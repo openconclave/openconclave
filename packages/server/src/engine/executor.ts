@@ -363,33 +363,32 @@ export class WorkflowExecutor {
               })
             : undefined;
 
-          // Check if this agent connects to a Prompt node (conversational loop)
-          const hasPromptOutput = outEdges.some((e) => {
-            const target = nodeMap.get(e.target);
-            return target?.data.type === "prompt";
-          });
+          // Conversation history — every agent gets one
+          const history = conversationHistory.get(nodeId) ?? [];
 
-          // Get or create conversation history for this agent
-          const history = hasPromptOutput
-            ? (conversationHistory.get(nodeId) ?? [])
-            : undefined;
+          // If this agent has been triggered by another node, add the input as "user" turn
+          if (input !== undefined && input !== null && history.length > 0) {
+            const inputStr = typeof input === "string" ? input : JSON.stringify(input);
+            // Strip routing metadata from input
+            let cleanInput = inputStr;
+            try {
+              const parsed = JSON.parse(inputStr);
+              if (parsed?.__routeTo) cleanInput = parsed.content ?? inputStr;
+            } catch { /* not JSON */ }
+            history.push({ role: "user", content: cleanInput });
+          }
 
           output = await this.executeAgent(runId, nodeId, node.data.config as AgentConfig, input, routeTargets, history);
 
-          // Update conversation history if this agent is in a prompt loop
-          if (hasPromptOutput && history) {
-            // Add the user input (from prompt response) if it exists and is from a prompt
-            const triggeredByNode = triggeredBy ? nodeMap.get(triggeredBy) : null;
-            if (triggeredByNode?.data.type === "prompt" && input) {
-              history.push({ role: "user", content: typeof input === "string" ? input : JSON.stringify(input) });
-            }
-            // Add the agent's output
-            const agentOutput = typeof output === "string" ? output : JSON.stringify(output);
-            // Strip routing markers from history
-            const cleanOutput = agentOutput.replace(/\[\[ROUTE:[^\]]+\]\]/g, "").trim();
-            history.push({ role: "assistant", content: cleanOutput });
-            conversationHistory.set(nodeId, history);
-          }
+          // Add this agent's output as "assistant" turn
+          const agentOutput = typeof output === "string" ? output : JSON.stringify(output);
+          let cleanOutput = agentOutput;
+          try {
+            const parsed = JSON.parse(agentOutput);
+            if (parsed?.__routeTo) cleanOutput = parsed.content ?? agentOutput;
+          } catch { /* not JSON */ }
+          history.push({ role: "assistant", content: cleanOutput });
+          conversationHistory.set(nodeId, history);
           break;
         }
 
