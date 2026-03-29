@@ -45,7 +45,7 @@ export function NodeInspector() {
         {data.type === "trigger" && <TriggerFields nodeId={selectedNode.id} config={data.config as TriggerConfig} />}
         {data.type === "agent" && <AgentFields nodeId={selectedNode.id} config={data.config as AgentConfig} />}
         {data.type === "condition" && <ExpressionField nodeId={selectedNode.id} config={data.config as ConditionConfig} />}
-        {data.type === "transform" && <ExpressionField nodeId={selectedNode.id} config={data.config as TransformConfig} />}
+        {data.type === "transform" && <CodeFields nodeId={selectedNode.id} config={data.config as TransformConfig} />}
         {data.type === "output" && <OutputFields nodeId={selectedNode.id} config={data.config as OutputConfig} />}
 
         <button
@@ -85,6 +85,7 @@ function TriggerFields({ nodeId, config }: { nodeId: string; config: TriggerConf
           <option value="manual">Manual</option>
           <option value="cron">Cron</option>
           <option value="webhook">Webhook</option>
+          <option value="channel">Channel (Claude Code)</option>
         </select>
       </Field>
       {config.type === "cron" && (
@@ -106,6 +107,22 @@ function TriggerFields({ nodeId, config }: { nodeId: string; config: TriggerConf
             onChange={(e) => update({ webhookPath: e.target.value })}
             placeholder="/hooks/my-trigger"
             className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm font-mono"
+          />
+        </Field>
+      )}
+      {config.type === "channel" && (
+        <p className="text-[10px] text-muted-foreground px-1">
+          Triggered from Claude Code via the OpenConclave channel. The payload passed becomes the input.
+        </p>
+      )}
+      {(config.type === "manual" || config.type === "cron") && (
+        <Field label="Input Prompt">
+          <textarea
+            value={config.prompt ?? ""}
+            onChange={(e) => update({ prompt: e.target.value })}
+            placeholder="Initial data passed to the first node..."
+            rows={3}
+            className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm resize-none"
           />
         </Field>
       )}
@@ -235,7 +252,7 @@ function AgentFields({ nodeId, config }: { nodeId: string; config: AgentConfig }
   );
 }
 
-function ExpressionField({ nodeId, config }: { nodeId: string; config: ConditionConfig | TransformConfig }) {
+function ExpressionField({ nodeId, config }: { nodeId: string; config: ConditionConfig }) {
   const updateNodeData = useWorkflowStore((s) => s.updateNodeData);
 
   return (
@@ -245,11 +262,52 @@ function ExpressionField({ nodeId, config }: { nodeId: string; config: Condition
         onChange={(e) =>
           updateNodeData(nodeId, { config: { ...config, expression: e.target.value } } as any)
         }
-        placeholder="input.status === 'success'"
+        placeholder="input.includes('done')"
         rows={3}
         className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm font-mono resize-none"
       />
     </Field>
+  );
+}
+
+function CodeFields({ nodeId, config }: { nodeId: string; config: TransformConfig }) {
+  const updateNodeData = useWorkflowStore((s) => s.updateNodeData);
+  const update = (c: Partial<TransformConfig>) =>
+    updateNodeData(nodeId, { config: { ...config, ...c } } as any);
+
+  const placeholders: Record<string, string> = {
+    python: 'import sys, json\ndata = json.load(sys.stdin)\n# process data\nprint(json.dumps(data))',
+    node: 'const chunks = [];\nprocess.stdin.on("data", c => chunks.push(c));\nprocess.stdin.on("end", () => {\n  const input = JSON.parse(chunks.join(""));\n  // process\n  console.log(JSON.stringify(input));\n});',
+    bash: '# Input available via stdin and $INPUT env var\necho "$INPUT" | jq .field',
+  };
+
+  return (
+    <>
+      <Field label="Runtime">
+        <select
+          value={config.runtime ?? "python"}
+          onChange={(e) => update({ runtime: e.target.value as TransformConfig["runtime"] })}
+          className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm"
+        >
+          <option value="python">Python</option>
+          <option value="node">Node.js</option>
+          <option value="bash">Bash</option>
+        </select>
+      </Field>
+      <Field label="Code">
+        <textarea
+          value={config.code ?? ""}
+          onChange={(e) => update({ code: e.target.value })}
+          placeholder={placeholders[config.runtime ?? "python"]}
+          rows={10}
+          className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs font-mono resize-y leading-relaxed"
+          spellCheck={false}
+        />
+      </Field>
+      <p className="text-[10px] text-muted-foreground px-1">
+        Input from previous node is passed via stdin and $INPUT env var. Output is stdout.
+      </p>
+    </>
   );
 }
 

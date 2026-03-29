@@ -1,7 +1,8 @@
 export type NodeType = "trigger" | "agent" | "condition" | "transform" | "output";
 
 export type TriggerConfig = {
-  type: "manual" | "cron" | "webhook";
+  type: "manual" | "cron" | "webhook" | "channel";
+  prompt?: string;
   cron?: string;
   webhookPath?: string;
 };
@@ -25,7 +26,8 @@ export type ConditionConfig = {
 };
 
 export type TransformConfig = {
-  expression: string;
+  runtime: "python" | "node" | "bash";
+  code: string;
 };
 
 export type OutputConfig = {

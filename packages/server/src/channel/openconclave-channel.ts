@@ -20,18 +20,18 @@ const mcp = new Server(
     },
     instructions: [
       'Events from OpenConclave arrive as <channel source="openconclave" event_type="..." ...>.',
-      "These are workflow execution results, agent task completions, and run status updates.",
+      'These are workflow output events from "Claude Code (channel)" output nodes.',
       "",
       "Event types:",
-      '- run:completed — a workflow run finished. Attributes: run_id, status (success/failure), workflow_name.',
-      '- node:completed — a workflow node produced output. Attributes: run_id, node_id.',
-      '- agent:completed — an agent task finished. Attributes: run_id, node_id, task_id, success, duration_ms.',
+      '- channel:output — a workflow produced output for you. Contains the result data.',
       "",
       "You can interact with OpenConclave using these tools:",
       "- oc_list_workflows: see all workflows",
-      "- oc_trigger_workflow: start a workflow run",
+      '- oc_trigger_workflow: start a workflow run. Pass workflow_id and optional payload. Workflows with "channel" trigger type are designed to be triggered from here — the payload becomes the input for the first agent.',
       "- oc_get_run: get details of a specific run",
       "- oc_list_runs: list recent runs",
+      "",
+      "When you receive a channel:output event, it means a workflow finished and sent you its result. Read the content and act on it or present it to the user.",
     ].join("\n"),
   }
 );

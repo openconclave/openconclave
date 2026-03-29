@@ -37,13 +37,16 @@ export function BaseNode({
   sourceHandles?: { id: string; label: string; position: number }[];
 }) {
   const setSelectedNode = useWorkflowStore((s) => s.setSelectedNode);
+  const activeNodeId = useWorkflowStore((s) => s.activeNodeId);
+  const isActive = activeNodeId === id;
 
   return (
     <div
       className={cn(
         "w-[200px] rounded-lg border-2 bg-card transition-all cursor-pointer",
         nodeColors[data.type],
-        selected && "ring-2 ring-primary ring-offset-2 ring-offset-background"
+        selected && "ring-2 ring-primary ring-offset-2 ring-offset-background",
+        isActive && "animate-pulse ring-2 ring-warning ring-offset-2 ring-offset-background"
       )}
       onClick={() => setSelectedNode(id)}
     >

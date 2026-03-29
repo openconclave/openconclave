@@ -11,6 +11,9 @@ export function TriggerNode(props: NodeProps) {
     <BaseNode {...props} data={data} icon={Zap} showTargetHandle={false}>
       <span className="capitalize">{config.type}</span>
       {config.type === "cron" && config.cron && <span className="ml-1 font-mono">{config.cron}</span>}
+      {config.prompt && (
+        <p className="mt-0.5 text-[10px] opacity-60 truncate">{config.prompt}</p>
+      )}
     </BaseNode>
   );
 }

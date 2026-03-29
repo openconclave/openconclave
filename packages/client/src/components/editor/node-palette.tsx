@@ -1,4 +1,4 @@
-import { Zap, Cpu, GitFork, Shuffle, Send } from "lucide-react";
+import { Zap, Cpu, GitFork, Code, Send } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { NodeType } from "@openconclave/shared";
 
@@ -12,7 +12,7 @@ const nodeTypes: {
   { type: "trigger", label: "Trigger", icon: Zap, color: "bg-node-trigger", description: "Start a workflow" },
   { type: "agent", label: "Agent", icon: Cpu, color: "bg-node-agent", description: "AI agent task" },
   { type: "condition", label: "Condition", icon: GitFork, color: "bg-node-condition", description: "Branch logic" },
-  { type: "transform", label: "Transform", icon: Shuffle, color: "bg-node-transform", description: "Reshape data" },
+  { type: "transform", label: "Code", icon: Code, color: "bg-node-transform", description: "Run Python/Node/Bash" },
   { type: "output", label: "Output", icon: Send, color: "bg-node-output", description: "Send result" },
 ];
 
@@ -21,7 +21,7 @@ function getDefaultConfig(type: NodeType) {
     case "trigger": return { type: "manual" };
     case "agent": return { prompt: "", model: "sonnet" };
     case "condition": return { expression: "" };
-    case "transform": return { expression: "" };
+    case "transform": return { runtime: "python", code: "" };
     case "output": return { type: "log", config: {} };
   }
 }

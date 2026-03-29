@@ -15,6 +15,7 @@ type WorkflowState = {
   nodes: Node<WorkflowNodeData>[];
   edges: Edge[];
   selectedNodeId: string | null;
+  activeNodeId: string | null;
   workflowName: string;
   workflowDescription: string;
   isDirty: boolean;
@@ -23,6 +24,7 @@ type WorkflowState = {
   onEdgesChange: OnEdgesChange;
   onConnect: OnConnect;
   setSelectedNode: (id: string | null) => void;
+  setActiveNode: (id: string | null) => void;
   addNode: (node: Node<WorkflowNodeData>) => void;
   updateNodeData: (id: string, data: Partial<WorkflowNodeData>) => void;
   removeNode: (id: string) => void;
@@ -35,6 +37,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   nodes: [],
   edges: [],
   selectedNodeId: null,
+  activeNodeId: null,
   workflowName: "Untitled Workflow",
   workflowDescription: "",
   isDirty: false,
@@ -54,9 +57,20 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   },
 
   onConnect: (connection) => {
+    const sourceNode = get().nodes.find((n) => n.id === connection.source);
+    const nodeType = sourceNode?.data?.type ?? "agent";
+    const colorMap: Record<string, string> = {
+      trigger: "oklch(0.65 0.18 145)",
+      agent: "oklch(0.65 0.18 260)",
+      condition: "oklch(0.70 0.16 80)",
+      transform: "oklch(0.65 0.15 300)",
+      output: "oklch(0.60 0.15 20)",
+    };
+    const stroke = colorMap[nodeType] ?? colorMap.agent;
+
     set({
       edges: addEdge(
-        { ...connection, animated: true, style: { stroke: "oklch(0.65 0.18 260)" } },
+        { ...connection, type: "smoothstep", animated: true, style: { stroke, strokeWidth: 2 } },
         get().edges
       ),
       isDirty: true,
@@ -64,6 +78,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   },
 
   setSelectedNode: (id) => set({ selectedNodeId: id }),
+  setActiveNode: (id) => set({ activeNodeId: id }),
 
   addNode: (node) => {
     set({ nodes: [...get().nodes, node], isDirty: true });

@@ -4,7 +4,10 @@ import { db } from "../db/client";
 import { runs, agentTasks, runEvents } from "../db/schema";
 import { agentPool } from "../agent/pool";
 import { runOllamaAgent } from "../agent/ollama";
-import { topologicalSort, getIncomingEdges, getOutgoingEdges } from "./graph";
+import { getIncomingEdges, getOutgoingEdges } from "./graph";
+import { resolve } from "path";
+
+const PROJECT_ROOT = resolve(import.meta.dir, "../../../");
 import type {
   WorkflowDefinition,
   WorkflowNode,
@@ -23,6 +26,8 @@ type RunEvent = {
   data?: unknown;
 };
 
+const MAX_ITERATIONS = 100; // safety limit to prevent infinite loops
+
 export class WorkflowExecutor {
   private onEvent?: EventCallback;
 
@@ -37,7 +42,6 @@ export class WorkflowExecutor {
     const runId = nanoid();
     const now = new Date().toISOString();
 
-    // Create run record
     await db.insert(runs).values({
       id: runId,
       workflowId: workflow.id,
@@ -68,21 +72,62 @@ export class WorkflowExecutor {
     const nodeOutputs = new Map<string, unknown>();
 
     try {
-      const layers = topologicalSort(nodes, edges);
+      // Find entry points (nodes with no incoming edges)
+      const entryNodes = nodes.filter(
+        (n) => getIncomingEdges(n.id, edges).length === 0
+      );
 
-      for (const layer of layers) {
-        // Execute all nodes in this layer in parallel
-        await Promise.all(
-          layer.nodeIds.map((nodeId) =>
-            this.executeNode(runId, nodeId, nodeMap, edges, nodeOutputs, triggerPayload)
-          )
-        );
+      if (entryNodes.length === 0) {
+        throw new Error("No entry nodes found (need at least one node with no incoming edges)");
+      }
+
+      // Walk the graph starting from entry nodes
+      // Queue entries track which node triggered them for correct input resolution
+      type QueueEntry = { nodeId: string; triggeredBy: string | null };
+      const queue: QueueEntry[] = entryNodes.map((n) => ({ nodeId: n.id, triggeredBy: null }));
+      let iterations = 0;
+
+      while (queue.length > 0) {
+        iterations++;
+        if (iterations > MAX_ITERATIONS) {
+          throw new Error(`Exceeded max iterations (${MAX_ITERATIONS}). Possible infinite loop.`);
+        }
 
         // Check if run was cancelled
         const run = await db.select().from(runs).where(eq(runs.id, runId));
         if (run[0]?.status === "cancelled") {
           this.emit({ type: "run:completed", runId, data: { status: "cancelled" } });
           return;
+        }
+
+        const entry = queue.shift()!;
+        const node = nodeMap.get(entry.nodeId);
+        if (!node) continue;
+
+        // Execute the node with the specific triggering source
+        const output = await this.executeNode(
+          runId, entry.nodeId, nodeMap, edges, nodeOutputs, triggerPayload, entry.triggeredBy
+        );
+
+        // Determine next nodes based on output
+        const outgoing = getOutgoingEdges(entry.nodeId, edges);
+
+        if (node.data.type === "condition") {
+          const condResult = (output as any)?.__conditionResult;
+          nodeOutputs.set(entry.nodeId, (output as any)?.__passthrough);
+          for (const edge of outgoing) {
+            if (edge.sourceHandle === "true" && condResult) {
+              queue.push({ nodeId: edge.target, triggeredBy: entry.nodeId });
+            } else if (edge.sourceHandle === "false" && !condResult) {
+              queue.push({ nodeId: edge.target, triggeredBy: entry.nodeId });
+            } else if (!edge.sourceHandle) {
+              queue.push({ nodeId: edge.target, triggeredBy: entry.nodeId });
+            }
+          }
+        } else {
+          for (const edge of outgoing) {
+            queue.push({ nodeId: edge.target, triggeredBy: entry.nodeId });
+          }
         }
       }
 
@@ -115,22 +160,27 @@ export class WorkflowExecutor {
     nodeMap: Map<string, WorkflowNode>,
     edges: WorkflowEdge[],
     nodeOutputs: Map<string, unknown>,
-    triggerPayload?: unknown
-  ) {
+    triggerPayload?: unknown,
+    triggeredBy?: string | null
+  ): Promise<unknown> {
     const node = nodeMap.get(nodeId);
-    if (!node) return;
+    if (!node) return undefined;
 
-    // Gather input from predecessor nodes
-    const incomingEdges = getIncomingEdges(nodeId, edges);
+    // Gather input — use the specific triggering node's output if known
     let input: unknown;
 
-    if (incomingEdges.length === 1) {
-      input = nodeOutputs.get(incomingEdges[0].source);
-    } else if (incomingEdges.length > 1) {
-      input = incomingEdges.map((e) => ({
-        from: e.source,
-        data: nodeOutputs.get(e.source),
-      }));
+    if (triggeredBy) {
+      input = nodeOutputs.get(triggeredBy);
+    } else {
+      const incomingEdges = getIncomingEdges(nodeId, edges);
+      if (incomingEdges.length === 1) {
+        input = nodeOutputs.get(incomingEdges[0].source);
+      } else if (incomingEdges.length > 1) {
+        for (const e of incomingEdges) {
+          const val = nodeOutputs.get(e.source);
+          if (val !== undefined) input = val;
+        }
+      }
     }
 
     this.emit({ type: "node:started", runId, nodeId });
@@ -139,20 +189,26 @@ export class WorkflowExecutor {
       let output: unknown;
 
       switch (node.data.type) {
-        case "trigger":
-          output = triggerPayload ?? { triggered: true, timestamp: new Date().toISOString() };
+        case "trigger": {
+          const triggerConfig = node.data.config as any;
+          // Priority: webhook/API payload > configured prompt > default
+          output = triggerPayload ?? triggerConfig.prompt ?? { triggered: true, timestamp: new Date().toISOString() };
           break;
+        }
 
         case "agent":
           output = await this.executeAgentNode(runId, nodeId, node.data.config as AgentConfig, input);
           break;
 
-        case "condition":
-          output = await this.executeConditionNode(node.data.config as ConditionConfig, input, nodeId, edges, nodeOutputs);
+        case "condition": {
+          const condResult = this.executeConditionNode(node.data.config as ConditionConfig, input);
+          // Store the full result for routing, but pass through original input as output
+          output = { __conditionResult: condResult.conditionResult, __passthrough: input };
           break;
+        }
 
         case "transform":
-          output = this.executeTransformNode(node.data.config as TransformConfig, input);
+          output = await this.executeCodeNode(node.data.config as TransformConfig, input);
           break;
 
         case "output": {
@@ -169,6 +225,7 @@ export class WorkflowExecutor {
 
       nodeOutputs.set(nodeId, output);
       this.emit({ type: "node:completed", runId, nodeId, data: output });
+      return output;
     } catch (err: any) {
       this.emit({ type: "node:failed", runId, nodeId, data: { error: err.message } });
       throw err;
@@ -183,6 +240,9 @@ export class WorkflowExecutor {
   ): Promise<unknown> {
     const taskId = nanoid();
     const now = new Date().toISOString();
+
+    // Inject context into the agent's config as an appended system prompt
+    const augmentedConfig = config;
 
     const engine = config.engine ?? "claude";
     if (engine === "ollama" && !config.ollamaModel) {
@@ -227,8 +287,8 @@ export class WorkflowExecutor {
       // Run via Ollama API with tool calling + MCP servers
       result = await runOllamaAgent({
         model: modelName,
-        prompt: config.prompt,
-        systemPrompt: config.systemPrompt,
+        prompt: augmentedConfig.prompt,
+        systemPrompt: augmentedConfig.systemPrompt,
         input,
         tools: ollamaTools.length > 0 ? ollamaTools : undefined,
         mcpServers: config.mcpServers,
@@ -239,7 +299,7 @@ export class WorkflowExecutor {
     } else {
       // Run via Claude Code CLI through the agent pool
       result = await agentPool.submit(taskId, {
-        config,
+        config: augmentedConfig,
         input,
         onOutput: (chunk) => {
           this.emit({ type: "agent:output", runId, nodeId, data: { taskId, chunk } });
@@ -275,39 +335,56 @@ export class WorkflowExecutor {
     return result.output;
   }
 
-  private async executeConditionNode(
+  private executeConditionNode(
     config: ConditionConfig,
     input: unknown,
-    nodeId: string,
-    edges: WorkflowEdge[],
-    nodeOutputs: Map<string, unknown>
-  ): Promise<unknown> {
+  ): { conditionResult: boolean; input: unknown } {
     // Evaluate condition expression
     const fn = new Function("input", `return Boolean(${config.expression})`);
     const result = fn(input);
-
-    // Mark downstream nodes on the non-taken branch as skipped
-    // by not including them in outputs
-    const outgoing = getOutgoingEdges(nodeId, edges);
-    for (const edge of outgoing) {
-      if (edge.sourceHandle === "true" && !result) {
-        nodeOutputs.set(edge.target, undefined); // skip
-      }
-      if (edge.sourceHandle === "false" && result) {
-        nodeOutputs.set(edge.target, undefined); // skip
-      }
-    }
-
     return { conditionResult: result, input };
   }
 
-  private executeTransformNode(config: TransformConfig, input: unknown): unknown {
-    const fn = new Function("input", `return (${config.expression})`);
-    return fn(input);
+  private async executeCodeNode(config: TransformConfig, input: unknown): Promise<unknown> {
+    const { runtime, code } = config;
+    const inputStr = typeof input === "string" ? input : JSON.stringify(input);
+    const cmdMap: Record<string, string[]> = {
+      python: ["python3", "-c", code],
+      node: ["node", "-e", code],
+      bash: ["bash", "-c", code],
+    };
+
+    const cmd = cmdMap[runtime];
+    if (!cmd) throw new Error(`Unknown runtime: ${runtime}`);
+
+    const proc = Bun.spawn(cmd, {
+      cwd: PROJECT_ROOT,
+      stdin: new Blob([inputStr]),
+      stdout: "pipe",
+      stderr: "pipe",
+      env: {
+        ...process.env,
+        INPUT: inputStr,
+      },
+    });
+
+    const stdout = await new Response(proc.stdout).text();
+    const stderr = await new Response(proc.stderr).text();
+    const exitCode = await proc.exited;
+
+    if (exitCode !== 0) {
+      throw new Error(`Code node failed (${runtime}, exit ${exitCode}): ${stderr}`);
+    }
+
+    // Try to parse as JSON, otherwise return as string
+    try {
+      return JSON.parse(stdout.trim());
+    } catch {
+      return stdout.trim();
+    }
   }
 
   private emit(event: RunEvent) {
-    // Persist event
     const now = new Date().toISOString();
     db.insert(runEvents)
       .values({
@@ -319,7 +396,6 @@ export class WorkflowExecutor {
       })
       .catch((err) => console.error("Failed to persist event:", err));
 
-    // Notify listeners
     this.onEvent?.(event);
   }
 }

@@ -1,7 +1,8 @@
 import { z } from "zod";
 
 export const triggerConfigSchema = z.object({
-  type: z.enum(["manual", "cron", "webhook"]),
+  type: z.enum(["manual", "cron", "webhook", "channel"]),
+  prompt: z.string().optional(),
   cron: z.string().optional(),
   webhookPath: z.string().optional(),
 });
@@ -23,7 +24,8 @@ export const conditionConfigSchema = z.object({
 });
 
 export const transformConfigSchema = z.object({
-  expression: z.string().min(1),
+  runtime: z.enum(["python", "node", "bash"]).default("python"),
+  code: z.string().min(1),
 });
 
 export const outputConfigSchema = z.object({
