@@ -9,9 +9,25 @@ import {
   applyEdgeChanges,
   addEdge,
 } from "@xyflow/react";
-import type { WorkflowNodeData } from "@openconclave/shared";
+import type {
+  WorkflowNodeData,
+  WorkflowNodeConfig,
+  NodeType,
+} from "@openconclave/shared";
 
-type WorkflowState = {
+// ── Edge Colors ──────────────────────────────────────────────
+
+const EDGE_COLORS: Record<string, string> = {
+  trigger: "oklch(0.65 0.18 145)",
+  agent: "oklch(0.65 0.18 260)",
+  condition: "oklch(0.70 0.16 80)",
+  transform: "oklch(0.65 0.15 300)",
+  output: "oklch(0.60 0.15 20)",
+};
+
+// ── Store Types ──────────────────────────────────────────────
+
+interface WorkflowState {
   nodes: Node<WorkflowNodeData>[];
   edges: Edge[];
   selectedNodeId: string | null;
@@ -27,11 +43,19 @@ type WorkflowState = {
   setActiveNode: (id: string | null) => void;
   addNode: (node: Node<WorkflowNodeData>) => void;
   updateNodeData: (id: string, data: Partial<WorkflowNodeData>) => void;
+  updateNodeConfig: (id: string, config: Partial<WorkflowNodeConfig>) => void;
   removeNode: (id: string) => void;
   setWorkflowMeta: (name: string, description: string) => void;
-  loadWorkflow: (nodes: Node<WorkflowNodeData>[], edges: Edge[], name: string, description: string) => void;
+  loadWorkflow: (
+    nodes: Node<WorkflowNodeData>[],
+    edges: Edge[],
+    name: string,
+    description: string
+  ) => void;
   reset: () => void;
-};
+}
+
+// ── Store ────────────────────────────────────────────────────
 
 export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   nodes: [],
@@ -58,19 +82,17 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
 
   onConnect: (connection) => {
     const sourceNode = get().nodes.find((n) => n.id === connection.source);
-    const nodeType = sourceNode?.data?.type ?? "agent";
-    const colorMap: Record<string, string> = {
-      trigger: "oklch(0.65 0.18 145)",
-      agent: "oklch(0.65 0.18 260)",
-      condition: "oklch(0.70 0.16 80)",
-      transform: "oklch(0.65 0.15 300)",
-      output: "oklch(0.60 0.15 20)",
-    };
-    const stroke = colorMap[nodeType] ?? colorMap.agent;
+    const nodeType: NodeType = sourceNode?.data?.type ?? "agent";
+    const stroke = EDGE_COLORS[nodeType] ?? EDGE_COLORS.agent;
 
     set({
       edges: addEdge(
-        { ...connection, type: "smoothstep", animated: true, style: { stroke, strokeWidth: 2 } },
+        {
+          ...connection,
+          type: "smoothstep",
+          animated: true,
+          style: { stroke, strokeWidth: 2 },
+        },
         get().edges
       ),
       isDirty: true,
@@ -93,6 +115,22 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
     });
   },
 
+  updateNodeConfig: (id, configUpdate) => {
+    set({
+      nodes: get().nodes.map((n) => {
+        if (n.id !== id) return n;
+        return {
+          ...n,
+          data: {
+            ...n.data,
+            config: { ...n.data.config, ...configUpdate },
+          },
+        };
+      }),
+      isDirty: true,
+    });
+  },
+
   removeNode: (id) => {
     set({
       nodes: get().nodes.filter((n) => n.id !== id),
@@ -107,7 +145,15 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   },
 
   loadWorkflow: (nodes, edges, name, description) => {
-    set({ nodes, edges, workflowName: name, workflowDescription: description, isDirty: false, selectedNodeId: null });
+    set({
+      nodes,
+      edges,
+      workflowName: name,
+      workflowDescription: description,
+      isDirty: false,
+      selectedNodeId: null,
+      activeNodeId: null,
+    });
   },
 
   reset: () => {
@@ -115,6 +161,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       nodes: [],
       edges: [],
       selectedNodeId: null,
+      activeNodeId: null,
       workflowName: "Untitled Workflow",
       workflowDescription: "",
       isDirty: false,

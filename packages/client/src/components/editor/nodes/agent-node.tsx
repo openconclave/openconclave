@@ -1,10 +1,11 @@
 import { type NodeProps } from "@xyflow/react";
 import { Cpu } from "lucide-react";
 import { BaseNode } from "./base-node";
-import type { WorkflowNodeData, AgentConfig } from "@openconclave/shared";
+import { useNodeData } from "@/hooks/use-node-data";
+import type { AgentConfig } from "@openconclave/shared";
 
 export function AgentNode(props: NodeProps) {
-  const data = props.data as unknown as WorkflowNodeData;
+  const data = useNodeData(props);
   const config = data.config as AgentConfig;
 
   return (

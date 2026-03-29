@@ -139,7 +139,7 @@ export function WorkflowEditorPage() {
           source: e.source,
           target: e.target,
           sourceHandle: e.sourceHandle ?? undefined,
-          label: (e as any).label,
+          label: "label" in e ? String(e.label) : undefined,
         })),
       };
 

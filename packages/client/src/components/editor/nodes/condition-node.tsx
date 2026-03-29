@@ -1,10 +1,11 @@
 import { type NodeProps } from "@xyflow/react";
 import { GitFork } from "lucide-react";
 import { BaseNode } from "./base-node";
-import type { WorkflowNodeData, ConditionConfig } from "@openconclave/shared";
+import { useNodeData } from "@/hooks/use-node-data";
+import type { ConditionConfig } from "@openconclave/shared";
 
 export function ConditionNode(props: NodeProps) {
-  const data = props.data as unknown as WorkflowNodeData;
+  const data = useNodeData(props);
   const config = data.config as ConditionConfig;
 
   return (

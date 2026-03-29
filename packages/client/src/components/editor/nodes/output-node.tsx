@@ -1,10 +1,11 @@
 import { type NodeProps } from "@xyflow/react";
 import { Send } from "lucide-react";
 import { BaseNode } from "./base-node";
-import type { WorkflowNodeData, OutputConfig } from "@openconclave/shared";
+import { useNodeData } from "@/hooks/use-node-data";
+import type { OutputConfig } from "@openconclave/shared";
 
 export function OutputNode(props: NodeProps) {
-  const data = props.data as unknown as WorkflowNodeData;
+  const data = useNodeData(props);
   const config = data.config as OutputConfig;
 
   return (

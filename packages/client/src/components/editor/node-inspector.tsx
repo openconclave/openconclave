@@ -2,13 +2,23 @@ import { useState, useEffect } from "react";
 import { useWorkflowStore } from "@/stores/workflow-store";
 import { X, Trash2 } from "lucide-react";
 import { ToolPicker } from "./tool-picker";
-import type { WorkflowNodeData, AgentConfig, TriggerConfig, ConditionConfig, TransformConfig, OutputConfig } from "@openconclave/shared";
+import type {
+  WorkflowNodeData,
+  AgentConfig,
+  TriggerConfig,
+  ConditionConfig,
+  CodeConfig,
+  OutputConfig,
+} from "@openconclave/shared";
+
+// ── Main Inspector ───────────────────────────────────────────
 
 export function NodeInspector() {
   const nodes = useWorkflowStore((s) => s.nodes);
   const selectedNodeId = useWorkflowStore((s) => s.selectedNodeId);
   const setSelectedNode = useWorkflowStore((s) => s.setSelectedNode);
   const updateNodeData = useWorkflowStore((s) => s.updateNodeData);
+  const updateNodeConfig = useWorkflowStore((s) => s.updateNodeConfig);
   const removeNode = useWorkflowStore((s) => s.removeNode);
 
   const selectedNode = nodes.find((n) => n.id === selectedNodeId);
@@ -42,11 +52,21 @@ export function NodeInspector() {
           {data.type} config
         </div>
 
-        {data.type === "trigger" && <TriggerFields nodeId={selectedNode.id} config={data.config as TriggerConfig} />}
-        {data.type === "agent" && <AgentFields nodeId={selectedNode.id} config={data.config as AgentConfig} />}
-        {data.type === "condition" && <ExpressionField nodeId={selectedNode.id} config={data.config as ConditionConfig} />}
-        {data.type === "transform" && <CodeFields nodeId={selectedNode.id} config={data.config as TransformConfig} />}
-        {data.type === "output" && <OutputFields nodeId={selectedNode.id} config={data.config as OutputConfig} />}
+        {data.type === "trigger" && (
+          <TriggerFields nodeId={selectedNode.id} config={data.config as TriggerConfig} />
+        )}
+        {data.type === "agent" && (
+          <AgentFields nodeId={selectedNode.id} config={data.config as AgentConfig} />
+        )}
+        {data.type === "condition" && (
+          <ConditionFields nodeId={selectedNode.id} config={data.config as ConditionConfig} />
+        )}
+        {data.type === "transform" && (
+          <CodeFields nodeId={selectedNode.id} config={data.config as CodeConfig} />
+        )}
+        {data.type === "output" && (
+          <OutputFields nodeId={selectedNode.id} config={data.config as OutputConfig} />
+        )}
 
         <button
           onClick={() => removeNode(selectedNode.id)}
@@ -60,6 +80,8 @@ export function NodeInspector() {
   );
 }
 
+// ── Shared ───────────────────────────────────────────────────
+
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
@@ -69,19 +91,19 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
+const INPUT_CLASS = "w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm";
+const MONO_INPUT_CLASS = `${INPUT_CLASS} font-mono`;
+
+// ── Trigger ──────────────────────────────────────────────────
+
 function TriggerFields({ nodeId, config }: { nodeId: string; config: TriggerConfig }) {
-  const updateNodeData = useWorkflowStore((s) => s.updateNodeData);
-  const update = (c: Partial<TriggerConfig>) =>
-    updateNodeData(nodeId, { config: { ...config, ...c } } as any);
+  const updateNodeConfig = useWorkflowStore((s) => s.updateNodeConfig);
+  const update = (c: Partial<TriggerConfig>) => updateNodeConfig(nodeId, c);
 
   return (
     <>
       <Field label="Type">
-        <select
-          value={config.type}
-          onChange={(e) => update({ type: e.target.value as TriggerConfig["type"] })}
-          className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm"
-        >
+        <select value={config.type} onChange={(e) => update({ type: e.target.value as TriggerConfig["type"] })} className={INPUT_CLASS}>
           <option value="manual">Manual</option>
           <option value="cron">Cron</option>
           <option value="webhook">Webhook</option>
@@ -91,76 +113,52 @@ function TriggerFields({ nodeId, config }: { nodeId: string; config: TriggerConf
       </Field>
       {config.type === "telegram" && (
         <Field label="Chat ID">
-          <input
-            type="text"
-            value={config.chatId ?? ""}
-            onChange={(e) => update({ chatId: e.target.value })}
-            placeholder="1470461098"
-            className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm font-mono"
-          />
-          <p className="mt-1 text-[10px] text-muted-foreground">
-            Messages from this chat will trigger the workflow. The message text becomes the input.
-          </p>
+          <input type="text" value={config.chatId ?? ""} onChange={(e) => update({ chatId: e.target.value })} placeholder="1470461098" className={MONO_INPUT_CLASS} />
+          <p className="mt-1 text-[10px] text-muted-foreground">Messages from this chat will trigger the workflow.</p>
         </Field>
       )}
       {config.type === "cron" && (
         <Field label="Cron Expression">
-          <input
-            type="text"
-            value={config.cron ?? ""}
-            onChange={(e) => update({ cron: e.target.value })}
-            placeholder="0 9 * * 1-5"
-            className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm font-mono"
-          />
+          <input type="text" value={config.cron ?? ""} onChange={(e) => update({ cron: e.target.value })} placeholder="0 9 * * 1-5" className={MONO_INPUT_CLASS} />
         </Field>
       )}
       {config.type === "webhook" && (
         <Field label="Webhook Path">
-          <input
-            type="text"
-            value={config.webhookPath ?? ""}
-            onChange={(e) => update({ webhookPath: e.target.value })}
-            placeholder="/hooks/my-trigger"
-            className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm font-mono"
-          />
+          <input type="text" value={config.webhookPath ?? ""} onChange={(e) => update({ webhookPath: e.target.value })} placeholder="/hooks/my-trigger" className={MONO_INPUT_CLASS} />
         </Field>
       )}
       {config.type === "channel" && (
-        <p className="text-[10px] text-muted-foreground px-1">
-          Triggered from Claude Code via the OpenConclave channel. The payload passed becomes the input.
-        </p>
+        <p className="text-[10px] text-muted-foreground px-1">Triggered from Claude Code via the OpenConclave channel.</p>
       )}
       {(config.type === "manual" || config.type === "cron") && (
         <Field label="Input Prompt">
-          <textarea
-            value={config.prompt ?? ""}
-            onChange={(e) => update({ prompt: e.target.value })}
-            placeholder="Initial data passed to the first node..."
-            rows={3}
-            className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm resize-none"
-          />
+          <textarea value={config.prompt ?? ""} onChange={(e) => update({ prompt: e.target.value })} placeholder="Initial data passed to the first node..." rows={3} className={`${INPUT_CLASS} resize-none`} />
         </Field>
       )}
     </>
   );
 }
 
-function AgentFields({ nodeId, config }: { nodeId: string; config: AgentConfig }) {
-  const updateNodeData = useWorkflowStore((s) => s.updateNodeData);
-  const update = (c: Partial<AgentConfig>) =>
-    updateNodeData(nodeId, { config: { ...config, ...c } } as any);
+// ── Agent ────────────────────────────────────────────────────
 
-  const [ollamaStatus, setOllamaStatus] = useState<{ installed: boolean; running: boolean; models: string[] } | null>(null);
+function AgentFields({ nodeId, config }: { nodeId: string; config: AgentConfig }) {
+  const updateNodeConfig = useWorkflowStore((s) => s.updateNodeConfig);
+  const update = (c: Partial<AgentConfig>) => updateNodeConfig(nodeId, c);
+
+  const [ollamaStatus, setOllamaStatus] = useState<{
+    installed: boolean;
+    running: boolean;
+    models: string[];
+  } | null>(null);
   const engine = config.engine ?? "claude";
 
   useEffect(() => {
     if (engine === "ollama" && !ollamaStatus) {
       fetch("/api/ollama/status")
         .then((r) => r.json())
-        .then((status) => {
+        .then((status: { installed: boolean; running: boolean; models: string[] }) => {
           setOllamaStatus(status);
-          // Auto-set ollamaModel if not already set
-          if (!config.ollamaModel && status.models?.length > 0) {
+          if (!config.ollamaModel && status.models.length > 0) {
             update({ ollamaModel: status.models[0] });
           }
         })
@@ -171,64 +169,34 @@ function AgentFields({ nodeId, config }: { nodeId: string; config: AgentConfig }
   return (
     <>
       <Field label="Engine">
-        <select
-          value={engine}
-          onChange={(e) => update({ engine: e.target.value as "claude" | "ollama" })}
-          className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm"
-        >
+        <select value={engine} onChange={(e) => update({ engine: e.target.value as AgentConfig["engine"] })} className={INPUT_CLASS}>
           <option value="claude">Claude Code</option>
           <option value="ollama">Ollama (local)</option>
         </select>
       </Field>
 
       <Field label="Prompt">
-        <textarea
-          value={config.prompt}
-          onChange={(e) => update({ prompt: e.target.value })}
-          placeholder="Describe what this agent should do..."
-          rows={4}
-          className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm resize-none"
-        />
+        <textarea value={config.prompt} onChange={(e) => update({ prompt: e.target.value })} placeholder="Describe what this agent should do..." rows={4} className={`${INPUT_CLASS} resize-none`} />
       </Field>
+
       <Field label="System Prompt">
-        <textarea
-          value={config.systemPrompt ?? ""}
-          onChange={(e) => update({ systemPrompt: e.target.value })}
-          placeholder="Optional system instructions..."
-          rows={2}
-          className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm resize-none"
-        />
+        <textarea value={config.systemPrompt ?? ""} onChange={(e) => update({ systemPrompt: e.target.value })} placeholder="Optional system instructions..." rows={2} className={`${INPUT_CLASS} resize-none`} />
       </Field>
 
       {engine === "claude" ? (
         <>
           <Field label="Model">
-            <select
-              value={config.model ?? "sonnet"}
-              onChange={(e) => update({ model: e.target.value })}
-              className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm"
-            >
+            <select value={config.model ?? "sonnet"} onChange={(e) => update({ model: e.target.value })} className={INPUT_CLASS}>
               <option value="sonnet">Sonnet</option>
               <option value="opus">Opus</option>
               <option value="haiku">Haiku</option>
             </select>
           </Field>
           <Field label="Max Turns">
-            <input
-              type="number"
-              value={config.maxTurns ?? 25}
-              onChange={(e) => update({ maxTurns: parseInt(e.target.value) || 25 })}
-              className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm"
-            />
+            <input type="number" value={config.maxTurns ?? 25} onChange={(e) => update({ maxTurns: parseInt(e.target.value) || 25 })} className={INPUT_CLASS} />
           </Field>
           <Field label="Max Budget (USD)">
-            <input
-              type="number"
-              step="0.1"
-              value={config.maxBudgetUsd ?? 1.0}
-              onChange={(e) => update({ maxBudgetUsd: parseFloat(e.target.value) || 1.0 })}
-              className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm"
-            />
+            <input type="number" step="0.1" value={config.maxBudgetUsd ?? 1.0} onChange={(e) => update({ maxBudgetUsd: parseFloat(e.target.value) || 1.0 })} className={INPUT_CLASS} />
           </Field>
         </>
       ) : (
@@ -242,11 +210,7 @@ function AgentFields({ nodeId, config }: { nodeId: string; config: AgentConfig }
           ) : ollamaStatus.models.length === 0 ? (
             <p className="text-xs text-warning">No models found. Pull one with: ollama pull llama3</p>
           ) : (
-            <select
-              value={config.ollamaModel ?? ollamaStatus.models[0]}
-              onChange={(e) => update({ ollamaModel: e.target.value })}
-              className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm"
-            >
+            <select value={config.ollamaModel ?? ollamaStatus.models[0]} onChange={(e) => update({ ollamaModel: e.target.value })} className={INPUT_CLASS}>
               {ollamaStatus.models.map((m) => (
                 <option key={m} value={m}>{m}</option>
               ))}
@@ -267,43 +231,40 @@ function AgentFields({ nodeId, config }: { nodeId: string; config: AgentConfig }
   );
 }
 
-function ExpressionField({ nodeId, config }: { nodeId: string; config: ConditionConfig }) {
-  const updateNodeData = useWorkflowStore((s) => s.updateNodeData);
+// ── Condition ────────────────────────────────────────────────
+
+function ConditionFields({ nodeId, config }: { nodeId: string; config: ConditionConfig }) {
+  const updateNodeConfig = useWorkflowStore((s) => s.updateNodeConfig);
 
   return (
     <Field label="Expression">
       <textarea
         value={config.expression}
-        onChange={(e) =>
-          updateNodeData(nodeId, { config: { ...config, expression: e.target.value } } as any)
-        }
+        onChange={(e) => updateNodeConfig(nodeId, { expression: e.target.value })}
         placeholder="input.includes('done')"
         rows={3}
-        className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm font-mono resize-none"
+        className={`${MONO_INPUT_CLASS} resize-none`}
       />
     </Field>
   );
 }
 
-function CodeFields({ nodeId, config }: { nodeId: string; config: TransformConfig }) {
-  const updateNodeData = useWorkflowStore((s) => s.updateNodeData);
-  const update = (c: Partial<TransformConfig>) =>
-    updateNodeData(nodeId, { config: { ...config, ...c } } as any);
+// ── Code ─────────────────────────────────────────────────────
 
-  const placeholders: Record<string, string> = {
-    python: 'import sys, json\ndata = json.load(sys.stdin)\n# process data\nprint(json.dumps(data))',
-    node: 'const chunks = [];\nprocess.stdin.on("data", c => chunks.push(c));\nprocess.stdin.on("end", () => {\n  const input = JSON.parse(chunks.join(""));\n  // process\n  console.log(JSON.stringify(input));\n});',
-    bash: '# Input available via stdin and $INPUT env var\necho "$INPUT" | jq .field',
-  };
+const CODE_PLACEHOLDERS: Record<string, string> = {
+  python: 'import sys, json\ndata = json.load(sys.stdin)\n# process data\nprint(json.dumps(data))',
+  node: 'const chunks = [];\nprocess.stdin.on("data", c => chunks.push(c));\nprocess.stdin.on("end", () => {\n  const input = JSON.parse(chunks.join(""));\n  console.log(JSON.stringify(input));\n});',
+  bash: '# Input available via stdin and $INPUT env var\necho "$INPUT" | jq .field',
+};
+
+function CodeFields({ nodeId, config }: { nodeId: string; config: CodeConfig }) {
+  const updateNodeConfig = useWorkflowStore((s) => s.updateNodeConfig);
+  const update = (c: Partial<CodeConfig>) => updateNodeConfig(nodeId, c);
 
   return (
     <>
       <Field label="Runtime">
-        <select
-          value={config.runtime ?? "python"}
-          onChange={(e) => update({ runtime: e.target.value as TransformConfig["runtime"] })}
-          className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm"
-        >
+        <select value={config.runtime ?? "python"} onChange={(e) => update({ runtime: e.target.value as CodeConfig["runtime"] })} className={INPUT_CLASS}>
           <option value="python">Python</option>
           <option value="node">Node.js</option>
           <option value="bash">Bash</option>
@@ -313,7 +274,7 @@ function CodeFields({ nodeId, config }: { nodeId: string; config: TransformConfi
         <textarea
           value={config.code ?? ""}
           onChange={(e) => update({ code: e.target.value })}
-          placeholder={placeholders[config.runtime ?? "python"]}
+          placeholder={CODE_PLACEHOLDERS[config.runtime ?? "python"]}
           rows={10}
           className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs font-mono resize-y leading-relaxed"
           spellCheck={false}
@@ -326,18 +287,15 @@ function CodeFields({ nodeId, config }: { nodeId: string; config: TransformConfi
   );
 }
 
+// ── Output ───────────────────────────────────────────────────
+
 function OutputFields({ nodeId, config }: { nodeId: string; config: OutputConfig }) {
-  const updateNodeData = useWorkflowStore((s) => s.updateNodeData);
-  const update = (c: Partial<OutputConfig>) =>
-    updateNodeData(nodeId, { config: { ...config, ...c } } as any);
+  const updateNodeConfig = useWorkflowStore((s) => s.updateNodeConfig);
+  const update = (c: Partial<OutputConfig>) => updateNodeConfig(nodeId, c);
 
   return (
     <Field label="Output Type">
-      <select
-        value={config.type}
-        onChange={(e) => update({ type: e.target.value as OutputConfig["type"] })}
-        className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm"
-      >
+      <select value={config.type} onChange={(e) => update({ type: e.target.value as OutputConfig["type"] })} className={INPUT_CLASS}>
         <option value="log">Log</option>
         <option value="webhook">Webhook</option>
         <option value="file">File</option>
@@ -352,13 +310,7 @@ function OutputFields({ nodeId, config }: { nodeId: string; config: OutputConfig
       )}
       {config.type === "telegram" && (
         <>
-          <input
-            type="text"
-            value={config.chatId ?? ""}
-            onChange={(e) => update({ chatId: e.target.value })}
-            placeholder="Chat ID"
-            className="mt-2 w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm font-mono"
-          />
+          <input type="text" value={config.chatId ?? ""} onChange={(e) => update({ chatId: e.target.value })} placeholder="Chat ID" className={`mt-2 ${MONO_INPUT_CLASS}`} />
           <p className="mt-1 text-[10px] text-muted-foreground">
             Send output to this Telegram chat. Get your ID from /chatid on the bot.
           </p>

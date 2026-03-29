@@ -1,10 +1,11 @@
 import { type NodeProps } from "@xyflow/react";
 import { Zap } from "lucide-react";
 import { BaseNode } from "./base-node";
-import type { WorkflowNodeData, TriggerConfig } from "@openconclave/shared";
+import { useNodeData } from "@/hooks/use-node-data";
+import type { TriggerConfig } from "@openconclave/shared";
 
 export function TriggerNode(props: NodeProps) {
-  const data = props.data as unknown as WorkflowNodeData;
+  const data = useNodeData(props);
   const config = data.config as TriggerConfig;
 
   return (
