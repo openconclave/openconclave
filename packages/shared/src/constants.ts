@@ -1,0 +1,20 @@
+export const MAX_WORKFLOW_ITERATIONS = 100;
+export const DEFAULT_AGENT_MAX_TURNS = 25;
+export const DEFAULT_AGENT_MAX_BUDGET_USD = 1.0;
+export const DEFAULT_AGENT_POOL_SIZE = 3;
+export const DEFAULT_CODE_TIMEOUT_MS = 60_000;
+export const DEFAULT_AGENT_TIMEOUT_MS = 300_000;
+
+export const CRON_CHECK_INTERVAL_MS = 15_000;
+export const CRON_SYNC_INTERVAL_MS = 60_000;
+export const TELEGRAM_POLL_TIMEOUT_S = 30;
+
+export const API_PORT = 4000;
+export const CLIENT_PORT = 5173;
+
+export const NODE_TYPES = ["trigger", "agent", "condition", "transform", "output"] as const;
+export const TRIGGER_TYPES = ["manual", "cron", "webhook", "channel", "telegram"] as const;
+export const AGENT_ENGINES = ["claude", "ollama"] as const;
+export const CODE_RUNTIMES = ["python", "node", "bash"] as const;
+export const OUTPUT_TYPES = ["log", "webhook", "file", "notification", "claude-code", "telegram"] as const;
+export const RUN_STATUSES = ["queued", "running", "success", "failure", "cancelled"] as const;

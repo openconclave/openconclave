@@ -7,6 +7,11 @@
     "dev:server": "bun run --filter server dev",
     "dev:client": "bun run --filter client dev",
     "start": "bun run start.ts",
-    "build": "bun run --filter '*' build"
+    "build": "bun run --filter '*' build",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.2"
   }
 }

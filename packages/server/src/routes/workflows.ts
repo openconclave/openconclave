@@ -2,9 +2,14 @@ import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
+
 import { db } from "../db/client";
 import { workflows } from "../db/schema";
-import { createWorkflowSchema, updateWorkflowSchema } from "@openconclave/shared";
+import {
+  createWorkflowSchema,
+  updateWorkflowSchema,
+  AppError,
+} from "@openconclave/shared";
 
 export const workflowRoutes = new Hono()
   .get("/", async (c) => {
@@ -14,9 +19,9 @@ export const workflowRoutes = new Hono()
 
   .get("/:id", async (c) => {
     const { id } = c.req.param();
-    const result = await db.select().from(workflows).where(eq(workflows.id, id));
-    if (!result.length) return c.json({ error: "Not found" }, 404);
-    return c.json(result[0]);
+    const [result] = await db.select().from(workflows).where(eq(workflows.id, id));
+    if (!result) throw AppError.notFound("Workflow", id);
+    return c.json(result);
   })
 
   .post("/", zValidator("json", createWorkflowSchema), async (c) => {
@@ -43,10 +48,9 @@ export const workflowRoutes = new Hono()
     const body = c.req.valid("json");
     const now = new Date().toISOString();
 
-    const existing = await db.select().from(workflows).where(eq(workflows.id, id));
-    if (!existing.length) return c.json({ error: "Not found" }, 404);
+    const [prev] = await db.select().from(workflows).where(eq(workflows.id, id));
+    if (!prev) throw AppError.notFound("Workflow", id);
 
-    const prev = existing[0];
     const updated = {
       name: body.name ?? prev.name,
       description: body.description ?? prev.description,
@@ -66,6 +70,6 @@ export const workflowRoutes = new Hono()
 
   .delete("/:id", async (c) => {
     const { id } = c.req.param();
-    const result = await db.delete(workflows).where(eq(workflows.id, id));
+    await db.delete(workflows).where(eq(workflows.id, id));
     return c.json({ deleted: true });
   });

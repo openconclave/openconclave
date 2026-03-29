@@ -1,7 +1,14 @@
 import { z } from "zod";
+import {
+  NODE_TYPES,
+  TRIGGER_TYPES,
+  AGENT_ENGINES,
+  CODE_RUNTIMES,
+  OUTPUT_TYPES,
+} from "../constants";
 
 export const triggerConfigSchema = z.object({
-  type: z.enum(["manual", "cron", "webhook", "channel", "telegram"]),
+  type: z.enum(TRIGGER_TYPES),
   prompt: z.string().optional(),
   cron: z.string().optional(),
   webhookPath: z.string().optional(),
@@ -9,7 +16,7 @@ export const triggerConfigSchema = z.object({
 });
 
 export const agentConfigSchema = z.object({
-  engine: z.enum(["claude", "ollama"]).optional(),
+  engine: z.enum(AGENT_ENGINES).optional(),
   prompt: z.string().min(1),
   systemPrompt: z.string().optional(),
   model: z.string().optional(),
@@ -24,29 +31,32 @@ export const conditionConfigSchema = z.object({
   expression: z.string().min(1),
 });
 
-export const transformConfigSchema = z.object({
-  runtime: z.enum(["python", "node", "bash"]).default("python"),
+export const codeConfigSchema = z.object({
+  runtime: z.enum(CODE_RUNTIMES).default("python"),
   code: z.string().min(1),
 });
 
+// Keep backward compat alias
+export const transformConfigSchema = codeConfigSchema;
+
 export const outputConfigSchema = z.object({
-  type: z.enum(["webhook", "log", "file", "notification", "claude-code", "telegram"]),
+  type: z.enum(OUTPUT_TYPES),
   chatId: z.string().optional(),
   config: z.record(z.unknown()),
 });
 
 export const workflowNodeSchema = z.object({
   id: z.string(),
-  type: z.enum(["trigger", "agent", "condition", "transform", "output"]),
+  type: z.enum(NODE_TYPES),
   position: z.object({ x: z.number(), y: z.number() }),
   data: z.object({
     label: z.string(),
-    type: z.enum(["trigger", "agent", "condition", "transform", "output"]),
+    type: z.enum(NODE_TYPES),
     config: z.union([
       triggerConfigSchema,
       agentConfigSchema,
       conditionConfigSchema,
-      transformConfigSchema,
+      codeConfigSchema,
       outputConfigSchema,
     ]),
   }),

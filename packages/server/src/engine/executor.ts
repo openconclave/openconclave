@@ -1,35 +1,60 @@
 import { nanoid } from "nanoid";
 import { eq } from "drizzle-orm";
+import { resolve } from "path";
+
 import { db } from "../db/client";
 import { runs, agentTasks, runEvents, settings } from "../db/schema";
 import { agentPool } from "../agent/pool";
 import { runOllamaAgent } from "../agent/ollama";
 import { getIncomingEdges, getOutgoingEdges } from "./graph";
-import { resolve } from "path";
-
-const PROJECT_ROOT = resolve(import.meta.dir, "../../../");
+import { evaluateExpression } from "../lib/expression";
+import { logger } from "../lib/logger";
+import {
+  AppError,
+  ErrorCode,
+  MAX_WORKFLOW_ITERATIONS,
+} from "@openconclave/shared";
 import type {
   WorkflowDefinition,
   WorkflowNode,
   WorkflowEdge,
   AgentConfig,
   ConditionConfig,
-  TransformConfig,
+  CodeConfig,
+  TriggerConfig,
+  OutputConfig,
 } from "@openconclave/shared";
 
-type EventCallback = (event: RunEvent) => void;
+const PROJECT_ROOT = resolve(import.meta.dir, "../../../");
 
-type RunEvent = {
+// ── Types ────────────────────────────────────────────────────
+
+interface RunEvent {
   type: string;
   runId: string;
   nodeId?: string;
   data?: unknown;
-};
+}
 
-const MAX_ITERATIONS = 100; // safety limit to prevent infinite loops
+interface QueueEntry {
+  nodeId: string;
+  triggeredBy: string | null;
+}
+
+interface AgentResult {
+  success: boolean;
+  output: string;
+  error?: string;
+  costUsd?: number;
+  durationMs: number;
+}
+
+type EventCallback = (event: RunEvent) => void;
+
+// ── Executor ─────────────────────────────────────────────────
 
 export class WorkflowExecutor {
-  private onEvent?: EventCallback;
+  private readonly onEvent?: EventCallback;
 
   constructor(onEvent?: EventCallback) {
     this.onEvent = onEvent;
@@ -55,26 +80,30 @@ export class WorkflowExecutor {
 
     this.emit({ type: "run:started", runId });
 
-    // Execute asynchronously
-    this.executeGraph(runId, workflow, triggerPayload, triggerNodeId).catch((err) => {
-      console.error(`Run ${runId} failed:`, err);
-    });
+    this.executeGraph(runId, workflow, triggerPayload, triggerNodeId).catch(
+      (err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        logger.error(`Run ${runId} failed`, { error: message });
+      }
+    );
 
     return runId;
   }
+
+  // ── Graph Walker ─────────────────────────────────────────
 
   private async executeGraph(
     runId: string,
     workflow: WorkflowDefinition,
     triggerPayload?: unknown,
     triggerNodeId?: string
-  ) {
+  ): Promise<void> {
     const { nodes, edges } = workflow;
     const nodeMap = new Map(nodes.map((n) => [n.id, n]));
     const nodeOutputs = new Map<string, unknown>();
 
     try {
-      // Find entry point — use specific trigger node if provided, otherwise all entry nodes
+      // Find entry point
       let entryNodes: WorkflowNode[];
       if (triggerNodeId) {
         const triggerNode = nodes.find((n) => n.id === triggerNodeId);
@@ -86,24 +115,27 @@ export class WorkflowExecutor {
       }
 
       if (entryNodes.length === 0) {
-        throw new Error("No entry nodes found");
+        throw new AppError(ErrorCode.WORKFLOW_NO_ENTRY, "No entry nodes found");
       }
 
-      // Walk the graph starting from entry nodes
-      // Queue entries track which node triggered them for correct input resolution
-      type QueueEntry = { nodeId: string; triggeredBy: string | null };
-      const queue: QueueEntry[] = entryNodes.map((n) => ({ nodeId: n.id, triggeredBy: null }));
+      const queue: QueueEntry[] = entryNodes.map((n) => ({
+        nodeId: n.id,
+        triggeredBy: null,
+      }));
       let iterations = 0;
 
       while (queue.length > 0) {
         iterations++;
-        if (iterations > MAX_ITERATIONS) {
-          throw new Error(`Exceeded max iterations (${MAX_ITERATIONS}). Possible infinite loop.`);
+        if (iterations > MAX_WORKFLOW_ITERATIONS) {
+          throw new AppError(
+            ErrorCode.WORKFLOW_MAX_ITERATIONS,
+            `Exceeded max iterations (${MAX_WORKFLOW_ITERATIONS})`
+          );
         }
 
-        // Check if run was cancelled
-        const run = await db.select().from(runs).where(eq(runs.id, runId));
-        if (run[0]?.status === "cancelled") {
+        // Check cancellation
+        const [run] = await db.select().from(runs).where(eq(runs.id, runId));
+        if (run?.status === "cancelled") {
           this.emit({ type: "run:completed", runId, data: { status: "cancelled" } });
           return;
         }
@@ -112,17 +144,24 @@ export class WorkflowExecutor {
         const node = nodeMap.get(entry.nodeId);
         if (!node) continue;
 
-        // Execute the node with the specific triggering source
         const output = await this.executeNode(
-          runId, entry.nodeId, nodeMap, edges, nodeOutputs, triggerPayload, entry.triggeredBy
+          runId,
+          entry.nodeId,
+          nodeMap,
+          edges,
+          nodeOutputs,
+          triggerPayload,
+          entry.triggeredBy
         );
 
-        // Determine next nodes based on output
+        // Route to next nodes
         const outgoing = getOutgoingEdges(entry.nodeId, edges);
 
         if (node.data.type === "condition") {
-          const condResult = (output as any)?.__conditionResult;
-          nodeOutputs.set(entry.nodeId, (output as any)?.__passthrough);
+          const condResult = (output as { __conditionResult?: boolean })?.__conditionResult;
+          const passthrough = (output as { __passthrough?: unknown })?.__passthrough;
+          nodeOutputs.set(entry.nodeId, passthrough);
+
           for (const edge of outgoing) {
             if (edge.sourceHandle === "true" && condResult) {
               queue.push({ nodeId: edge.target, triggeredBy: entry.nodeId });
@@ -139,28 +178,25 @@ export class WorkflowExecutor {
         }
       }
 
-      // Mark run as success
+      // Success
       const now = new Date().toISOString();
       await db
         .update(runs)
         .set({ status: "success", completedAt: now })
         .where(eq(runs.id, runId));
-
       this.emit({ type: "run:completed", runId, data: { status: "success" } });
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
       const now = new Date().toISOString();
       await db
         .update(runs)
-        .set({ status: "failure", completedAt: now, error: err.message })
+        .set({ status: "failure", completedAt: now, error: message })
         .where(eq(runs.id, runId));
-
-      this.emit({
-        type: "run:completed",
-        runId,
-        data: { status: "failure", error: err.message },
-      });
+      this.emit({ type: "run:completed", runId, data: { status: "failure", error: message } });
     }
   }
+
+  // ── Node Execution ───────────────────────────────────────
 
   private async executeNode(
     runId: string,
@@ -174,9 +210,8 @@ export class WorkflowExecutor {
     const node = nodeMap.get(nodeId);
     if (!node) return undefined;
 
-    // Gather input — use the specific triggering node's output if known
+    // Resolve input from triggering source
     let input: unknown;
-
     if (triggeredBy) {
       input = nodeOutputs.get(triggeredBy);
     } else {
@@ -198,37 +233,30 @@ export class WorkflowExecutor {
 
       switch (node.data.type) {
         case "trigger": {
-          const triggerConfig = node.data.config as any;
-          // Priority: webhook/API payload > configured prompt > default
-          output = triggerPayload ?? triggerConfig.prompt ?? { triggered: true, timestamp: new Date().toISOString() };
+          const config = node.data.config as TriggerConfig;
+          output = triggerPayload ?? config.prompt ?? null;
           break;
         }
 
         case "agent":
-          output = await this.executeAgentNode(runId, nodeId, node.data.config as AgentConfig, input);
+          output = await this.executeAgent(runId, nodeId, node.data.config as AgentConfig, input);
           break;
 
         case "condition": {
-          const condResult = this.executeConditionNode(node.data.config as ConditionConfig, input);
-          // Store the full result for routing, but pass through original input as output
-          output = { __conditionResult: condResult.conditionResult, __passthrough: input };
+          const config = node.data.config as ConditionConfig;
+          const result = evaluateExpression(config.expression, input);
+          output = { __conditionResult: result, __passthrough: input };
           break;
         }
 
         case "transform":
-          output = await this.executeCodeNode(node.data.config as TransformConfig, input);
+          output = await this.executeCode(node.data.config as CodeConfig, input);
           break;
 
         case "output": {
-          const outputConfig = node.data.config as any;
+          const config = node.data.config as OutputConfig;
           output = input;
-          if (outputConfig.type === "claude-code") {
-            this.emit({ type: "channel:output", runId, nodeId, data: output });
-          } else if (outputConfig.type === "telegram") {
-            await this.sendTelegram(outputConfig.chatId, output);
-          } else {
-            console.log(`[Output: ${node.data.label}]`, JSON.stringify(input, null, 2));
-          }
+          await this.handleOutput(config, input, runId, nodeId);
           break;
         }
       }
@@ -236,31 +264,31 @@ export class WorkflowExecutor {
       nodeOutputs.set(nodeId, output);
       this.emit({ type: "node:completed", runId, nodeId, data: output });
       return output;
-    } catch (err: any) {
-      this.emit({ type: "node:failed", runId, nodeId, data: { error: err.message } });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.emit({ type: "node:failed", runId, nodeId, data: { error: message } });
       throw err;
     }
   }
 
-  private async executeAgentNode(
+  // ── Agent Execution ──────────────────────────────────────
+
+  private async executeAgent(
     runId: string,
     nodeId: string,
     config: AgentConfig,
     input: unknown
-  ): Promise<unknown> {
+  ): Promise<string> {
     const taskId = nanoid();
     const now = new Date().toISOString();
-
-    // Inject context into the agent's config as an appended system prompt
-    const augmentedConfig = config;
-
     const engine = config.engine ?? "claude";
+
     if (engine === "ollama" && !config.ollamaModel) {
-      throw new Error("No Ollama model selected. Edit the agent node and pick a model.");
+      throw new AppError(ErrorCode.AGENT_NO_MODEL, "No Ollama model selected");
     }
+
     const modelName = engine === "ollama" ? config.ollamaModel! : (config.model ?? "sonnet");
 
-    // Create agent task record
     await db.insert(agentTasks).values({
       id: taskId,
       runId,
@@ -276,29 +304,15 @@ export class WorkflowExecutor {
 
     this.emit({ type: "agent:started", runId, nodeId, data: { taskId, engine } });
 
-    let result: { success: boolean; output: string; error?: string; costUsd?: number; durationMs: number };
+    let result: AgentResult;
 
     if (engine === "ollama") {
-      // Map allowed tools + MCP servers to Ollama tool IDs
-      const ollamaTools: string[] = [];
-      if (config.allowedTools?.length) {
-        const toolMap: Record<string, string> = {
-          Bash: "bash", Read: "read_file", Write: "write_file",
-          WebFetch: "web_fetch",
-        };
-        for (const t of config.allowedTools) {
-          if (toolMap[t]) ollamaTools.push(toolMap[t]);
-        }
-      }
-      if (config.mcpServers?.includes("telegram-voice")) {
-        ollamaTools.push("send_telegram");
-      }
+      const ollamaTools = this.mapOllamaTools(config);
 
-      // Run via Ollama API with tool calling + MCP servers
       result = await runOllamaAgent({
         model: modelName,
-        prompt: augmentedConfig.prompt,
-        systemPrompt: augmentedConfig.systemPrompt,
+        prompt: config.prompt,
+        systemPrompt: config.systemPrompt,
         input,
         tools: ollamaTools.length > 0 ? ollamaTools : undefined,
         mcpServers: config.mcpServers,
@@ -307,9 +321,8 @@ export class WorkflowExecutor {
         },
       });
     } else {
-      // Run via Claude Code CLI through the agent pool
       result = await agentPool.submit(taskId, {
-        config: augmentedConfig,
+        config,
         input,
         onOutput: (chunk) => {
           this.emit({ type: "agent:output", runId, nodeId, data: { taskId, chunk } });
@@ -318,8 +331,6 @@ export class WorkflowExecutor {
     }
 
     const completedAt = new Date().toISOString();
-
-    // Update task record
     await db
       .update(agentTasks)
       .set({
@@ -339,25 +350,41 @@ export class WorkflowExecutor {
     });
 
     if (!result.success) {
-      throw new Error(`Agent task failed: ${result.error}`);
+      throw new AppError(ErrorCode.AGENT_FAILED, `Agent task failed: ${result.error}`);
     }
 
     return result.output;
   }
 
-  private executeConditionNode(
-    config: ConditionConfig,
-    input: unknown,
-  ): { conditionResult: boolean; input: unknown } {
-    // Evaluate condition expression
-    const fn = new Function("input", `return Boolean(${config.expression})`);
-    const result = fn(input);
-    return { conditionResult: result, input };
+  private mapOllamaTools(config: AgentConfig): string[] {
+    const tools: string[] = [];
+    const toolMap: Record<string, string> = {
+      Bash: "bash",
+      Read: "read_file",
+      Write: "write_file",
+      WebFetch: "web_fetch",
+    };
+
+    if (config.allowedTools) {
+      for (const t of config.allowedTools) {
+        const mapped = toolMap[t];
+        if (mapped) tools.push(mapped);
+      }
+    }
+
+    if (config.mcpServers?.includes("telegram-voice")) {
+      tools.push("send_telegram");
+    }
+
+    return tools;
   }
 
-  private async executeCodeNode(config: TransformConfig, input: unknown): Promise<unknown> {
+  // ── Code Execution ───────────────────────────────────────
+
+  private async executeCode(config: CodeConfig, input: unknown): Promise<unknown> {
     const { runtime, code } = config;
     const inputStr = typeof input === "string" ? input : JSON.stringify(input);
+
     const cmdMap: Record<string, string[]> = {
       python: ["python3", "-c", code],
       node: ["node", "-e", code],
@@ -365,17 +392,16 @@ export class WorkflowExecutor {
     };
 
     const cmd = cmdMap[runtime];
-    if (!cmd) throw new Error(`Unknown runtime: ${runtime}`);
+    if (!cmd) {
+      throw new AppError(ErrorCode.CODE_INVALID_RUNTIME, `Unknown runtime: ${runtime}`);
+    }
 
     const proc = Bun.spawn(cmd, {
       cwd: PROJECT_ROOT,
       stdin: new Blob([inputStr]),
       stdout: "pipe",
       stderr: "pipe",
-      env: {
-        ...process.env,
-        INPUT: inputStr,
-      },
+      env: { ...process.env, INPUT: inputStr },
     });
 
     const stdout = await new Response(proc.stdout).text();
@@ -383,10 +409,12 @@ export class WorkflowExecutor {
     const exitCode = await proc.exited;
 
     if (exitCode !== 0) {
-      throw new Error(`Code node failed (${runtime}, exit ${exitCode}): ${stderr}`);
+      throw new AppError(
+        ErrorCode.CODE_EXECUTION_FAILED,
+        `Code node failed (${runtime}, exit ${exitCode}): ${stderr}`
+      );
     }
 
-    // Try to parse as JSON, otherwise return as string
     try {
       return JSON.parse(stdout.trim());
     } catch {
@@ -394,31 +422,61 @@ export class WorkflowExecutor {
     }
   }
 
-  private async sendTelegram(chatId: string | undefined, data: unknown) {
-    const tokenResult = await db.select().from(settings).where(eq(settings.key, "telegram_bot_token"));
-    const token = tokenResult[0]?.value;
-    if (!token) {
-      console.error("[Output: Telegram] No bot token configured in Settings");
-      return;
-    }
-    if (!chatId) {
-      console.error("[Output: Telegram] No chat ID configured on output node");
-      return;
-    }
+  // ── Output Handling ──────────────────────────────────────
 
-    const text = typeof data === "string" ? data : JSON.stringify(data, null, 2);
-    try {
-      await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chat_id: chatId, text }),
-      });
-    } catch (err: any) {
-      console.error("[Output: Telegram] Send failed:", err.message);
+  private async handleOutput(
+    config: OutputConfig,
+    data: unknown,
+    runId: string,
+    nodeId: string
+  ): Promise<void> {
+    switch (config.type) {
+      case "claude-code":
+        this.emit({ type: "channel:output", runId, nodeId, data });
+        break;
+
+      case "telegram":
+        await this.sendTelegram(config.chatId, data);
+        break;
+
+      default:
+        logger.info(`[Output: ${config.type}]`, {
+          data: typeof data === "string" ? data.slice(0, 200) : JSON.stringify(data).slice(0, 200),
+        });
     }
   }
 
-  private emit(event: RunEvent) {
+  private async sendTelegram(chatId: string | undefined, data: unknown): Promise<void> {
+    const [tokenRow] = await db
+      .select()
+      .from(settings)
+      .where(eq(settings.key, "telegram_bot_token"));
+    const token = tokenRow?.value;
+
+    if (!token) {
+      throw new AppError(ErrorCode.TELEGRAM_NO_TOKEN, "No Telegram bot token in Settings");
+    }
+    if (!chatId) {
+      throw new AppError(ErrorCode.TELEGRAM_SEND_FAILED, "No chat ID on Telegram output node");
+    }
+
+    const text = typeof data === "string" ? data : JSON.stringify(data, null, 2);
+
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text }),
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      throw new AppError(ErrorCode.TELEGRAM_SEND_FAILED, `Telegram API error: ${err}`);
+    }
+  }
+
+  // ── Events ───────────────────────────────────────────────
+
+  private emit(event: RunEvent): void {
     const now = new Date().toISOString();
     db.insert(runEvents)
       .values({
@@ -428,7 +486,10 @@ export class WorkflowExecutor {
         data: event.data ?? null,
         createdAt: now,
       })
-      .catch((err) => console.error("Failed to persist event:", err));
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        logger.error("Failed to persist event", { error: message });
+      });
 
     this.onEvent?.(event);
   }

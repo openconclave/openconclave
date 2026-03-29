@@ -1,7 +1,9 @@
 import { Hono } from "hono";
 import { eq, desc } from "drizzle-orm";
+
 import { db } from "../db/client";
 import { runs, agentTasks, runEvents } from "../db/schema";
+import { AppError } from "@openconclave/shared";
 
 export const runRoutes = new Hono()
   .get("/", async (c) => {
@@ -10,12 +12,17 @@ export const runRoutes = new Hono()
 
     const costByRun = new Map<string, number>();
     const durationByRun = new Map<string, number>();
+
     for (const t of allTasks) {
       costByRun.set(t.runId, (costByRun.get(t.runId) ?? 0) + (t.costUsd ?? 0));
     }
+
     for (const r of allRuns) {
       if (r.startedAt && r.completedAt) {
-        durationByRun.set(r.id, new Date(r.completedAt).getTime() - new Date(r.startedAt).getTime());
+        durationByRun.set(
+          r.id,
+          new Date(r.completedAt).getTime() - new Date(r.startedAt).getTime()
+        );
       }
     }
 
@@ -30,13 +37,13 @@ export const runRoutes = new Hono()
 
   .get("/:id", async (c) => {
     const { id } = c.req.param();
-    const run = await db.select().from(runs).where(eq(runs.id, id));
-    if (!run.length) return c.json({ error: "Not found" }, 404);
+    const [run] = await db.select().from(runs).where(eq(runs.id, id));
+    if (!run) throw AppError.notFound("Run", id);
 
     const tasks = await db.select().from(agentTasks).where(eq(agentTasks.runId, id));
     const events = await db.select().from(runEvents).where(eq(runEvents.runId, id));
 
-    return c.json({ run: run[0], tasks, events });
+    return c.json({ run, tasks, events });
   })
 
   .post("/:id/cancel", async (c) => {
@@ -46,5 +53,9 @@ export const runRoutes = new Hono()
       .update(runs)
       .set({ status: "cancelled", completedAt: now })
       .where(eq(runs.id, id));
+    await db
+      .update(agentTasks)
+      .set({ status: "cancelled", completedAt: now })
+      .where(eq(agentTasks.runId, id));
     return c.json({ cancelled: true });
   });

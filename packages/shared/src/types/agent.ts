@@ -1,7 +1,8 @@
-export type TaskStatus = "queued" | "running" | "success" | "failure" | "cancelled";
-export type RunStatus = "queued" | "running" | "success" | "failure" | "cancelled";
+import type { RunStatus, TaskStatus } from "./workflow";
 
-export type AgentTask = {
+export type { TaskStatus, RunStatus };
+
+export interface AgentTask {
   id: string;
   runId: string;
   nodeId: string;
@@ -17,9 +18,9 @@ export type AgentTask = {
   startedAt?: string;
   completedAt?: string;
   createdAt: string;
-};
+}
 
-export type Run = {
+export interface Run {
   id: string;
   workflowId: string;
   status: RunStatus;
@@ -29,13 +30,13 @@ export type Run = {
   completedAt?: string;
   error?: string;
   createdAt: string;
-};
+}
 
-export type RunEvent = {
+export interface RunEvent {
   id: number;
   runId: string;
   nodeId?: string;
   type: string;
   data?: unknown;
   createdAt: string;
-};
+}

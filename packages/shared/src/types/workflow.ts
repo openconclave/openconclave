@@ -1,16 +1,31 @@
-export type NodeType = "trigger" | "agent" | "condition" | "transform" | "output";
+import type {
+  NODE_TYPES,
+  TRIGGER_TYPES,
+  AGENT_ENGINES,
+  CODE_RUNTIMES,
+  OUTPUT_TYPES,
+  RUN_STATUSES,
+} from "../constants";
 
-export type TriggerConfig = {
-  type: "manual" | "cron" | "webhook" | "channel" | "telegram";
+export type NodeType = (typeof NODE_TYPES)[number];
+export type TriggerType = (typeof TRIGGER_TYPES)[number];
+export type AgentEngine = (typeof AGENT_ENGINES)[number];
+export type CodeRuntime = (typeof CODE_RUNTIMES)[number];
+export type OutputType = (typeof OUTPUT_TYPES)[number];
+export type RunStatus = (typeof RUN_STATUSES)[number];
+export type TaskStatus = RunStatus;
+
+// ── Node Configs ─────────────────────────────────────────────
+
+export interface TriggerConfig {
+  type: TriggerType;
   prompt?: string;
   cron?: string;
   webhookPath?: string;
   chatId?: string;
-};
+}
 
-export type AgentEngine = "claude" | "ollama";
-
-export type AgentConfig = {
+export interface AgentConfig {
   engine?: AgentEngine;
   prompt: string;
   systemPrompt?: string;
@@ -20,52 +35,57 @@ export type AgentConfig = {
   maxBudgetUsd?: number;
   allowedTools?: string[];
   mcpServers?: string[];
-};
+}
 
-export type ConditionConfig = {
+export interface ConditionConfig {
   expression: string;
-};
+}
 
-export type TransformConfig = {
-  runtime: "python" | "node" | "bash";
+export interface CodeConfig {
+  runtime: CodeRuntime;
   code: string;
-};
+}
 
-export type OutputConfig = {
-  type: "webhook" | "log" | "file" | "notification" | "claude-code" | "telegram";
+export interface OutputConfig {
+  type: OutputType;
   chatId?: string;
   config: Record<string, unknown>;
-};
+}
+
+// Keep backward compat alias
+export type TransformConfig = CodeConfig;
 
 export type WorkflowNodeConfig =
   | TriggerConfig
   | AgentConfig
   | ConditionConfig
-  | TransformConfig
+  | CodeConfig
   | OutputConfig;
 
-export type WorkflowNodeData = {
+// ── Node Data ────────────────────────────────────────────────
+
+export interface WorkflowNodeData {
   label: string;
   type: NodeType;
   config: WorkflowNodeConfig;
-};
+}
 
-export type WorkflowNode = {
+export interface WorkflowNode {
   id: string;
   type: NodeType;
   position: { x: number; y: number };
   data: WorkflowNodeData;
-};
+}
 
-export type WorkflowEdge = {
+export interface WorkflowEdge {
   id: string;
   source: string;
   target: string;
   sourceHandle?: string;
   label?: string;
-};
+}
 
-export type WorkflowDefinition = {
+export interface WorkflowDefinition {
   id: string;
   name: string;
   description?: string;
@@ -74,4 +94,4 @@ export type WorkflowDefinition = {
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
-};
+}
