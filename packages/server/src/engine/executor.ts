@@ -140,41 +140,55 @@ export class WorkflowExecutor {
           return;
         }
 
-        const entry = queue.shift()!;
-        const node = nodeMap.get(entry.nodeId);
-        if (!node) continue;
+        // Batch: take all entries from the current queue and run in parallel
+        const batch = queue.splice(0, queue.length);
 
-        const output = await this.executeNode(
-          runId,
-          entry.nodeId,
-          nodeMap,
-          edges,
-          nodeOutputs,
-          triggerPayload,
-          entry.triggeredBy
+        const results = await Promise.all(
+          batch.map(async (entry) => {
+            const node = nodeMap.get(entry.nodeId);
+            if (!node) return [];
+
+            const output = await this.executeNode(
+              runId,
+              entry.nodeId,
+              nodeMap,
+              edges,
+              nodeOutputs,
+              triggerPayload,
+              entry.triggeredBy
+            );
+
+            // Determine next entries
+            const next: QueueEntry[] = [];
+            const outgoing = getOutgoingEdges(entry.nodeId, edges);
+
+            if (node.data.type === "condition") {
+              const condResult = (output as { __conditionResult?: boolean })?.__conditionResult;
+              const passthrough = (output as { __passthrough?: unknown })?.__passthrough;
+              nodeOutputs.set(entry.nodeId, passthrough);
+
+              for (const edge of outgoing) {
+                if (edge.sourceHandle === "true" && condResult) {
+                  next.push({ nodeId: edge.target, triggeredBy: entry.nodeId });
+                } else if (edge.sourceHandle === "false" && !condResult) {
+                  next.push({ nodeId: edge.target, triggeredBy: entry.nodeId });
+                } else if (!edge.sourceHandle) {
+                  next.push({ nodeId: edge.target, triggeredBy: entry.nodeId });
+                }
+              }
+            } else {
+              for (const edge of outgoing) {
+                next.push({ nodeId: edge.target, triggeredBy: entry.nodeId });
+              }
+            }
+
+            return next;
+          })
         );
 
-        // Route to next nodes
-        const outgoing = getOutgoingEdges(entry.nodeId, edges);
-
-        if (node.data.type === "condition") {
-          const condResult = (output as { __conditionResult?: boolean })?.__conditionResult;
-          const passthrough = (output as { __passthrough?: unknown })?.__passthrough;
-          nodeOutputs.set(entry.nodeId, passthrough);
-
-          for (const edge of outgoing) {
-            if (edge.sourceHandle === "true" && condResult) {
-              queue.push({ nodeId: edge.target, triggeredBy: entry.nodeId });
-            } else if (edge.sourceHandle === "false" && !condResult) {
-              queue.push({ nodeId: edge.target, triggeredBy: entry.nodeId });
-            } else if (!edge.sourceHandle) {
-              queue.push({ nodeId: edge.target, triggeredBy: entry.nodeId });
-            }
-          }
-        } else {
-          for (const edge of outgoing) {
-            queue.push({ nodeId: edge.target, triggeredBy: entry.nodeId });
-          }
+        // Flatten next entries back into the queue
+        for (const next of results) {
+          queue.push(...next);
         }
       }
 
