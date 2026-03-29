@@ -1,20 +1,21 @@
-import { Header } from "@/components/layout/header";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import {
   GitBranch,
   Play,
-  Cpu,
+  Activity,
   CheckCircle,
   DollarSign,
   Clock,
   XCircle,
-  AlertTriangle,
+  Ban,
   Zap,
+  ArrowUpRight,
+  Terminal,
 } from "lucide-react";
 
-type DashboardData = {
+interface DashboardData {
   totalWorkflows: number;
   activeRuns: number;
   totalRuns: number;
@@ -22,35 +23,38 @@ type DashboardData = {
   failureCount: number;
   cancelledCount: number;
   totalCost: number;
-  recentRuns: any[];
-  workflows: { id: string; name: string; enabled: boolean }[];
-  recentOutputs: { id: number; runId: string; nodeId: string; data: any; createdAt: string }[];
-  schedule: { workflowId: string; cron: string; nextRun: string; enabled: boolean }[];
-};
+  recentRuns: Array<{ id: string; status: string; workflowId: string; createdAt: string }>;
+  workflows: Array<{ id: string; name: string; enabled: boolean }>;
+  recentOutputs: Array<{ id: number; runId: string; nodeId: string; data: unknown; createdAt: string }>;
+  schedule: Array<{ workflowId: string; cron: string; nextRun: string; enabled: boolean }>;
+}
 
-const statusColors: Record<string, string> = {
-  queued: "bg-muted text-muted-foreground",
-  running: "bg-warning/20 text-warning",
-  success: "bg-success/20 text-success",
-  failure: "bg-destructive/20 text-destructive",
-  cancelled: "bg-muted text-muted-foreground",
+const STATUS_DOTS: Record<string, string> = {
+  queued: "bg-muted-foreground",
+  running: "bg-warning animate-pulse",
+  success: "bg-success",
+  failure: "bg-destructive",
+  cancelled: "bg-muted-foreground",
 };
 
 export function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
 
   useEffect(() => {
-    api.get<DashboardData>("/dashboard").then(setData).catch(() => {});
+    const load = () => api.get<DashboardData>("/dashboard").then(setData).catch(() => {});
+    load();
+    const interval = setInterval(load, 10000);
+    return () => clearInterval(interval);
   }, []);
 
   if (!data) {
     return (
-      <>
-        <Header title="Dashboard" />
-        <div className="flex flex-1 items-center justify-center text-muted-foreground">
-          Loading...
+      <div className="flex flex-1 items-center justify-center">
+        <div className="flex items-center gap-3 text-muted-foreground">
+          <Activity className="h-5 w-5 animate-pulse" />
+          <span className="text-sm tracking-wide uppercase">Connecting</span>
         </div>
-      </>
+      </div>
     );
   }
 
@@ -59,40 +63,118 @@ export function DashboardPage() {
     : 0;
 
   return (
-    <>
-      <Header title="Dashboard" />
-      <div className="flex-1 space-y-6 overflow-y-auto p-6">
-        {/* Status Cards */}
-        <div className="grid grid-cols-5 gap-4">
-          <StatCard label="Workflows" value={data.totalWorkflows} icon={GitBranch} color="text-node-agent" />
-          <StatCard label="Active Runs" value={data.activeRuns} icon={Play} color="text-success" />
-          <StatCard label="Total Runs" value={data.totalRuns} icon={Cpu} color="text-info" />
-          <StatCard label="Success Rate" value={`${successRate}%`} icon={CheckCircle} color="text-success" />
-          <StatCard label="Total Cost" value={`$${data.totalCost.toFixed(2)}`} icon={DollarSign} color="text-warning" />
+    <div className="flex-1 overflow-y-auto">
+      {/* Header strip */}
+      <div className="border-b border-border px-6 py-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-lg font-semibold tracking-tight">Operations</h1>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {data.activeRuns > 0
+                ? `${data.activeRuns} active run${data.activeRuns > 1 ? "s" : ""}`
+                : "All systems idle"}
+            </p>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className={cn(
+              "h-2 w-2 rounded-full",
+              data.activeRuns > 0 ? "bg-success animate-pulse" : "bg-muted-foreground"
+            )} />
+            <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
+              {data.activeRuns > 0 ? "live" : "idle"}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div className="p-6 space-y-5">
+        {/* Metrics Row */}
+        <div className="grid grid-cols-5 gap-3">
+          <MetricCard
+            label="Workflows"
+            value={data.totalWorkflows}
+            icon={GitBranch}
+            accent="oklch(0.65 0.18 260)"
+          />
+          <MetricCard
+            label="Active"
+            value={data.activeRuns}
+            icon={Activity}
+            accent="oklch(0.65 0.18 145)"
+            pulse={data.activeRuns > 0}
+          />
+          <MetricCard
+            label="Total Runs"
+            value={data.totalRuns}
+            icon={Zap}
+            accent="oklch(0.65 0.15 230)"
+          />
+          <MetricCard
+            label="Success"
+            value={`${successRate}%`}
+            icon={CheckCircle}
+            accent="oklch(0.65 0.18 145)"
+            subtitle={`${data.successCount} of ${data.totalRuns}`}
+          />
+          <MetricCard
+            label="Cost"
+            value={`$${data.totalCost.toFixed(2)}`}
+            icon={DollarSign}
+            accent="oklch(0.70 0.16 80)"
+          />
         </div>
 
-        {/* Charts Row */}
-        <div className="grid grid-cols-3 gap-6">
-          {/* Success/Failure Chart */}
-          <div className="rounded-lg border border-border bg-card p-4">
-            <h3 className="text-sm font-semibold mb-4">Run Results</h3>
-            <div className="flex items-end gap-2 h-32">
-              <Bar label="Success" value={data.successCount} max={data.totalRuns} color="bg-success" />
-              <Bar label="Failed" value={data.failureCount} max={data.totalRuns} color="bg-destructive" />
-              <Bar label="Cancelled" value={data.cancelledCount} max={data.totalRuns} color="bg-muted-foreground" />
+        {/* Main Grid */}
+        <div className="grid grid-cols-12 gap-5">
+
+          {/* Run Distribution — spans 4 cols */}
+          <div className="col-span-4 rounded-xl border border-border bg-card/50 p-5">
+            <h3 className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground mb-5">
+              Run Distribution
+            </h3>
+            <div className="space-y-4">
+              <DistributionBar
+                label="Success"
+                value={data.successCount}
+                total={data.totalRuns}
+                color="bg-success"
+                icon={<CheckCircle className="h-3.5 w-3.5 text-success" />}
+              />
+              <DistributionBar
+                label="Failed"
+                value={data.failureCount}
+                total={data.totalRuns}
+                color="bg-destructive"
+                icon={<XCircle className="h-3.5 w-3.5 text-destructive" />}
+              />
+              <DistributionBar
+                label="Cancelled"
+                value={data.cancelledCount}
+                total={data.totalRuns}
+                color="bg-muted-foreground"
+                icon={<Ban className="h-3.5 w-3.5 text-muted-foreground" />}
+              />
             </div>
           </div>
 
-          {/* Quick Launch */}
-          <div className="rounded-lg border border-border bg-card p-4">
-            <h3 className="text-sm font-semibold mb-3">Quick Launch</h3>
+          {/* Quick Launch — spans 4 cols */}
+          <div className="col-span-4 rounded-xl border border-border bg-card/50 p-5">
+            <h3 className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground mb-4">
+              Quick Launch
+            </h3>
             <div className="space-y-1">
               {data.workflows.map((wf) => (
-                <div key={wf.id} className="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-accent/30 transition-colors">
-                  <div className={cn("h-2 w-2 rounded-full shrink-0", wf.enabled ? "bg-success" : "bg-muted-foreground")} />
+                <div
+                  key={wf.id}
+                  className="group flex items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-secondary/50"
+                >
+                  <div className={cn(
+                    "h-1.5 w-1.5 rounded-full shrink-0 transition-colors",
+                    wf.enabled ? "bg-success" : "bg-muted-foreground/40"
+                  )} />
                   <a
                     href={`/workflows/${wf.id}`}
-                    className="text-sm truncate flex-1 hover:text-primary transition-colors"
+                    className="flex-1 text-sm truncate transition-colors group-hover:text-foreground text-muted-foreground"
                   >
                     {wf.name}
                   </a>
@@ -102,7 +184,7 @@ export function DashboardPage() {
                         e.preventDefault();
                         api.post(`/workflows/${wf.id}/run`, {}).catch(() => {});
                       }}
-                      className="shrink-0 flex h-6 w-6 items-center justify-center rounded bg-success/20 text-success hover:bg-success/30 transition-colors"
+                      className="opacity-0 group-hover:opacity-100 shrink-0 flex h-7 w-7 items-center justify-center rounded-md bg-primary/10 text-primary hover:bg-primary/20 transition-all"
                     >
                       <Play className="h-3 w-3" />
                     </button>
@@ -110,151 +192,207 @@ export function DashboardPage() {
                 </div>
               ))}
               {data.workflows.length === 0 && (
-                <p className="text-xs text-muted-foreground text-center py-4">No workflows yet</p>
+                <div className="flex flex-col items-center py-6 text-muted-foreground/50">
+                  <GitBranch className="h-8 w-8 mb-2" />
+                  <p className="text-xs">No workflows</p>
+                </div>
               )}
             </div>
           </div>
 
-          {/* Active Schedules */}
-          <div className="rounded-lg border border-border bg-card p-4">
-            <h3 className="text-sm font-semibold mb-3">Active Schedules</h3>
-            <div className="space-y-2 max-h-36 overflow-y-auto">
+          {/* Schedules — spans 4 cols */}
+          <div className="col-span-4 rounded-xl border border-border bg-card/50 p-5">
+            <h3 className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground mb-4">
+              Schedules
+            </h3>
+            <div className="space-y-3">
               {data.schedule.filter((s) => s.enabled).map((s) => {
                 const wf = data.workflows.find((w) => w.id === s.workflowId);
                 return (
-                  <div key={s.workflowId} className="flex items-center gap-2">
-                    <Clock className="h-3 w-3 text-info shrink-0" />
+                  <div key={s.workflowId} className="flex items-start gap-3">
+                    <div className="mt-1 flex h-6 w-6 items-center justify-center rounded-md bg-info/10">
+                      <Clock className="h-3 w-3 text-info" />
+                    </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm truncate">{wf?.name ?? s.workflowId.slice(0, 8)}</p>
-                      <p className="text-[10px] text-muted-foreground">
-                        <span className="font-mono">{s.cron}</span>
-                        <span className="ml-2">Next: {new Date(s.nextRun).toLocaleTimeString()}</span>
-                      </p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-[10px] font-mono text-muted-foreground bg-secondary/50 px-1.5 py-0.5 rounded">
+                          {s.cron}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground">
+                          next {new Date(s.nextRun).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                        </span>
+                      </div>
                     </div>
                   </div>
                 );
               })}
               {data.schedule.filter((s) => s.enabled).length === 0 && (
-                <p className="text-xs text-muted-foreground text-center py-4">No active schedules</p>
+                <div className="flex flex-col items-center py-6 text-muted-foreground/50">
+                  <Clock className="h-8 w-8 mb-2" />
+                  <p className="text-xs">No schedules</p>
+                </div>
               )}
             </div>
           </div>
-        </div>
 
-        {/* Bottom Row */}
-        <div className="grid grid-cols-2 gap-6">
-          {/* Recent Runs */}
-          <div className="rounded-lg border border-border bg-card">
-            <div className="flex items-center justify-between border-b border-border px-4 py-3">
-              <h3 className="text-sm font-semibold">Recent Runs</h3>
-              <a href="/runs" className="text-xs text-primary hover:underline">View all</a>
+          {/* Recent Runs — spans 7 cols */}
+          <div className="col-span-7 rounded-xl border border-border bg-card/50">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+              <h3 className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                Recent Runs
+              </h3>
+              <a
+                href="/runs"
+                className="flex items-center gap-1 text-[10px] text-primary hover:text-primary/80 transition-colors"
+              >
+                View all <ArrowUpRight className="h-3 w-3" />
+              </a>
             </div>
-            <div className="divide-y divide-border">
-              {data.recentRuns.slice(0, 10).map((run) => (
-                <a
-                  key={run.id}
-                  href={`/runs/${run.id}`}
-                  className="flex items-center justify-between px-4 py-2.5 hover:bg-accent/30 transition-colors"
-                >
-                  <div className="flex items-center gap-3">
-                    <span
-                      className={cn(
-                        "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium",
-                        statusColors[run.status] ?? statusColors.queued
-                      )}
-                    >
-                      {run.status}
+            <div className="divide-y divide-border/50">
+              {data.recentRuns.slice(0, 8).map((run) => {
+                const wf = data.workflows.find((w) => w.id === run.workflowId);
+                return (
+                  <a
+                    key={run.id}
+                    href={`/runs/${run.id}`}
+                    className="flex items-center gap-3 px-5 py-2.5 transition-colors hover:bg-secondary/30"
+                  >
+                    <div className={cn("h-2 w-2 rounded-full shrink-0", STATUS_DOTS[run.status] ?? STATUS_DOTS.queued)} />
+                    <span className="text-sm flex-1 truncate text-muted-foreground">
+                      {wf?.name ?? run.workflowId.slice(0, 8)}
                     </span>
-                    <span className="text-xs font-mono text-muted-foreground">{run.id.slice(0, 8)}</span>
-                  </div>
-                  <span className="text-[10px] text-muted-foreground">
-                    {new Date(run.createdAt).toLocaleTimeString()}
-                  </span>
-                </a>
-              ))}
+                    <span className="text-[10px] font-mono text-muted-foreground/60">
+                      {run.id.slice(0, 6)}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground/60 w-16 text-right">
+                      {new Date(run.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    </span>
+                  </a>
+                );
+              })}
               {data.recentRuns.length === 0 && (
-                <p className="px-4 py-6 text-center text-xs text-muted-foreground">No runs yet</p>
-              )}
-            </div>
-          </div>
-
-          {/* Recent Outputs */}
-          <div className="rounded-lg border border-border bg-card">
-            <div className="border-b border-border px-4 py-3">
-              <h3 className="text-sm font-semibold">Recent Outputs</h3>
-            </div>
-            <div className="divide-y divide-border">
-              {data.recentOutputs.map((out) => (
-                <a
-                  key={out.id}
-                  href={`/runs/${out.runId}`}
-                  className="block px-4 py-3 hover:bg-accent/30 transition-colors"
-                >
-                  <p className="text-sm line-clamp-2">
-                    {typeof out.data === "string" ? out.data : JSON.stringify(out.data).slice(0, 120)}
-                  </p>
-                  <p className="text-[10px] text-muted-foreground mt-1">
-                    {new Date(out.createdAt).toLocaleTimeString()}
-                  </p>
-                </a>
-              ))}
-              {data.recentOutputs.length === 0 && (
-                <p className="px-4 py-6 text-center text-xs text-muted-foreground">
-                  No outputs yet. Add a "Claude Code" or "Telegram" output node.
+                <p className="px-5 py-8 text-center text-xs text-muted-foreground/50">
+                  No runs yet
                 </p>
               )}
             </div>
           </div>
+
+          {/* Recent Outputs — spans 5 cols */}
+          <div className="col-span-5 rounded-xl border border-border bg-card/50">
+            <div className="px-5 py-4 border-b border-border">
+              <h3 className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                Latest Outputs
+              </h3>
+            </div>
+            <div className="divide-y divide-border/50">
+              {data.recentOutputs.slice(0, 5).map((out) => (
+                <a
+                  key={out.id}
+                  href={`/runs/${out.runId}`}
+                  className="block px-5 py-3 transition-colors hover:bg-secondary/30"
+                >
+                  <div className="flex items-start gap-2">
+                    <Terminal className="h-3 w-3 mt-1 text-primary shrink-0" />
+                    <p className="text-xs line-clamp-2 text-muted-foreground leading-relaxed">
+                      {typeof out.data === "string" ? out.data : JSON.stringify(out.data).slice(0, 150)}
+                    </p>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground/50 mt-1.5 pl-5">
+                    {new Date(out.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  </p>
+                </a>
+              ))}
+              {data.recentOutputs.length === 0 && (
+                <div className="flex flex-col items-center py-8 text-muted-foreground/50">
+                  <Terminal className="h-8 w-8 mb-2" />
+                  <p className="text-xs">No outputs yet</p>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </div>
-    </>
-  );
-}
-
-function StatCard({
-  label,
-  value,
-  icon: Icon,
-  color,
-}: {
-  label: string;
-  value: number | string;
-  icon: React.ElementType;
-  color: string;
-}) {
-  return (
-    <div className="rounded-lg border border-border bg-card p-4">
-      <div className="flex items-center justify-between">
-        <p className="text-xs text-muted-foreground">{label}</p>
-        <Icon className={cn("h-4 w-4", color)} />
-      </div>
-      <p className="mt-2 text-2xl font-bold">{value}</p>
     </div>
   );
 }
 
-function Bar({
+// ── Components ───────────────────────────────────────────────
+
+function MetricCard({
   label,
   value,
-  max,
+  icon: Icon,
+  accent,
+  subtitle,
+  pulse,
+}: {
+  label: string;
+  value: number | string;
+  icon: React.ElementType;
+  accent: string;
+  subtitle?: string;
+  pulse?: boolean;
+}) {
+  return (
+    <div className="group relative rounded-xl border border-border bg-card/50 p-4 transition-colors hover:border-border/80 overflow-hidden">
+      {/* Accent glow */}
+      <div
+        className="absolute -top-8 -right-8 h-20 w-20 rounded-full opacity-[0.07] blur-2xl transition-opacity group-hover:opacity-[0.12]"
+        style={{ backgroundColor: accent }}
+      />
+
+      <div className="flex items-center justify-between relative">
+        <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+          {label}
+        </p>
+        <Icon
+          className={cn("h-4 w-4 opacity-40", pulse && "animate-pulse")}
+          style={{ color: accent }}
+        />
+      </div>
+      <p className="mt-2 text-2xl font-bold tracking-tight relative">{value}</p>
+      {subtitle && (
+        <p className="text-[10px] text-muted-foreground/60 mt-0.5">{subtitle}</p>
+      )}
+    </div>
+  );
+}
+
+function DistributionBar({
+  label,
+  value,
+  total,
   color,
+  icon,
 }: {
   label: string;
   value: number;
-  max: number;
+  total: number;
   color: string;
+  icon: React.ReactNode;
 }) {
-  const height = max > 0 ? Math.max(4, (value / max) * 100) : 4;
+  const pct = total > 0 ? (value / total) * 100 : 0;
+
   return (
-    <div className="flex-1 flex flex-col items-center gap-1">
-      <div className="w-full flex items-end h-24">
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          {icon}
+          <span className="text-xs text-muted-foreground">{label}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-semibold">{value}</span>
+          <span className="text-[10px] text-muted-foreground/50">{pct.toFixed(0)}%</span>
+        </div>
+      </div>
+      <div className="h-1.5 w-full rounded-full bg-secondary/50 overflow-hidden">
         <div
-          className={cn("w-full rounded-t", color)}
-          style={{ height: `${height}%` }}
+          className={cn("h-full rounded-full transition-all duration-700", color)}
+          style={{ width: `${Math.max(pct, 1)}%` }}
         />
       </div>
-      <span className="text-lg font-bold">{value}</span>
-      <span className="text-[10px] text-muted-foreground">{label}</span>
     </div>
   );
 }

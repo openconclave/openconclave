@@ -1,0 +1,10 @@
+{
+  "name": "openconclave",
+  "version": "0.1.0",
+  "description": "AI agent orchestration platform — visual workflows, Claude Code + Ollama agents, MCP tools, Telegram integration",
+  "author": {
+    "name": "OpenConclave"
+  },
+  "license": "MIT",
+  "keywords": ["workflow", "orchestration", "agents", "ollama", "mcp", "automation"]
+}
