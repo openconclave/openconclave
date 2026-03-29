@@ -492,13 +492,14 @@ export class WorkflowExecutor {
       augmentedConfig.systemPrompt = (config.systemPrompt ?? "") + routeInstruction;
     }
 
-    // Inject conversation history for prompt loops
+    // Conversation history available via openconclave_history MCP tool
+    // Also inject into system prompt as backup for models that don't call tools proactively
     if (conversationHistory && conversationHistory.length > 0) {
       const historyText = conversationHistory
         .map((h) => `${h.role === "user" ? "User" : "You"}: ${h.content}`)
         .join("\n");
       augmentedConfig.systemPrompt = (augmentedConfig.systemPrompt ?? "") +
-        "\n\n## Conversation History\nThis is an ongoing conversation. Continue from where you left off:\n" + historyText;
+        "\n\n## Conversation History\nPrevious turns (also available via openconclave_history tool):\n" + historyText;
     }
 
     await db.insert(agentTasks).values({
@@ -545,6 +546,7 @@ export class WorkflowExecutor {
           config: augmentedConfig,
           input,
           routeTargets,
+          conversationHistory,
           onOutput: (chunk) => {
             this.emit({ type: "agent:output", runId, nodeId, data: { taskId, chunk } });
           },
@@ -554,11 +556,13 @@ export class WorkflowExecutor {
       // If no routing needed, break immediately
       if (!routeTargets || routeTargets.length < 2) break;
 
-      // Parse routing from output
-      routedTo = this.parseRoute(result.output, routeTargets);
-      if (routedTo) break;
+      // Check if agent called openconclave_next (route written to state file)
+      if (result.routeTo) {
+        routedTo = result.routeTo;
+        break;
+      }
 
-      // No valid route found — retry
+      // No route — retry if routing was required
       if (attempt < MAX_ROUTE_RETRIES) {
         logger.warn(`Agent didn't route, retry ${attempt + 1}/${MAX_ROUTE_RETRIES}`, { runId, nodeId });
       }
@@ -628,36 +632,6 @@ export class WorkflowExecutor {
     return tools;
   }
 
-  private parseRoute(output: string, targets: RouteTarget[]): string | null {
-    const validIds = new Set(targets.map((t) => t.nodeId));
-
-    // Check for [[ROUTE:nodeId]] marker (Claude Code)
-    const markerMatch = /\[\[ROUTE:([^\]]+)\]\]/.exec(output);
-    if (markerMatch?.[1] && validIds.has(markerMatch[1])) {
-      return markerMatch[1];
-    }
-
-    // Check for ROUTE:nodeId:content format (Ollama openconclave_next tool)
-    const routeMatch = /ROUTE:([^:]+):/.exec(output);
-    if (routeMatch?.[1] && validIds.has(routeMatch[1])) {
-      return routeMatch[1];
-    }
-
-    // Check for openconclave_next tool call pattern in text
-    const toolCallMatch = /openconclave_next\s*\(\s*(?:node_id\s*=\s*)?["']([^"']+)["']/.exec(output);
-    if (toolCallMatch?.[1] && validIds.has(toolCallMatch[1])) {
-      return toolCallMatch[1];
-    }
-
-    // Check for node ID mentioned directly in output
-    for (const target of targets) {
-      if (output.includes(target.nodeId)) {
-        return target.nodeId;
-      }
-    }
-
-    return null;
-  }
 
   // ── Code Execution ───────────────────────────────────────
 

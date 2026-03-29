@@ -1,5 +1,5 @@
 import { spawn } from "bun";
-import { writeFileSync, unlinkSync, mkdirSync } from "fs";
+import { writeFileSync, unlinkSync, mkdirSync, readFileSync, existsSync } from "fs";
 import { join, resolve } from "path";
 import type { AgentConfig } from "@openconclave/shared";
 
@@ -18,6 +18,7 @@ export interface AgentResult {
   costUsd?: number;
   durationMs: number;
   thinking?: ThinkingBlock[];
+  routeTo?: string;
 }
 
 export interface RouteTarget {
@@ -29,6 +30,7 @@ export interface RouteTarget {
 export type AgentRunOptions = {
   config: AgentConfig;
   routeTargets?: RouteTarget[];
+  conversationHistory?: Array<{ role: string; content: string }>;
   input?: unknown;
   cwd?: string;
   abortSignal?: AbortSignal;
@@ -112,15 +114,27 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
     }
   }
 
-  // Add routing MCP server if agent has route targets
+  // Add OpenConclave workflow MCP server for routing + history
   const routeTargets = options.routeTargets;
-  if (routeTargets && routeTargets.length >= 2) {
-    const routeServerPath = resolve(import.meta.dir, "route-mcp-server.ts");
-    mcpServers["openconclave-router"] = {
+  const conversationHistory = options.conversationHistory;
+  let stateFile: string | null = null;
+
+  const needsWorkflowMcp = (routeTargets && routeTargets.length >= 2) ||
+    (conversationHistory && conversationHistory.length > 0);
+
+  if (needsWorkflowMcp) {
+    const tmpDir = join(process.cwd(), ".openconclave-tmp");
+    mkdirSync(tmpDir, { recursive: true });
+    stateFile = join(tmpDir, `state-${Date.now()}.json`);
+
+    const workflowMcpPath = resolve(import.meta.dir, "workflow-mcp-server.ts");
+    mcpServers["openconclave-workflow"] = {
       command: "bun",
-      args: ["run", routeServerPath],
+      args: ["run", workflowMcpPath],
       env: {
-        ROUTE_TARGETS: JSON.stringify(routeTargets),
+        OC_STATE_FILE: stateFile,
+        OC_ROUTE_TARGETS: JSON.stringify(routeTargets ?? []),
+        OC_CONVERSATION_HISTORY: JSON.stringify(conversationHistory ?? []),
       },
     };
   }
@@ -242,17 +256,40 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
       parsedOutput = lines.join("\n");
     }
 
+    // Read workflow state file for routing decisions
+    let routeTo: string | undefined;
+    if (stateFile) {
+      try {
+        if (existsSync(stateFile)) {
+          const state = JSON.parse(readFileSync(stateFile, "utf8"));
+          if (state.routeTo) {
+            routeTo = state.routeTo;
+            if (state.routeContent) {
+              parsedOutput = state.routeContent;
+            }
+          }
+          unlinkSync(stateFile);
+        }
+      } catch {
+        // State file not written — agent didn't call routing tool
+      }
+    }
+
     return {
       success: true,
       output: parsedOutput,
       costUsd,
       durationMs,
       thinking: thinkingBlocks.length > 0 ? thinkingBlocks : undefined,
+      routeTo,
     };
   } catch (err: any) {
-    // Clean up temp MCP config on error too
+    // Clean up temp files on error
     if (mcpConfigPath) {
       try { unlinkSync(mcpConfigPath); } catch {}
+    }
+    if (stateFile) {
+      try { unlinkSync(stateFile); } catch {}
     }
 
     return {
