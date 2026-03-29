@@ -13,8 +13,8 @@ import { agentPool } from "./agent/pool";
 import { checkOllama } from "./agent/ollama";
 import { TelegramTrigger } from "./triggers/telegram";
 import { db } from "./db/client";
-import { workflows, runs, agentTasks, settings } from "./db/schema";
-import { sql, eq } from "drizzle-orm";
+import { workflows, runs, agentTasks, runEvents, settings } from "./db/schema";
+import { sql, eq, desc } from "drizzle-orm";
 
 // Auto-create tables on first run
 db.run(sql`CREATE TABLE IF NOT EXISTS workflows (
@@ -89,13 +89,43 @@ app.get("/api/health", (c) => c.json({ status: "ok" }));
 
 app.get("/api/dashboard", async (c) => {
   const allWorkflows = await db.select().from(workflows);
-  const allRuns = await db.select().from(runs);
-  const allTasks = await db.select().from(agentTasks);
+  const allRuns = await db.select().from(runs).orderBy(desc(runs.createdAt));
+  const allTasks = await db.select().from(agentTasks).orderBy(desc(agentTasks.createdAt));
+
+  const successCount = allRuns.filter((r) => r.status === "success").length;
+  const failureCount = allRuns.filter((r) => r.status === "failure").length;
+  const cancelledCount = allRuns.filter((r) => r.status === "cancelled").length;
+  const totalCost = allTasks.reduce((sum, t) => sum + (t.costUsd ?? 0), 0);
+
+  // Recent outputs (from run events)
+  const recentOutputEvents = await db
+    .select()
+    .from(runEvents)
+    .where(eq(runEvents.type, "channel:output"))
+    .orderBy(desc(runEvents.createdAt))
+    .limit(10);
+
+  // Get schedule
+  let schedule: any[] = [];
+  try {
+    const res = await fetch("http://localhost:4000/api/scheduler");
+    const d = await res.json() as any;
+    schedule = d.schedule ?? [];
+  } catch {}
+
   return c.json({
     totalWorkflows: allWorkflows.length,
     activeRuns: allRuns.filter((r) => r.status === "running").length,
     recentRuns: allRuns.slice(0, 20),
     agentTasks: allTasks.slice(0, 20),
+    successCount,
+    failureCount,
+    cancelledCount,
+    totalRuns: allRuns.length,
+    totalCost,
+    workflows: allWorkflows.map((w) => ({ id: w.id, name: w.name, enabled: w.enabled })),
+    recentOutputs: recentOutputEvents,
+    schedule,
   });
 });
 
