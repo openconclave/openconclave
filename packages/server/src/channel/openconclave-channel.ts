@@ -185,8 +185,8 @@ function connectWebSocket() {
 
           const content =
             typeof data.data === "string"
-              ? data.data.slice(0, 500)
-              : JSON.stringify(data.data ?? {}).slice(0, 500);
+              ? data.data
+              : JSON.stringify(data.data ?? {});
 
           await mcp.notification({
             method: "notifications/claude/channel",
