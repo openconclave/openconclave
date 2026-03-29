@@ -384,9 +384,12 @@ export class WorkflowExecutor {
             }
           }
 
-          // Add user message to history (input from previous node)
+          // Always add user message to history (input from previous node)
           if (userMessage) {
             history.push({ role: "user", content: userMessage });
+          } else if (history.length === 0 && workflowContext) {
+            // First turn with no explicit input — use workflow context as first user message
+            history.push({ role: "user", content: workflowContext });
           }
 
           // Build system prompt: agent's instructions + workflow context
@@ -402,16 +405,23 @@ export class WorkflowExecutor {
             systemPrompt: fullSystemPrompt,
           };
 
-          output = await this.executeAgent(runId, nodeId, chatConfig, input, routeTargets, history);
+          const agentResult = await this.executeAgent(runId, nodeId, chatConfig, input, routeTargets, history);
+          output = agentResult.output;
 
-          // Add agent's output as "assistant" turn
-          const agentOutput = typeof output === "string" ? output : JSON.stringify(output);
-          let cleanOutput = agentOutput;
+          // Add agent's output as "assistant" turn — include thinking so agent remembers its reasoning
+          let cleanOutput = typeof output === "string" ? output : JSON.stringify(output);
           try {
-            const parsed = JSON.parse(agentOutput);
-            if (parsed?.__routeTo) cleanOutput = parsed.content ?? agentOutput;
+            const parsed = JSON.parse(cleanOutput);
+            if (parsed?.__routeTo) cleanOutput = parsed.content ?? cleanOutput;
           } catch { /* not JSON */ }
-          history.push({ role: "assistant", content: cleanOutput });
+
+          // Prepend thinking to the assistant turn so agent remembers its own reasoning
+          let assistantContent = cleanOutput;
+          if (agentResult.thinking && agentResult.thinking.length > 0) {
+            const thinkingText = agentResult.thinking.map((t) => t.thinking).join("\n");
+            assistantContent = `[internal reasoning: ${thinkingText}]\n\n${cleanOutput}`;
+          }
+          history.push({ role: "assistant", content: assistantContent });
           conversationHistory.set(nodeId, history);
           break;
         }
@@ -623,7 +633,10 @@ export class WorkflowExecutor {
       throw new AppError(ErrorCode.AGENT_FAILED, `Agent task failed: ${result.error}`);
     }
 
-    return result.output;
+    return {
+      output: result.output,
+      thinking: result.thinking,
+    };
   }
 
   private mapOllamaTools(config: AgentConfig): string[] {
