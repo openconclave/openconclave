@@ -151,33 +151,42 @@ export class WorkflowExecutor {
         const ready: QueueEntry[] = [];
         const waiting: QueueEntry[] = [];
 
+        // Deduplicate: group entries by nodeId, track all triggeredBy sources
+        const byNode = new Map<string, QueueEntry[]>();
         for (const entry of batch) {
-          const incomingEdges = getIncomingEdges(entry.nodeId, edges);
+          const list = byNode.get(entry.nodeId) ?? [];
+          list.push(entry);
+          byNode.set(entry.nodeId, list);
+        }
+
+        for (const [nodeId, entries] of byNode) {
+          const incomingEdges = getIncomingEdges(nodeId, edges);
 
           // Count only edges from nodes that have actually produced output
-          // This handles multiple triggers — only the fired trigger's edge counts
           const activeIncoming = incomingEdges.filter(
-            (e) => nodeOutputs.has(e.source) || e.source === entry.triggeredBy
+            (e) => nodeOutputs.has(e.source) || entries.some((en) => en.triggeredBy === e.source)
           );
           const expectedInputs = activeIncoming.length;
 
           if (expectedInputs <= 1) {
-            // Single active input — ready immediately
-            ready.push(entry);
+            // Single active input — ready immediately (use first entry)
+            ready.push(entries[0]);
           } else {
-            // Multiple active inputs — track arrivals
-            if (!pendingInputs.has(entry.nodeId)) {
-              pendingInputs.set(entry.nodeId, new Map());
+            // Multiple active inputs — track all arrivals from this batch + previous
+            if (!pendingInputs.has(nodeId)) {
+              pendingInputs.set(nodeId, new Map());
             }
-            const inputs = pendingInputs.get(entry.nodeId)!;
-            if (entry.triggeredBy) {
-              inputs.set(entry.triggeredBy, nodeOutputs.get(entry.triggeredBy));
+            const inputs = pendingInputs.get(nodeId)!;
+            for (const entry of entries) {
+              if (entry.triggeredBy) {
+                inputs.set(entry.triggeredBy, nodeOutputs.get(entry.triggeredBy));
+              }
             }
 
             if (inputs.size >= expectedInputs) {
               // All active inputs arrived — ready to execute
-              ready.push(entry);
-              pendingInputs.delete(entry.nodeId);
+              ready.push(entries[0]);
+              pendingInputs.delete(nodeId);
             }
           }
         }
