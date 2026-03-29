@@ -67,6 +67,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
   // Build CLI args — use stream-json to capture thinking blocks
   const args: string[] = [
     "--print",
+    "--verbose",
     "--output-format", "stream-json",
     "--max-thinking-tokens", "31999",
     "--dangerously-skip-permissions",

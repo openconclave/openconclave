@@ -268,20 +268,22 @@ export class WorkflowExecutor {
     const node = nodeMap.get(nodeId);
     if (!node) return undefined;
 
-    // Resolve input
+    // Resolve input — use triggeredBy first, then fan-in only for truly parallel sources
     let input: unknown;
     const incomingEdges = getIncomingEdges(nodeId, edges);
 
-    if (incomingEdges.length > 1) {
-      // Fan-in: collect all inputs as an array
+    if (triggeredBy) {
+      // We know exactly which node triggered us — use its output directly
+      input = nodeOutputs.get(triggeredBy);
+    } else if (incomingEdges.length > 1) {
+      // Fan-in: collect outputs from all predecessors that actually ran
       const inputs: unknown[] = [];
       for (const e of incomingEdges) {
-        const val = nodeOutputs.get(e.source);
-        if (val !== undefined) inputs.push(val);
+        if (nodeOutputs.has(e.source)) {
+          inputs.push(nodeOutputs.get(e.source));
+        }
       }
-      input = inputs;
-    } else if (triggeredBy) {
-      input = nodeOutputs.get(triggeredBy);
+      input = inputs.length === 1 ? inputs[0] : inputs;
     } else if (incomingEdges.length === 1) {
       input = nodeOutputs.get(incomingEdges[0].source);
     }
