@@ -5,6 +5,7 @@ import { WorkflowsPage } from "@/pages/workflows";
 import { WorkflowEditorPage } from "@/pages/workflow-editor";
 import { RunsPage } from "@/pages/runs";
 import { RunDetailPage } from "@/pages/run-detail";
+import { SettingsPage } from "@/pages/settings";
 
 function getPage() {
   const path = window.location.pathname;
@@ -13,6 +14,7 @@ function getPage() {
   if (path.startsWith("/workflows/")) return <WorkflowEditorPage />;
   if (path === "/runs") return <RunsPage />;
   if (path.startsWith("/runs/")) return <RunDetailPage />;
+  if (path === "/settings") return <SettingsPage />;
   return <DashboardPage />;
 }
 

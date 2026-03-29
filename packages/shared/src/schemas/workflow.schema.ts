@@ -1,10 +1,11 @@
 import { z } from "zod";
 
 export const triggerConfigSchema = z.object({
-  type: z.enum(["manual", "cron", "webhook", "channel"]),
+  type: z.enum(["manual", "cron", "webhook", "channel", "telegram"]),
   prompt: z.string().optional(),
   cron: z.string().optional(),
   webhookPath: z.string().optional(),
+  chatId: z.string().optional(),
 });
 
 export const agentConfigSchema = z.object({
@@ -29,7 +30,8 @@ export const transformConfigSchema = z.object({
 });
 
 export const outputConfigSchema = z.object({
-  type: z.enum(["webhook", "log", "file", "notification", "claude-code"]),
+  type: z.enum(["webhook", "log", "file", "notification", "claude-code", "telegram"]),
+  chatId: z.string().optional(),
   config: z.record(z.unknown()),
 });
 

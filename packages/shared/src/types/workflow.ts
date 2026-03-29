@@ -1,10 +1,11 @@
 export type NodeType = "trigger" | "agent" | "condition" | "transform" | "output";
 
 export type TriggerConfig = {
-  type: "manual" | "cron" | "webhook" | "channel";
+  type: "manual" | "cron" | "webhook" | "channel" | "telegram";
   prompt?: string;
   cron?: string;
   webhookPath?: string;
+  chatId?: string;
 };
 
 export type AgentEngine = "claude" | "ollama";
@@ -31,7 +32,8 @@ export type TransformConfig = {
 };
 
 export type OutputConfig = {
-  type: "webhook" | "log" | "file" | "notification" | "claude-code";
+  type: "webhook" | "log" | "file" | "notification" | "claude-code" | "telegram";
+  chatId?: string;
   config: Record<string, unknown>;
 };
 

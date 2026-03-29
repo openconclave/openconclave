@@ -1,7 +1,7 @@
 import { nanoid } from "nanoid";
 import { eq } from "drizzle-orm";
 import { db } from "../db/client";
-import { runs, agentTasks, runEvents } from "../db/schema";
+import { runs, agentTasks, runEvents, settings } from "../db/schema";
 import { agentPool } from "../agent/pool";
 import { runOllamaAgent } from "../agent/ollama";
 import { getIncomingEdges, getOutgoingEdges } from "./graph";
@@ -37,7 +37,8 @@ export class WorkflowExecutor {
 
   async execute(
     workflow: WorkflowDefinition,
-    triggerPayload?: unknown
+    triggerPayload?: unknown,
+    triggerNodeId?: string
   ): Promise<string> {
     const runId = nanoid();
     const now = new Date().toISOString();
@@ -55,7 +56,7 @@ export class WorkflowExecutor {
     this.emit({ type: "run:started", runId });
 
     // Execute asynchronously
-    this.executeGraph(runId, workflow, triggerPayload).catch((err) => {
+    this.executeGraph(runId, workflow, triggerPayload, triggerNodeId).catch((err) => {
       console.error(`Run ${runId} failed:`, err);
     });
 
@@ -65,20 +66,27 @@ export class WorkflowExecutor {
   private async executeGraph(
     runId: string,
     workflow: WorkflowDefinition,
-    triggerPayload?: unknown
+    triggerPayload?: unknown,
+    triggerNodeId?: string
   ) {
     const { nodes, edges } = workflow;
     const nodeMap = new Map(nodes.map((n) => [n.id, n]));
     const nodeOutputs = new Map<string, unknown>();
 
     try {
-      // Find entry points (nodes with no incoming edges)
-      const entryNodes = nodes.filter(
-        (n) => getIncomingEdges(n.id, edges).length === 0
-      );
+      // Find entry point — use specific trigger node if provided, otherwise all entry nodes
+      let entryNodes: WorkflowNode[];
+      if (triggerNodeId) {
+        const triggerNode = nodes.find((n) => n.id === triggerNodeId);
+        entryNodes = triggerNode ? [triggerNode] : [];
+      } else {
+        entryNodes = nodes.filter(
+          (n) => getIncomingEdges(n.id, edges).length === 0
+        );
+      }
 
       if (entryNodes.length === 0) {
-        throw new Error("No entry nodes found (need at least one node with no incoming edges)");
+        throw new Error("No entry nodes found");
       }
 
       // Walk the graph starting from entry nodes
@@ -216,6 +224,8 @@ export class WorkflowExecutor {
           output = input;
           if (outputConfig.type === "claude-code") {
             this.emit({ type: "channel:output", runId, nodeId, data: output });
+          } else if (outputConfig.type === "telegram") {
+            await this.sendTelegram(outputConfig.chatId, output);
           } else {
             console.log(`[Output: ${node.data.label}]`, JSON.stringify(input, null, 2));
           }
@@ -381,6 +391,30 @@ export class WorkflowExecutor {
       return JSON.parse(stdout.trim());
     } catch {
       return stdout.trim();
+    }
+  }
+
+  private async sendTelegram(chatId: string | undefined, data: unknown) {
+    const tokenResult = await db.select().from(settings).where(eq(settings.key, "telegram_bot_token"));
+    const token = tokenResult[0]?.value;
+    if (!token) {
+      console.error("[Output: Telegram] No bot token configured in Settings");
+      return;
+    }
+    if (!chatId) {
+      console.error("[Output: Telegram] No chat ID configured on output node");
+      return;
+    }
+
+    const text = typeof data === "string" ? data : JSON.stringify(data, null, 2);
+    try {
+      await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: chatId, text }),
+      });
+    } catch (err: any) {
+      console.error("[Output: Telegram] Send failed:", err.message);
     }
   }
 

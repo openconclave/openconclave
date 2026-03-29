@@ -86,8 +86,23 @@ function TriggerFields({ nodeId, config }: { nodeId: string; config: TriggerConf
           <option value="cron">Cron</option>
           <option value="webhook">Webhook</option>
           <option value="channel">Channel (Claude Code)</option>
+          <option value="telegram">Telegram</option>
         </select>
       </Field>
+      {config.type === "telegram" && (
+        <Field label="Chat ID">
+          <input
+            type="text"
+            value={config.chatId ?? ""}
+            onChange={(e) => update({ chatId: e.target.value })}
+            placeholder="1470461098"
+            className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm font-mono"
+          />
+          <p className="mt-1 text-[10px] text-muted-foreground">
+            Messages from this chat will trigger the workflow. The message text becomes the input.
+          </p>
+        </Field>
+      )}
       {config.type === "cron" && (
         <Field label="Cron Expression">
           <input
@@ -328,11 +343,26 @@ function OutputFields({ nodeId, config }: { nodeId: string; config: OutputConfig
         <option value="file">File</option>
         <option value="notification">Notification</option>
         <option value="claude-code">Claude Code (channel)</option>
+        <option value="telegram">Telegram</option>
       </select>
       {config.type === "claude-code" && (
         <p className="mt-2 text-[10px] text-muted-foreground">
           Output will be pushed to any connected Claude Code session via the OpenConclave channel.
         </p>
+      )}
+      {config.type === "telegram" && (
+        <>
+          <input
+            type="text"
+            value={config.chatId ?? ""}
+            onChange={(e) => update({ chatId: e.target.value })}
+            placeholder="Chat ID"
+            className="mt-2 w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm font-mono"
+          />
+          <p className="mt-1 text-[10px] text-muted-foreground">
+            Send output to this Telegram chat. Get your ID from /chatid on the bot.
+          </p>
+        </>
       )}
     </Field>
   );

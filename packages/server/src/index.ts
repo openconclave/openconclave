@@ -11,8 +11,9 @@ import { WorkflowExecutor } from "./engine/executor";
 import { CronScheduler } from "./engine/scheduler";
 import { agentPool } from "./agent/pool";
 import { checkOllama } from "./agent/ollama";
+import { TelegramTrigger } from "./triggers/telegram";
 import { db } from "./db/client";
-import { workflows, runs, agentTasks } from "./db/schema";
+import { workflows, runs, agentTasks, settings } from "./db/schema";
 import { sql, eq } from "drizzle-orm";
 
 // Auto-create tables on first run
@@ -73,6 +74,12 @@ db.run(sql`CREATE TABLE IF NOT EXISTS mcp_servers (
   created_at TEXT NOT NULL
 )`);
 
+db.run(sql`CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+)`);
+
 const app = new Hono();
 
 app.use("*", cors());
@@ -90,6 +97,26 @@ app.get("/api/dashboard", async (c) => {
     recentRuns: allRuns.slice(0, 20),
     agentTasks: allTasks.slice(0, 20),
   });
+});
+
+// Settings API
+app.get("/api/settings", async (c) => {
+  const all = await db.select().from(settings);
+  const obj: Record<string, string> = {};
+  for (const s of all) obj[s.key] = s.value;
+  return c.json(obj);
+});
+
+app.put("/api/settings", async (c) => {
+  const body = await c.req.json() as Record<string, string>;
+  const now = new Date().toISOString();
+  for (const [key, value] of Object.entries(body)) {
+    await db
+      .insert(settings)
+      .values({ key, value, updatedAt: now })
+      .onConflictDoUpdate({ target: settings.key, set: { value, updatedAt: now } });
+  }
+  return c.json({ ok: true });
 });
 
 app.get("/api/ollama/status", async (c) => {
@@ -119,7 +146,12 @@ app.post("/api/workflows/:id/run", async (c) => {
 
   const body = await c.req.json().catch(() => ({}));
   const definition = wf[0].definition as any;
-  const runId = await executor.execute(definition, body.payload);
+
+  // Find the first trigger node to use as entry point
+  const triggerNode = (definition.nodes ?? []).find(
+    (n: any) => n.data?.type === "trigger"
+  );
+  const runId = await executor.execute(definition, body.payload, triggerNode?.id);
 
   return c.json({ runId, status: "running" }, 201);
 });
@@ -149,6 +181,29 @@ app.post("/mcp/messages", async (c) => {
   return c.json({ ok: true });
 });
 
+// Telegram trigger — called when a Telegram message arrives
+app.post("/api/triggers/telegram", async (c) => {
+  const body = await c.req.json() as { chatId: string; message: string };
+  const allWorkflows = await db.select().from(workflows);
+
+  const triggered: string[] = [];
+  for (const wf of allWorkflows) {
+    if (!wf.enabled) continue;
+    const def = wf.definition as any;
+    for (const node of def.nodes ?? []) {
+      if (node.data?.type === "trigger" && node.data?.config?.type === "telegram") {
+        const triggerChatId = node.data.config.chatId;
+        if (triggerChatId === body.chatId || !triggerChatId) {
+          const runId = await executor.execute(def, body.message);
+          triggered.push(runId);
+        }
+      }
+    }
+  }
+
+  return c.json({ triggered });
+});
+
 _server = Bun.serve({
   port: 4000,
   fetch(req, server) {
@@ -174,3 +229,12 @@ console.log(`🔮 OpenConclave server running at http://localhost:${_server.port
 // Start cron scheduler
 const scheduler = new CronScheduler(executor);
 scheduler.start();
+
+// Start Telegram trigger polling
+const telegramTrigger = new TelegramTrigger(executor);
+telegramTrigger.start();
+
+app.post("/api/telegram/restart", async (c) => {
+  await telegramTrigger.restart();
+  return c.json({ ok: true });
+});

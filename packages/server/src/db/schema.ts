@@ -49,6 +49,12 @@ export const runEvents = sqliteTable("run_events", {
   createdAt: text("created_at").notNull(),
 });
 
+export const settings = sqliteTable("settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
 export const mcpServers = sqliteTable("mcp_servers", {
   name: text("name").primaryKey(),
   type: text("type").notNull(),

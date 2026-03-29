@@ -6,6 +6,7 @@ import type { WorkflowDefinition, WorkflowNode, TriggerConfig } from "@openconcl
 
 type ScheduledJob = {
   workflowId: string;
+  triggerNodeId: string;
   cron: string;
   nextRun: Date;
   enabled: boolean;
@@ -120,6 +121,7 @@ export class CronScheduler {
               if (nextRun) {
                 this.jobs.set(wf.id, {
                   workflowId: wf.id,
+                  triggerNodeId: node.id,
                   cron: config.cron,
                   nextRun,
                   enabled: true,
@@ -160,7 +162,7 @@ export class CronScheduler {
         }
 
         const def = wf[0].definition as unknown as WorkflowDefinition;
-        await this.executor.execute(def, { cronTrigger: true, scheduledAt: now.toISOString() });
+        await this.executor.execute(def, { cronTrigger: true, scheduledAt: now.toISOString() }, job.triggerNodeId);
       } catch (err: any) {
         console.error(`⏰ Failed to trigger workflow ${id}:`, err.message);
       }
