@@ -1,4 +1,4 @@
-import { Zap, Cpu, GitFork, Code, Combine, Send } from "lucide-react";
+import { Zap, Cpu, GitFork, Code, Combine, MessageCircleQuestion, Send } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { NodeType } from "@openconclave/shared";
 
@@ -14,6 +14,7 @@ const nodeTypes: {
   { type: "condition", label: "Condition", icon: GitFork, color: "bg-node-condition", description: "Branch logic" },
   { type: "transform", label: "Code", icon: Code, color: "bg-node-transform", description: "Run Python/Node/Bash" },
   { type: "merge", label: "Merge", icon: Combine, color: "bg-info", description: "Combine all inputs" },
+  { type: "prompt", label: "Prompt", icon: MessageCircleQuestion, color: "bg-warning", description: "Ask & wait for answer" },
   { type: "output", label: "Output", icon: Send, color: "bg-node-output", description: "Send result" },
 ];
 
@@ -24,6 +25,7 @@ function getDefaultConfig(type: NodeType) {
     case "condition": return { expression: "" };
     case "transform": return { runtime: "python", code: "" };
     case "merge": return {};
+    case "prompt": return { question: "" };
     case "output": return { type: "log", config: {} };
   }
 }

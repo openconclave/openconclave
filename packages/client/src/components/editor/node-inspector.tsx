@@ -8,6 +8,7 @@ import type {
   TriggerConfig,
   ConditionConfig,
   CodeConfig,
+  PromptConfig,
   OutputConfig,
 } from "@openconclave/shared";
 
@@ -63,6 +64,9 @@ export function NodeInspector() {
         )}
         {data.type === "transform" && (
           <CodeFields nodeId={selectedNode.id} config={data.config as CodeConfig} />
+        )}
+        {data.type === "prompt" && (
+          <PromptFields nodeId={selectedNode.id} config={data.config as PromptConfig} />
         )}
         {data.type === "merge" && (
           <p className="text-xs text-muted-foreground">
@@ -293,6 +297,27 @@ function CodeFields({ nodeId, config }: { nodeId: string; config: CodeConfig }) 
 }
 
 // ── Output ───────────────────────────────────────────────────
+
+function PromptFields({ nodeId, config }: { nodeId: string; config: PromptConfig }) {
+  const updateNodeConfig = useWorkflowStore((s) => s.updateNodeConfig);
+
+  return (
+    <>
+      <Field label="Question">
+        <textarea
+          value={config.question ?? ""}
+          onChange={(e) => updateNodeConfig(nodeId, { question: e.target.value })}
+          placeholder="What should the workflow ask? e.g., 'Should I proceed with deployment?'"
+          rows={3}
+          className={`${INPUT_CLASS} resize-none`}
+        />
+      </Field>
+      <p className="text-[10px] text-muted-foreground px-1">
+        Pauses the workflow and sends this question via the channel. The workflow resumes when a response is received. Input from the previous node is included as context.
+      </p>
+    </>
+  );
+}
 
 function OutputFields({ nodeId, config }: { nodeId: string; config: OutputConfig }) {
   const updateNodeConfig = useWorkflowStore((s) => s.updateNodeConfig);

@@ -8,6 +8,7 @@ import { agentPool } from "../agent/pool";
 import { runOllamaAgent } from "../agent/ollama";
 import { getIncomingEdges, getOutgoingEdges } from "./graph";
 import { evaluateExpression } from "../lib/expression";
+import { registerPrompt } from "./prompt-registry";
 import { logger } from "../lib/logger";
 import {
   AppError,
@@ -22,6 +23,7 @@ import type {
   ConditionConfig,
   CodeConfig,
   TriggerConfig,
+  PromptConfig,
   OutputConfig,
 } from "@openconclave/shared";
 
@@ -326,6 +328,26 @@ export class WorkflowExecutor {
             if (val !== undefined) merged[key] = val;
           }
           output = merged;
+          break;
+        }
+
+        case "prompt": {
+          const config = node.data.config as PromptConfig;
+          // Build the question — include input context if available
+          const question = input
+            ? `${config.question}\n\nContext:\n${typeof input === "string" ? input : JSON.stringify(input, null, 2)}`
+            : config.question;
+
+          // Send question via channel and wait for response
+          this.emit({
+            type: "prompt:question",
+            runId,
+            nodeId,
+            data: { question, waitingForResponse: true },
+          });
+
+          logger.info(`Prompt node waiting for response`, { runId, nodeId });
+          output = await registerPrompt(runId, nodeId, question, input);
           break;
         }
 

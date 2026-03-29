@@ -22,18 +22,20 @@ const mcp = new Server(
     },
     instructions: [
       'Events from OpenConclave arrive as <channel source="openconclave" event_type="..." ...>.',
-      'These are workflow output events from "Claude Code (channel)" output nodes.',
       "",
       "Event types:",
-      '- channel:output — a workflow produced output for you. Contains the result data.',
+      "- channel:output — a workflow produced output for you. Read and present to user.",
+      "- prompt:question — a workflow is asking YOU a question and waiting for your response. You MUST respond using oc_respond with the run_id and node_id from the event attributes. The workflow is paused until you respond.",
       "",
-      "You can interact with OpenConclave using these tools:",
+      "Tools:",
       "- oc_list_workflows: see all workflows",
-      '- oc_trigger_workflow: start a workflow run. Pass workflow_id and optional payload. Workflows with "channel" trigger type are designed to be triggered from here — the payload becomes the input for the first agent.',
-      "- oc_get_run: get details of a specific run",
+      "- oc_trigger_workflow: start a workflow run with optional payload",
+      "- oc_get_run: get run details",
       "- oc_list_runs: list recent runs",
+      "- oc_respond: respond to a pending prompt question (REQUIRED when you receive prompt:question events)",
+      "- oc_pending_prompts: list all prompts waiting for response",
       "",
-      "When you receive a channel:output event, it means a workflow finished and sent you its result. Read the content and act on it or present it to the user.",
+      "IMPORTANT: When you receive a prompt:question event, respond immediately using oc_respond. The workflow is blocked until you do.",
     ].join("\n"),
   }
 );
@@ -93,6 +95,24 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
         },
       },
     },
+    {
+      name: "oc_respond",
+      description: "Respond to a pending prompt question from a workflow. When a workflow has a Prompt node, it pauses and asks a question via the channel. Use this tool to send your response back so the workflow can continue.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          run_id: { type: "string", description: "The run ID" },
+          node_id: { type: "string", description: "The prompt node ID" },
+          response: { type: "string", description: "Your response to the question" },
+        },
+        required: ["run_id", "node_id", "response"],
+      },
+    },
+    {
+      name: "oc_pending_prompts",
+      description: "List all pending prompt questions waiting for responses",
+      inputSchema: { type: "object", properties: {} },
+    },
   ],
 }));
 
@@ -146,6 +166,17 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       return { content: [{ type: "text", text: JSON.stringify(summary, null, 2) }] };
     }
 
+    case "oc_respond": {
+      const { run_id, node_id, response } = args as { run_id: string; node_id: string; response: string };
+      const data = await ocApi("/prompts/respond", "POST", { runId: run_id, nodeId: node_id, response });
+      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    }
+
+    case "oc_pending_prompts": {
+      const data = await ocApi("/prompts/pending");
+      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    }
+
     default:
       throw new Error(`Unknown tool: ${name}`);
   }
@@ -171,9 +202,9 @@ function connectWebSocket() {
         const data = JSON.parse(event.data.toString());
         const eventType = data.type as string;
 
-        // Only forward claude-code output events — nothing else buzzes the session
+        // Forward output events and prompt questions
         if (
-          eventType === "channel:output"
+          eventType === "channel:output" || eventType === "prompt:question"
         ) {
           const meta: Record<string, string> = {
             event_type: eventType,

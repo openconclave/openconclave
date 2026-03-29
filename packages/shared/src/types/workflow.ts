@@ -48,7 +48,10 @@ export interface CodeConfig {
 
 export interface MergeConfig {
   // Merge uses source node labels as keys by default
-  // No config needed — it's automatic
+}
+
+export interface PromptConfig {
+  question: string;
 }
 
 export interface OutputConfig {
@@ -66,6 +69,7 @@ export type WorkflowNodeConfig =
   | ConditionConfig
   | CodeConfig
   | MergeConfig
+  | PromptConfig
   | OutputConfig;
 
 // ── Node Data ────────────────────────────────────────────────

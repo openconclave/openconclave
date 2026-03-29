@@ -23,6 +23,7 @@ const EDGE_COLORS: Record<string, string> = {
   condition: "oklch(0.70 0.16 80)",
   transform: "oklch(0.65 0.15 300)",
   merge: "oklch(0.65 0.15 230)",
+  prompt: "oklch(0.70 0.16 80)",
   output: "oklch(0.60 0.15 20)",
 };
 

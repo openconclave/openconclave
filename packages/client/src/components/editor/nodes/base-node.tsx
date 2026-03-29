@@ -9,6 +9,7 @@ const nodeColors: Record<string, string> = {
   condition: "border-node-condition",
   transform: "border-node-transform",
   merge: "border-info",
+  prompt: "border-warning",
   output: "border-node-output",
 };
 
@@ -18,6 +19,7 @@ const nodeBgDots: Record<string, string> = {
   condition: "bg-node-condition",
   transform: "bg-node-transform",
   merge: "bg-info",
+  prompt: "bg-warning",
   output: "bg-node-output",
 };
 

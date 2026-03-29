@@ -7,6 +7,7 @@ import { errorHandler } from "./lib/errors";
 import { db } from "./db/client";
 import { runMigrations } from "./db/migrate";
 import { workflows, runs, agentTasks, runEvents, settings } from "./db/schema";
+import { respondToPrompt, getPendingPrompts } from "./engine/prompt-registry";
 import { workflowRoutes } from "./routes/workflows";
 import { runRoutes } from "./routes/runs";
 import { agentRoutes } from "./routes/agents";
@@ -136,6 +137,18 @@ app.post("/api/workflows/:id/run", async (c) => {
 });
 
 app.get("/api/agents/pool", (c) => c.json(agentPool.stats));
+
+// ── Prompt (Human/Claude-in-the-loop) ────────────────────────
+app.get("/api/prompts/pending", (c) => {
+  return c.json({ prompts: getPendingPrompts() });
+});
+
+app.post("/api/prompts/respond", async (c) => {
+  const body = (await c.req.json()) as { runId: string; nodeId: string; response: string };
+  const ok = respondToPrompt(body.runId, body.nodeId, body.response);
+  if (!ok) return c.json({ error: "No pending prompt found" }, 404);
+  return c.json({ ok: true });
+});
 
 // ── Telegram Trigger API ─────────────────────────────────────
 app.post("/api/triggers/telegram", async (c) => {
