@@ -19,6 +19,7 @@ export interface AgentResult {
   durationMs: number;
   thinking?: ThinkingBlock[];
   routeTo?: string;
+  sessionId?: string;
 }
 
 export interface RouteTarget {
@@ -30,6 +31,7 @@ export interface RouteTarget {
 export type AgentRunOptions = {
   config: AgentConfig;
   routeTargets?: RouteTarget[];
+  sessionId?: string;
   conversationHistory?: Array<{ role: string; content: string }>;
   input?: unknown;
   cwd?: string;
@@ -67,18 +69,9 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
   const { config, input, cwd, abortSignal, onOutput } = options;
   const startTime = Date.now();
 
-  // Build the prompt from conversation history or input
-  const history = options.conversationHistory;
+  // Build the prompt — just the current user message
   let prompt: string;
-
-  if (history && history.length > 0) {
-    // Build prompt with full conversation context
-    const historyText = history
-      .map((h) => `${h.role === "user" ? "User" : "Assistant"}: ${h.content}`)
-      .join("\n\n");
-    prompt = historyText;
-  } else if (input !== undefined) {
-    // Input from previous node IS the user message
+  if (input !== undefined) {
     prompt = typeof input === "string" ? input : JSON.stringify(input, null, 2);
   } else {
     prompt = "Start";
@@ -92,6 +85,11 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
     "--max-thinking-tokens", "31999",
     "--dangerously-skip-permissions",
   ];
+
+  // Resume existing session for multi-turn conversations
+  if (options.sessionId) {
+    args.push("--resume", options.sessionId);
+  }
 
   if (config.model && modelMap[config.model]) {
     args.push("--model", modelMap[config.model]);
@@ -249,6 +247,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
     // Parse the result message (last line with type "result")
     let parsedOutput = "";
     let costUsd: number | undefined;
+    let sessionId: string | undefined;
 
     for (const line of lines) {
       try {
@@ -256,6 +255,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
         if (msg.type === "result") {
           parsedOutput = typeof msg.result === "string" ? msg.result : JSON.stringify(msg.result);
           costUsd = msg.total_cost_usd;
+          sessionId = msg.session_id;
         }
       } catch {
         // skip
@@ -293,6 +293,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
       durationMs,
       thinking: thinkingBlocks.length > 0 ? thinkingBlocks : undefined,
       routeTo,
+      sessionId,
     };
   } catch (err: any) {
     // Clean up temp files on error

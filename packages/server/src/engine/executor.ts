@@ -116,6 +116,8 @@ export class WorkflowExecutor {
     const nodeOutputs = new Map<string, unknown>();
     // Conversation history per agent: [{role: "user"|"assistant", content}]
     const conversationHistory = new Map<string, Array<{ role: string; content: string }>>();
+    // Claude CLI session IDs per agent — enables --resume for multi-turn
+    const agentSessions = new Map<string, string>();
     // Workflow context from trigger — injected into every agent's system prompt
     const workflowContext = triggerPayload
       ? (typeof triggerPayload === "string" ? triggerPayload : JSON.stringify(triggerPayload))
@@ -218,6 +220,7 @@ export class WorkflowExecutor {
               edges,
               nodeOutputs,
               conversationHistory,
+              agentSessions,
               workflowContext,
               triggerPayload,
               entry.triggeredBy
@@ -317,6 +320,7 @@ export class WorkflowExecutor {
     edges: WorkflowEdge[],
     nodeOutputs: Map<string, unknown>,
     conversationHistory: Map<string, Array<{ role: string; content: string }>>,
+    agentSessions: Map<string, string>,
     workflowContext: string | null,
     triggerPayload?: unknown,
     triggeredBy?: string | null
@@ -399,13 +403,14 @@ export class WorkflowExecutor {
           if (workflowContext) systemParts.push(`\nWorkflow context: ${workflowContext}`);
           const fullSystemPrompt = systemParts.join("\n\n");
 
-          // Execute with proper chat model: system + history
+          // Execute with proper chat model: system + session resume
           const chatConfig = {
             ...agentConfig,
             systemPrompt: fullSystemPrompt,
           };
 
-          const agentResult = await this.executeAgent(runId, nodeId, chatConfig, input, routeTargets, history);
+          const existingSessionId = agentSessions.get(nodeId);
+          const agentResult = await this.executeAgent(runId, nodeId, chatConfig, input, routeTargets, history, existingSessionId);
           output = agentResult.output;
 
           // Add agent's output as "assistant" turn — include thinking so agent remembers its reasoning
@@ -423,6 +428,11 @@ export class WorkflowExecutor {
           }
           history.push({ role: "assistant", content: assistantContent });
           conversationHistory.set(nodeId, history);
+
+          // Save Claude session ID for resume on next turn
+          if (agentResult.sessionId) {
+            agentSessions.set(nodeId, agentResult.sessionId);
+          }
           break;
         }
 
@@ -497,8 +507,9 @@ export class WorkflowExecutor {
     config: AgentConfig,
     input: unknown,
     routeTargets?: RouteTarget[],
-    conversationHistory?: Array<{ role: string; content: string }>
-  ): Promise<string> {
+    conversationHistory?: Array<{ role: string; content: string }>,
+    sessionId?: string
+  ): Promise<{ output: string; thinking?: ThinkingBlock[]; sessionId?: string }> {
     const taskId = nanoid();
     const now = new Date().toISOString();
     const engine = config.engine ?? "claude";
@@ -573,7 +584,7 @@ export class WorkflowExecutor {
           config: augmentedConfig,
           input,
           routeTargets,
-          conversationHistory,
+          sessionId,
           onOutput: (chunk) => {
             this.emit({ type: "agent:output", runId, nodeId, data: { taskId, chunk } });
           },
@@ -636,6 +647,7 @@ export class WorkflowExecutor {
     return {
       output: result.output,
       thinking: result.thinking,
+      sessionId: result.sessionId,
     };
   }
 
