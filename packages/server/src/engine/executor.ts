@@ -567,11 +567,9 @@ export class WorkflowExecutor {
           ollamaTools.push("openconclave_next");
         }
 
-        // Session file for Ollama — same pattern as Claude's --resume
-        let ollamaSessionFile: string | undefined;
-        if (sessionId) {
-          ollamaSessionFile = sessionId; // For Ollama, sessionId IS the file path
-        }
+        // Session file for Ollama — always create path, reuse on subsequent turns
+        const tmpDir = join(PROJECT_ROOT, ".openconclave-tmp", "sessions");
+        const ollamaSessionFile = sessionId ?? join(tmpDir, `${runId}-${nodeId}.jsonl`);
 
         result = await runOllamaAgent({
           model: modelName,
@@ -587,12 +585,8 @@ export class WorkflowExecutor {
           },
         });
 
-        // Store session file path as "sessionId" for next turn
-        if (!sessionId) {
-          const tmpDir = join(PROJECT_ROOT, ".openconclave-tmp", "sessions");
-          const sessionPath = join(tmpDir, `${runId}-${nodeId}.jsonl`);
-          result.sessionId = sessionPath;
-        }
+        // Store session file path for next turn
+        result.sessionId = ollamaSessionFile;
       } else {
         result = await agentPool.submit(taskId, {
           config: augmentedConfig,
