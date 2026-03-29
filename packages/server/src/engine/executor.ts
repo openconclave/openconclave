@@ -450,14 +450,24 @@ export class WorkflowExecutor {
       const routeList = routeTargets
         .map((r) => `  - "${r.nodeId}" → ${r.label} (${r.type} node)`)
         .join("\n");
-      const routeInstruction = [
-        "\n\n## Routing",
-        "This agent has multiple possible next steps. You MUST call openconclave_next to choose where to route.",
-        "Available routes:",
-        routeList,
-        'Call: openconclave_next(node_id="<chosen node id>", content="<your output message>")',
-        "You MUST call openconclave_next exactly once. Do not skip it.",
-      ].join("\n");
+      const isOllama = (config.engine ?? "claude") === "ollama";
+      const routeInstruction = isOllama
+        ? [
+            "\n\n## Routing",
+            "You have multiple possible next steps. Call the openconclave_next tool to choose where to route.",
+            "Available routes:",
+            routeList,
+            "Call openconclave_next with node_id and content. You MUST call it exactly once.",
+          ].join("\n")
+        : [
+            "\n\n## Routing",
+            "You have multiple possible next steps. You MUST include exactly one routing line at the END of your response.",
+            "Available routes:",
+            routeList,
+            "End your response with EXACTLY one of these lines (no other text after it):",
+            ...routeTargets.map((r) => `  [[ROUTE:${r.nodeId}]]`),
+            "Do NOT skip the routing line. It MUST be the last line of your response.",
+          ].join("\n");
       augmentedConfig.systemPrompt = (config.systemPrompt ?? "") + routeInstruction;
     }
 
@@ -590,7 +600,13 @@ export class WorkflowExecutor {
   private parseRoute(output: string, targets: RouteTarget[]): string | null {
     const validIds = new Set(targets.map((t) => t.nodeId));
 
-    // Check for ROUTE:nodeId:content format (from Ollama openconclave_next tool)
+    // Check for [[ROUTE:nodeId]] marker (Claude Code)
+    const markerMatch = /\[\[ROUTE:([^\]]+)\]\]/.exec(output);
+    if (markerMatch?.[1] && validIds.has(markerMatch[1])) {
+      return markerMatch[1];
+    }
+
+    // Check for ROUTE:nodeId:content format (Ollama openconclave_next tool)
     const routeMatch = /ROUTE:([^:]+):/.exec(output);
     if (routeMatch?.[1] && validIds.has(routeMatch[1])) {
       return routeMatch[1];
