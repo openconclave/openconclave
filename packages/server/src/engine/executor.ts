@@ -168,11 +168,18 @@ export class WorkflowExecutor {
           );
           const expectedInputs = activeIncoming.length;
 
+          logger.debug(`Fan-in check: ${nodeId}`, {
+            entries: entries.length,
+            incomingEdges: incomingEdges.length,
+            activeIncoming: activeIncoming.length,
+            expectedInputs,
+            triggeredBy: entries.map((e) => e.triggeredBy),
+            nodeOutputKeys: [...nodeOutputs.keys()],
+          });
+
           if (expectedInputs <= 1) {
-            // Single active input — ready immediately (use first entry)
             ready.push(entries[0]);
           } else {
-            // Multiple active inputs — track all arrivals from this batch + previous
             if (!pendingInputs.has(nodeId)) {
               pendingInputs.set(nodeId, new Map());
             }
@@ -183,16 +190,32 @@ export class WorkflowExecutor {
               }
             }
 
+            logger.debug(`Fan-in pending: ${nodeId}`, {
+              inputsSize: inputs.size,
+              expectedInputs,
+              ready: inputs.size >= expectedInputs,
+            });
+
             if (inputs.size >= expectedInputs) {
-              // All active inputs arrived — ready to execute
               ready.push(entries[0]);
               pendingInputs.delete(nodeId);
             }
           }
         }
 
-        if (ready.length === 0 && waiting.length === 0) {
-          // Nothing ready and nothing waiting — we're stuck or done
+        logger.debug("Batch result", {
+          readyCount: ready.length,
+          pendingNodes: [...pendingInputs.keys()],
+        });
+
+        if (ready.length === 0 && pendingInputs.size === 0) {
+          // Nothing ready and nothing pending — done
+          break;
+        }
+
+        if (ready.length === 0) {
+          // Nodes are pending but nothing is ready — stuck, shouldn't happen
+          logger.warn("Fan-in deadlock detected", { pendingNodes: [...pendingInputs.keys()] });
           break;
         }
 
