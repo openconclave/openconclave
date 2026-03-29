@@ -10,7 +10,7 @@ export function AgentNode(props: NodeProps) {
 
   return (
     <BaseNode {...props} data={data} icon={Cpu}>
-      <p className="truncate">{config.prompt || "Configure prompt..."}</p>
+      <p className="truncate">{config.systemPrompt || "No instructions"}</p>
       <p className="mt-0.5 text-[10px] opacity-60">
         {config.engine === "ollama" ? config.ollamaModel ?? "ollama" : config.model ?? "sonnet"}
       </p>

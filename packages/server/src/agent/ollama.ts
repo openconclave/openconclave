@@ -255,9 +255,9 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
   } else if (input !== undefined) {
     // First turn — input is the user message
     const inputStr = typeof input === "string" ? input : JSON.stringify(input, null, 2);
-    messages.push({ role: "user", content: prompt ? `${prompt}\n\n${inputStr}` : inputStr });
+    messages.push({ role: "user", content: inputStr });
   } else {
-    messages.push({ role: "user", content: prompt });
+    messages.push({ role: "user", content: prompt || "Start" });
   }
 
   // Collect requested built-in tools

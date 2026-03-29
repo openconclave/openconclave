@@ -78,11 +78,10 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
       .join("\n\n");
     prompt = historyText;
   } else if (input !== undefined) {
-    // First turn — input is the user message
-    const inputStr = typeof input === "string" ? input : JSON.stringify(input, null, 2);
-    prompt = config.prompt ? `${config.prompt}\n\n${inputStr}` : inputStr;
+    // Input from previous node IS the user message
+    prompt = typeof input === "string" ? input : JSON.stringify(input, null, 2);
   } else {
-    prompt = config.prompt;
+    prompt = "Start";
   }
 
   // Build CLI args — use stream-json to capture thinking blocks

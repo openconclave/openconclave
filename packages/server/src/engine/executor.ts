@@ -393,7 +393,6 @@ export class WorkflowExecutor {
           const agentConfig = node.data.config as AgentConfig;
           const systemParts: string[] = [];
           if (agentConfig.systemPrompt) systemParts.push(agentConfig.systemPrompt);
-          if (agentConfig.prompt) systemParts.push(agentConfig.prompt);
           if (workflowContext) systemParts.push(`\nWorkflow context: ${workflowContext}`);
           const fullSystemPrompt = systemParts.join("\n\n");
 
@@ -401,7 +400,6 @@ export class WorkflowExecutor {
           const chatConfig = {
             ...agentConfig,
             systemPrompt: fullSystemPrompt,
-            prompt: userMessage ?? agentConfig.prompt, // fallback for first turn with no input
           };
 
           output = await this.executeAgent(runId, nodeId, chatConfig, input, routeTargets, history);
@@ -525,7 +523,7 @@ export class WorkflowExecutor {
       runId,
       nodeId,
       status: "running",
-      prompt: config.prompt,
+      prompt: config.systemPrompt ?? "(no instructions)",
       systemPrompt: augmentedConfig.systemPrompt,
       model: `${engine}/${modelName}`,
       input: input ?? null,
@@ -550,7 +548,7 @@ export class WorkflowExecutor {
 
         result = await runOllamaAgent({
           model: modelName,
-          prompt: attempt === 0 ? augmentedConfig.prompt : `Previous attempt failed: you must call openconclave_next to choose a route. Try again. ${augmentedConfig.prompt}`,
+          prompt: attempt === 0 ? (augmentedConfig.systemPrompt ?? "") : `Previous attempt failed: you must call openconclave_next to choose a route. Try again.`,
           systemPrompt: augmentedConfig.systemPrompt,
           input,
           tools: ollamaTools.length > 0 ? ollamaTools : undefined,

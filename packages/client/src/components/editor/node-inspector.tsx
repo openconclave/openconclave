@@ -184,13 +184,12 @@ function AgentFields({ nodeId, config }: { nodeId: string; config: AgentConfig }
         </select>
       </Field>
 
-      <Field label="Prompt">
-        <textarea value={config.prompt} onChange={(e) => update({ prompt: e.target.value })} placeholder="Describe what this agent should do..." rows={4} className={`${INPUT_CLASS} resize-none`} />
+      <Field label="Instructions (System Prompt)">
+        <textarea value={config.systemPrompt ?? ""} onChange={(e) => update({ systemPrompt: e.target.value })} placeholder="Agent's role and behavior. Input comes from the previous node automatically." rows={4} className={`${INPUT_CLASS} resize-none`} />
       </Field>
-
-      <Field label="System Prompt">
-        <textarea value={config.systemPrompt ?? ""} onChange={(e) => update({ systemPrompt: e.target.value })} placeholder="Optional system instructions..." rows={2} className={`${INPUT_CLASS} resize-none`} />
-      </Field>
+      <p className="text-[10px] text-muted-foreground px-1">
+        The agent receives input from the previous node as a user message. Instructions define the agent's role and behavior.
+      </p>
 
       {engine === "claude" ? (
         <>

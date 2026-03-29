@@ -31,15 +31,14 @@ describe("createWorkflowSchema", () => {
 });
 
 describe("agentConfigSchema", () => {
-  it("validates agent with prompt", () => {
-    const result = agentConfigSchema.safeParse({ prompt: "Say hello" });
+  it("validates agent with system prompt", () => {
+    const result = agentConfigSchema.safeParse({ systemPrompt: "You are helpful" });
     expect(result.success).toBe(true);
   });
 
   it("validates agent with all fields", () => {
     const result = agentConfigSchema.safeParse({
       engine: "ollama",
-      prompt: "Do something",
       systemPrompt: "You are helpful",
       model: "haiku",
       ollamaModel: "qwen3.5:9b",
@@ -51,9 +50,9 @@ describe("agentConfigSchema", () => {
     expect(result.success).toBe(true);
   });
 
-  it("rejects empty prompt", () => {
-    const result = agentConfigSchema.safeParse({ prompt: "" });
-    expect(result.success).toBe(false);
+  it("validates agent with no fields (all optional)", () => {
+    const result = agentConfigSchema.safeParse({});
+    expect(result.success).toBe(true);
   });
 
   it("rejects invalid engine", () => {

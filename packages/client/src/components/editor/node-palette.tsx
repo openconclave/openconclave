@@ -21,7 +21,7 @@ const nodeTypes: {
 function getDefaultConfig(type: NodeType) {
   switch (type) {
     case "trigger": return { type: "manual" };
-    case "agent": return { prompt: "", model: "sonnet" };
+    case "agent": return { model: "sonnet" };
     case "condition": return { expression: "" };
     case "transform": return { runtime: "python", code: "" };
     case "merge": return {};

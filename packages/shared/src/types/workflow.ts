@@ -27,7 +27,6 @@ export interface TriggerConfig {
 
 export interface AgentConfig {
   engine?: AgentEngine;
-  prompt: string;
   systemPrompt?: string;
   model?: string;
   ollamaModel?: string;

@@ -17,7 +17,6 @@ export const triggerConfigSchema = z.object({
 
 export const agentConfigSchema = z.object({
   engine: z.enum(AGENT_ENGINES).optional(),
-  prompt: z.string().min(1),
   systemPrompt: z.string().optional(),
   model: z.string().optional(),
   ollamaModel: z.string().optional(),
