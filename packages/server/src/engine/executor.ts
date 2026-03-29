@@ -153,13 +153,19 @@ export class WorkflowExecutor {
 
         for (const entry of batch) {
           const incomingEdges = getIncomingEdges(entry.nodeId, edges);
-          const expectedInputs = incomingEdges.length;
+
+          // Count only edges from nodes that have actually produced output
+          // This handles multiple triggers — only the fired trigger's edge counts
+          const activeIncoming = incomingEdges.filter(
+            (e) => nodeOutputs.has(e.source) || e.source === entry.triggeredBy
+          );
+          const expectedInputs = activeIncoming.length;
 
           if (expectedInputs <= 1) {
-            // Single input or entry node — ready immediately
+            // Single active input — ready immediately
             ready.push(entry);
           } else {
-            // Multiple inputs — track arrivals
+            // Multiple active inputs — track arrivals
             if (!pendingInputs.has(entry.nodeId)) {
               pendingInputs.set(entry.nodeId, new Map());
             }
@@ -169,11 +175,10 @@ export class WorkflowExecutor {
             }
 
             if (inputs.size >= expectedInputs) {
-              // All inputs arrived — ready to execute
+              // All active inputs arrived — ready to execute
               ready.push(entry);
               pendingInputs.delete(entry.nodeId);
             }
-            // Otherwise stays out of queue — will be re-added when more inputs arrive
           }
         }
 

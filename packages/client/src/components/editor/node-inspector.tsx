@@ -297,9 +297,6 @@ function OutputFields({ nodeId, config }: { nodeId: string; config: OutputConfig
     <Field label="Output Type">
       <select value={config.type} onChange={(e) => update({ type: e.target.value as OutputConfig["type"] })} className={INPUT_CLASS}>
         <option value="log">Log</option>
-        <option value="webhook">Webhook</option>
-        <option value="file">File</option>
-        <option value="notification">Notification</option>
         <option value="claude-code">Claude Code (channel)</option>
         <option value="telegram">Telegram</option>
       </select>

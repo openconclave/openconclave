@@ -16,5 +16,5 @@ export const NODE_TYPES = ["trigger", "agent", "condition", "transform", "output
 export const TRIGGER_TYPES = ["manual", "cron", "webhook", "channel", "telegram"] as const;
 export const AGENT_ENGINES = ["claude", "ollama"] as const;
 export const CODE_RUNTIMES = ["python", "node", "bash"] as const;
-export const OUTPUT_TYPES = ["log", "webhook", "file", "notification", "claude-code", "telegram"] as const;
+export const OUTPUT_TYPES = ["log", "claude-code", "telegram"] as const;
 export const RUN_STATUSES = ["queued", "running", "success", "failure", "cancelled"] as const;
