@@ -8,6 +8,7 @@ import {
   XCircle,
   Clock,
   Loader2,
+  Brain,
   Cpu,
   Zap,
   DollarSign,
@@ -226,6 +227,32 @@ export function RunDetailPage() {
                         </pre>
                       </div>
                     )}
+                    {/* Thinking blocks */}
+                    {(() => {
+                      const thinkingEvent = events.find(
+                        (e) => e.type === "agent:thinking" && (e.data as Record<string, unknown>)?.taskId === task.id
+                      );
+                      if (!thinkingEvent) return null;
+                      const thinkingData = thinkingEvent.data as { thinking: { thinking: string }[] };
+                      return (
+                        <div>
+                          <p className="text-[10px] text-muted-foreground uppercase mb-1 flex items-center gap-1">
+                            <Brain className="h-3 w-3 text-node-transform" />
+                            Thinking
+                          </p>
+                          <div className="space-y-2">
+                            {thinkingData.thinking.map((block, i) => (
+                              <pre
+                                key={i}
+                                className="text-xs bg-node-transform/10 border border-node-transform/20 rounded-md px-3 py-2 overflow-x-auto font-mono whitespace-pre-wrap text-muted-foreground"
+                              >
+                                {block.thinking}
+                              </pre>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
                     {task.output && (
                       <div>
                         <p className="text-[10px] text-muted-foreground uppercase mb-1">Output</p>
@@ -277,7 +304,8 @@ export function RunDetailPage() {
                     )}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="text-xs font-mono font-medium">{event.type}</span>
+                        {event.type === "agent:thinking" && <Brain className="h-3 w-3 text-node-transform shrink-0" />}
+                        <span className={cn("text-xs font-mono font-medium", event.type === "agent:thinking" && "text-node-transform")}>{event.type}</span>
                         {event.nodeId && (
                           <span className="text-[10px] text-muted-foreground font-mono">
                             {event.nodeId}

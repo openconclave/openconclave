@@ -6,13 +6,19 @@ import type { AgentConfig } from "@openconclave/shared";
 // Project root — two levels up from packages/server
 const PROJECT_ROOT = resolve(import.meta.dir, "../../../");
 
-export type AgentResult = {
+export interface ThinkingBlock {
+  thinking: string;
+  signature?: string;
+}
+
+export interface AgentResult {
   success: boolean;
   output: string;
   error?: string;
   costUsd?: number;
   durationMs: number;
-};
+  thinking?: ThinkingBlock[];
+}
 
 export type AgentRunOptions = {
   config: AgentConfig;
@@ -58,10 +64,11 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
     prompt = `## Input from previous step\n\`\`\`json\n${JSON.stringify(input, null, 2)}\n\`\`\`\n\n## Task\n${config.prompt}`;
   }
 
-  // Build CLI args
+  // Build CLI args — use stream-json to capture thinking blocks
   const args: string[] = [
     "--print",
-    "--output-format", "json",
+    "--output-format", "stream-json",
+    "--max-thinking-tokens", "31999",
     "--dangerously-skip-permissions",
   ];
 
@@ -123,18 +130,48 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
       });
     }
 
-    // Collect stdout
-    let stdout = "";
+    // Collect stdout — stream-json emits one JSON object per line
+    const lines: string[] = [];
+    const thinkingBlocks: ThinkingBlock[] = [];
     const reader = proc.stdout.getReader();
     const decoder = new TextDecoder();
+    let buffer = "";
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      const chunk = decoder.decode(value);
-      stdout += chunk;
-      onOutput?.(chunk);
+      buffer += decoder.decode(value);
+
+      // Process complete lines
+      const parts = buffer.split("\n");
+      buffer = parts.pop() ?? "";
+      for (const line of parts) {
+        if (!line.trim()) continue;
+        lines.push(line);
+
+        try {
+          const msg = JSON.parse(line);
+
+          // Capture thinking blocks from assistant messages
+          if (msg.type === "assistant" && Array.isArray(msg.message?.content)) {
+            for (const block of msg.message.content) {
+              if (block.type === "thinking" && block.thinking) {
+                thinkingBlocks.push({
+                  thinking: block.thinking,
+                  signature: block.signature,
+                });
+                onOutput?.(`[thinking: ${block.thinking.slice(0, 100)}...]\n`);
+              }
+            }
+          }
+        } catch {
+          // Not JSON, skip
+        }
+      }
     }
+
+    // Process remaining buffer
+    if (buffer.trim()) lines.push(buffer.trim());
 
     // Collect stderr
     let stderr = "";
@@ -156,26 +193,32 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
     if (exitCode !== 0) {
       return {
         success: false,
-        output: stdout,
+        output: lines.join("\n"),
         error: stderr || `claude exited with code ${exitCode}`,
         durationMs,
+        thinking: thinkingBlocks.length > 0 ? thinkingBlocks : undefined,
       };
     }
 
-    // Try to parse the JSON output to extract result and cost
-    let parsedOutput = stdout;
+    // Parse the result message (last line with type "result")
+    let parsedOutput = "";
     let costUsd: number | undefined;
 
-    try {
-      const json = JSON.parse(stdout);
-      if (json.result !== undefined) {
-        parsedOutput = typeof json.result === "string" ? json.result : JSON.stringify(json.result);
+    for (const line of lines) {
+      try {
+        const msg = JSON.parse(line);
+        if (msg.type === "result") {
+          parsedOutput = typeof msg.result === "string" ? msg.result : JSON.stringify(msg.result);
+          costUsd = msg.total_cost_usd;
+        }
+      } catch {
+        // skip
       }
-      if (json.total_cost_usd !== undefined) {
-        costUsd = json.total_cost_usd;
-      }
-    } catch {
-      // Not valid JSON, use raw output
+    }
+
+    if (!parsedOutput) {
+      // Fallback — try raw join
+      parsedOutput = lines.join("\n");
     }
 
     return {
@@ -183,6 +226,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
       output: parsedOutput,
       costUsd,
       durationMs,
+      thinking: thinkingBlocks.length > 0 ? thinkingBlocks : undefined,
     };
   } catch (err: any) {
     // Clean up temp MCP config on error too

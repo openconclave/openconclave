@@ -397,6 +397,16 @@ export class WorkflowExecutor {
       })
       .where(eq(agentTasks.id, taskId));
 
+    // Emit thinking blocks as separate events for observability
+    if (result.thinking && result.thinking.length > 0) {
+      this.emit({
+        type: "agent:thinking",
+        runId,
+        nodeId,
+        data: { taskId, thinking: result.thinking },
+      });
+    }
+
     this.emit({
       type: "agent:completed",
       runId,

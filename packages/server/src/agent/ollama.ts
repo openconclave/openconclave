@@ -201,12 +201,17 @@ export type OllamaRunOptions = {
   onOutput?: (chunk: string) => void;
 };
 
-export type OllamaResult = {
+export interface ThinkingBlock {
+  thinking: string;
+}
+
+export interface OllamaResult {
   success: boolean;
   output: string;
   error?: string;
   durationMs: number;
-};
+  thinking?: ThinkingBlock[];
+}
 
 export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaResult> {
   const { model, prompt, systemPrompt, input, abortSignal, onOutput } = options;
@@ -263,12 +268,15 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
 
   const hasTools = activeTools.length > 0;
 
+  const thinkingBlocks: ThinkingBlock[] = [];
+
   try {
     for (let turn = 0; turn < maxTurns; turn++) {
       const body: any = {
         model,
         messages,
-        stream: false, // Non-streaming for tool calling loop
+        stream: false,
+        think: true, // Enable thinking/reasoning output
       };
 
       if (hasTools) {
@@ -294,6 +302,12 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
 
       const data = await res.json() as any;
       const assistantMsg = data.message;
+
+      // Capture thinking/reasoning from the response
+      if (assistantMsg.thinking) {
+        thinkingBlocks.push({ thinking: assistantMsg.thinking });
+        onOutput?.(`[thinking: ${assistantMsg.thinking.slice(0, 100)}...]\n`);
+      }
 
       // Add assistant message to history
       messages.push(assistantMsg);
@@ -337,6 +351,7 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
         success: true,
         output,
         durationMs: Date.now() - startTime,
+        thinking: thinkingBlocks.length > 0 ? thinkingBlocks : undefined,
       };
     }
 
