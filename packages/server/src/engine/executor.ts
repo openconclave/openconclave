@@ -1,6 +1,6 @@
 import { nanoid } from "nanoid";
 import { eq } from "drizzle-orm";
-import { resolve } from "path";
+import { resolve, join } from "path";
 
 import { db } from "../db/client";
 import { runs, agentTasks, runEvents, settings } from "../db/schema";
@@ -567,6 +567,12 @@ export class WorkflowExecutor {
           ollamaTools.push("openconclave_next");
         }
 
+        // Session file for Ollama — same pattern as Claude's --resume
+        let ollamaSessionFile: string | undefined;
+        if (sessionId) {
+          ollamaSessionFile = sessionId; // For Ollama, sessionId IS the file path
+        }
+
         result = await runOllamaAgent({
           model: modelName,
           prompt: attempt === 0 ? (augmentedConfig.systemPrompt ?? "") : `Previous attempt failed: you must call openconclave_next to choose a route. Try again.`,
@@ -574,11 +580,18 @@ export class WorkflowExecutor {
           input,
           tools: ollamaTools.length > 0 ? ollamaTools : undefined,
           mcpServers: config.mcpServers,
-          conversationHistory,
+          sessionFile: ollamaSessionFile,
           onOutput: (chunk) => {
             this.emit({ type: "agent:output", runId, nodeId, data: { taskId, chunk } });
           },
         });
+
+        // Store session file path as "sessionId" for next turn
+        if (!sessionId) {
+          const tmpDir = join(PROJECT_ROOT, ".openconclave-tmp", "sessions");
+          const sessionPath = join(tmpDir, `${runId}-${nodeId}.jsonl`);
+          result.sessionId = sessionPath;
+        }
       } else {
         result = await agentPool.submit(taskId, {
           config: augmentedConfig,

@@ -1,4 +1,6 @@
 import { spawn } from "bun";
+import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync } from "fs";
+import { dirname } from "path";
 import { McpBridge } from "./mcp-bridge";
 
 const OLLAMA_URL = process.env.OLLAMA_URL ?? "http://localhost:11434";
@@ -217,7 +219,7 @@ export type OllamaRunOptions = {
   input?: unknown;
   tools?: string[];
   mcpServers?: string[];
-  conversationHistory?: Array<{ role: string; content: string }>;
+  sessionFile?: string;
   maxTurns?: number;
   abortSignal?: AbortSignal;
   onOutput?: (chunk: string) => void;
@@ -233,6 +235,7 @@ export interface OllamaResult {
   error?: string;
   durationMs: number;
   thinking?: ThinkingBlock[];
+  sessionId?: string;
 }
 
 export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaResult> {
@@ -240,23 +243,31 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
   const maxTurns = options.maxTurns ?? 10;
   const startTime = Date.now();
 
-  // Build messages array from conversation history or input
+  // Build messages — restore from session file or start fresh
+  const sessionFile = options.sessionFile;
   const messages: Array<{ role: string; content: string }> = [];
-  if (systemPrompt) {
-    messages.push({ role: "system", content: systemPrompt });
+
+  if (sessionFile && existsSync(sessionFile)) {
+    // Resume: read previous messages from session file
+    const lines = readFileSync(sessionFile, "utf8").split("\n").filter(Boolean);
+    for (const line of lines) {
+      try {
+        messages.push(JSON.parse(line));
+      } catch { /* skip malformed */ }
+    }
+  } else {
+    // First turn: add system prompt
+    if (systemPrompt) {
+      messages.push({ role: "system", content: systemPrompt });
+    }
   }
 
-  const history = options.conversationHistory;
-  if (history && history.length > 0) {
-    // Use proper chat history with alternating roles
-    for (const h of history) {
-      messages.push({ role: h.role, content: h.content });
-    }
-  } else if (input !== undefined) {
-    // First turn — input is the user message
+  // Add current user message
+  if (input !== undefined) {
     const inputStr = typeof input === "string" ? input : JSON.stringify(input, null, 2);
     messages.push({ role: "user", content: inputStr });
-  } else {
+  } else if (messages.length <= 1) {
+    // No input and no history — use prompt as first message
     messages.push({ role: "user", content: prompt || "Start" });
   }
 
@@ -375,6 +386,13 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
       // No tool calls — model produced a final text response
       const output = assistantMsg.content ?? "";
       onOutput?.(output);
+
+      // Save session to file for resume on next turn
+      if (sessionFile) {
+        mkdirSync(dirname(sessionFile), { recursive: true });
+        const linesToSave = messages.map((m) => JSON.stringify(m)).join("\n") + "\n";
+        writeFileSync(sessionFile, linesToSave);
+      }
 
       if (mcpBridge) await mcpBridge.disconnect();
       return {
