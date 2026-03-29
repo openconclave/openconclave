@@ -482,24 +482,13 @@ export class WorkflowExecutor {
       const routeList = routeTargets
         .map((r) => `  - "${r.nodeId}" → ${r.label} (${r.type} node)`)
         .join("\n");
-      const isOllama = (config.engine ?? "claude") === "ollama";
-      const routeInstruction = isOllama
-        ? [
-            "\n\n## Routing",
-            "You have multiple possible next steps. Call the openconclave_next tool to choose where to route.",
-            "Available routes:",
-            routeList,
-            "Call openconclave_next with node_id and content. You MUST call it exactly once.",
-          ].join("\n")
-        : [
-            "\n\n## Routing",
-            "You have multiple possible next steps. You MUST include exactly one routing line at the END of your response.",
-            "Available routes:",
-            routeList,
-            "End your response with EXACTLY one of these lines (no other text after it):",
-            ...routeTargets.map((r) => `  [[ROUTE:${r.nodeId}]]`),
-            "Do NOT skip the routing line. It MUST be the last line of your response.",
-          ].join("\n");
+      const routeInstruction = [
+        "\n\n## Routing",
+        "You have multiple possible next steps. You MUST call the openconclave_next tool to choose where to route.",
+        "Available routes:",
+        routeList,
+        "Call openconclave_next with node_id and content. You MUST call it exactly once.",
+      ].join("\n");
       augmentedConfig.systemPrompt = (config.systemPrompt ?? "") + routeInstruction;
     }
 
@@ -555,6 +544,7 @@ export class WorkflowExecutor {
         result = await agentPool.submit(taskId, {
           config: augmentedConfig,
           input,
+          routeTargets,
           onOutput: (chunk) => {
             this.emit({ type: "agent:output", runId, nodeId, data: { taskId, chunk } });
           },

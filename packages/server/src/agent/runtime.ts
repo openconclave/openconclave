@@ -20,8 +20,15 @@ export interface AgentResult {
   thinking?: ThinkingBlock[];
 }
 
+export interface RouteTarget {
+  nodeId: string;
+  label: string;
+  type: string;
+}
+
 export type AgentRunOptions = {
   config: AgentConfig;
+  routeTargets?: RouteTarget[];
   input?: unknown;
   cwd?: string;
   abortSignal?: AbortSignal;
@@ -90,27 +97,40 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
     args.push("--allowedTools", config.allowedTools.join(","));
   }
 
-  // MCP servers — write a temp config file and pass via --mcp-config
+  // MCP servers + routing — write a temp config file and pass via --mcp-config
   let mcpConfigPath: string | null = null;
+  const mcpConfig: Record<string, unknown> = { mcpServers: {} as Record<string, unknown> };
+  const mcpServers = mcpConfig.mcpServers as Record<string, unknown>;
 
+  // Add configured MCP servers
   if (config.mcpServers?.length) {
-    const mcpConfig: Record<string, any> = { mcpServers: {} };
-
     for (const serverId of config.mcpServers) {
       const serverConf = mcpServerConfigs[serverId];
       if (serverConf) {
-        mcpConfig.mcpServers[serverId] = serverConf;
+        mcpServers[serverId] = serverConf;
       }
     }
+  }
 
-    if (Object.keys(mcpConfig.mcpServers).length > 0) {
-      // Write temp MCP config
-      const tmpDir = join(process.cwd(), ".openconclave-tmp");
-      mkdirSync(tmpDir, { recursive: true });
-      mcpConfigPath = join(tmpDir, `mcp-${Date.now()}.json`);
-      writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig));
-      args.push("--mcp-config", mcpConfigPath);
-    }
+  // Add routing MCP server if agent has route targets
+  const routeTargets = options.routeTargets;
+  if (routeTargets && routeTargets.length >= 2) {
+    const routeServerPath = resolve(import.meta.dir, "route-mcp-server.ts");
+    mcpServers["openconclave-router"] = {
+      command: "bun",
+      args: ["run", routeServerPath],
+      env: {
+        ROUTE_TARGETS: JSON.stringify(routeTargets),
+      },
+    };
+  }
+
+  if (Object.keys(mcpServers).length > 0) {
+    const tmpDir = join(process.cwd(), ".openconclave-tmp");
+    mkdirSync(tmpDir, { recursive: true });
+    mcpConfigPath = join(tmpDir, `mcp-${Date.now()}.json`);
+    writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig));
+    args.push("--mcp-config", mcpConfigPath);
   }
 
   // Pass prompt via stdin to avoid CLI argument parsing issues with --mcp-config
