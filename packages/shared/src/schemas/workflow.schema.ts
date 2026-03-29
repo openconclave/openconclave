@@ -39,6 +39,8 @@ export const codeConfigSchema = z.object({
 // Keep backward compat alias
 export const transformConfigSchema = codeConfigSchema;
 
+export const mergeConfigSchema = z.object({}).passthrough();
+
 export const outputConfigSchema = z.object({
   type: z.enum(OUTPUT_TYPES),
   chatId: z.string().optional(),
@@ -52,13 +54,7 @@ export const workflowNodeSchema = z.object({
   data: z.object({
     label: z.string(),
     type: z.enum(NODE_TYPES),
-    config: z.union([
-      triggerConfigSchema,
-      agentConfigSchema,
-      conditionConfigSchema,
-      codeConfigSchema,
-      outputConfigSchema,
-    ]),
+    config: z.record(z.unknown()),
   }),
 });
 
