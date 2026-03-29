@@ -65,11 +65,11 @@ export function createMcpServer() {
         .array(
           z.object({
             id: z.string(),
-            type: z.enum(["trigger", "agent", "condition", "transform", "output"]),
+            type: z.enum(["trigger", "agent", "condition", "transform", "merge", "output"]),
             position: z.object({ x: z.number(), y: z.number() }),
             data: z.object({
               label: z.string(),
-              type: z.enum(["trigger", "agent", "condition", "transform", "output"]),
+              type: z.enum(["trigger", "agent", "condition", "transform", "merge", "output"]),
               config: z.record(z.unknown()),
             }),
           })
@@ -103,11 +103,11 @@ export function createMcpServer() {
       enabled: z.boolean().optional(),
       nodes: z.array(z.object({
         id: z.string(),
-        type: z.enum(["trigger", "agent", "condition", "transform", "output"]),
+        type: z.enum(["trigger", "agent", "condition", "transform", "merge", "output"]),
         position: z.object({ x: z.number(), y: z.number() }),
         data: z.object({
           label: z.string(),
-          type: z.enum(["trigger", "agent", "condition", "transform", "output"]),
+          type: z.enum(["trigger", "agent", "condition", "transform", "merge", "output"]),
           config: z.record(z.unknown()),
         }),
       })).optional(),
