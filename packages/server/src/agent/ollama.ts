@@ -185,6 +185,27 @@ const builtinTools: Record<string, { tool: OllamaTool; execute: (args: any) => P
       }
     },
   },
+  openconclave_next: {
+    tool: {
+      type: "function",
+      function: {
+        name: "openconclave_next",
+        description: "Route to the next workflow step. You MUST call this to choose which node to execute next.",
+        parameters: {
+          type: "object",
+          required: ["node_id", "content"],
+          properties: {
+            node_id: { type: "string", description: "The ID of the next node to route to" },
+            content: { type: "string", description: "Your output message to pass to the next node" },
+          },
+        },
+      },
+    },
+    execute: async (args: { node_id: string; content: string }) => {
+      // The executor handles routing — this just returns the route info
+      return `ROUTE:${args.node_id}:${args.content}`;
+    },
+  },
 };
 
 // ── Ollama agent runtime with tool calling ───────────────────

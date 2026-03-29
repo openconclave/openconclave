@@ -43,6 +43,17 @@ interface QueueEntry {
   triggeredBy: string | null;
 }
 
+interface RouteTarget {
+  nodeId: string;
+  label: string;
+  type: string;
+}
+
+interface AgentOutput {
+  content: string;
+  routeTo: string | null; // nodeId chosen by the agent — required when routeTargets exist
+}
+
 interface AgentResult {
   success: boolean;
   output: string;
@@ -222,6 +233,39 @@ export class WorkflowExecutor {
                   next.push({ nodeId: edge.target, triggeredBy: entry.nodeId });
                 }
               }
+            } else if (node.data.type === "agent" && outgoing.length >= 2) {
+              // Agent with routing — check for __routeTo in output
+              let routeTo: string | null = null;
+              let cleanOutput = output;
+              try {
+                const parsed = typeof output === "string" ? JSON.parse(output) : output;
+                if (parsed?.__routeTo) {
+                  routeTo = parsed.__routeTo as string;
+                  cleanOutput = parsed.content ?? output;
+                  nodeOutputs.set(entry.nodeId, cleanOutput);
+                }
+              } catch {
+                // Not JSON, no routing metadata
+              }
+
+              if (routeTo) {
+                // Route to the chosen edge only
+                const targetEdge = outgoing.find((e) => e.target === routeTo);
+                if (targetEdge) {
+                  next.push({ nodeId: targetEdge.target, triggeredBy: entry.nodeId });
+                } else {
+                  // Invalid route — fall through to all edges
+                  logger.warn("Agent routed to invalid target", { routeTo, nodeId: entry.nodeId });
+                  for (const edge of outgoing) {
+                    next.push({ nodeId: edge.target, triggeredBy: entry.nodeId });
+                  }
+                }
+              } else {
+                // No routing — trigger all edges (backward compat)
+                for (const edge of outgoing) {
+                  next.push({ nodeId: edge.target, triggeredBy: entry.nodeId });
+                }
+              }
             } else {
               for (const edge of outgoing) {
                 next.push({ nodeId: edge.target, triggeredBy: entry.nodeId });
@@ -302,9 +346,21 @@ export class WorkflowExecutor {
           break;
         }
 
-        case "agent":
-          output = await this.executeAgent(runId, nodeId, node.data.config as AgentConfig, input);
+        case "agent": {
+          const outEdges = getOutgoingEdges(nodeId, edges);
+          const routeTargets = outEdges.length >= 2
+            ? outEdges.map((e) => {
+                const target = nodeMap.get(e.target);
+                return {
+                  nodeId: e.target,
+                  label: target?.data.label ?? e.target,
+                  type: target?.data.type ?? "unknown",
+                };
+              })
+            : undefined;
+          output = await this.executeAgent(runId, nodeId, node.data.config as AgentConfig, input, routeTargets);
           break;
+        }
 
         case "condition": {
           const config = node.data.config as ConditionConfig;
@@ -375,7 +431,8 @@ export class WorkflowExecutor {
     runId: string,
     nodeId: string,
     config: AgentConfig,
-    input: unknown
+    input: unknown,
+    routeTargets?: RouteTarget[]
   ): Promise<string> {
     const taskId = nanoid();
     const now = new Date().toISOString();
@@ -387,13 +444,30 @@ export class WorkflowExecutor {
 
     const modelName = engine === "ollama" ? config.ollamaModel! : (config.model ?? "sonnet");
 
+    // Build routing-aware config
+    const augmentedConfig = { ...config };
+    if (routeTargets && routeTargets.length >= 2) {
+      const routeList = routeTargets
+        .map((r) => `  - "${r.nodeId}" → ${r.label} (${r.type} node)`)
+        .join("\n");
+      const routeInstruction = [
+        "\n\n## Routing",
+        "This agent has multiple possible next steps. You MUST call openconclave_next to choose where to route.",
+        "Available routes:",
+        routeList,
+        'Call: openconclave_next(node_id="<chosen node id>", content="<your output message>")',
+        "You MUST call openconclave_next exactly once. Do not skip it.",
+      ].join("\n");
+      augmentedConfig.systemPrompt = (config.systemPrompt ?? "") + routeInstruction;
+    }
+
     await db.insert(agentTasks).values({
       id: taskId,
       runId,
       nodeId,
       status: "running",
       prompt: config.prompt,
-      systemPrompt: config.systemPrompt,
+      systemPrompt: augmentedConfig.systemPrompt,
       model: `${engine}/${modelName}`,
       input: input ?? null,
       startedAt: now,
@@ -402,30 +476,56 @@ export class WorkflowExecutor {
 
     this.emit({ type: "agent:started", runId, nodeId, data: { taskId, engine } });
 
+    const MAX_ROUTE_RETRIES = 3;
     let result: AgentResult;
+    let routedTo: string | null = null;
 
-    if (engine === "ollama") {
-      const ollamaTools = this.mapOllamaTools(config);
+    for (let attempt = 0; attempt <= MAX_ROUTE_RETRIES; attempt++) {
+      if (engine === "ollama") {
+        const ollamaTools = this.mapOllamaTools(augmentedConfig);
 
-      result = await runOllamaAgent({
-        model: modelName,
-        prompt: config.prompt,
-        systemPrompt: config.systemPrompt,
-        input,
-        tools: ollamaTools.length > 0 ? ollamaTools : undefined,
-        mcpServers: config.mcpServers,
-        onOutput: (chunk) => {
-          this.emit({ type: "agent:output", runId, nodeId, data: { taskId, chunk } });
-        },
-      });
-    } else {
-      result = await agentPool.submit(taskId, {
-        config,
-        input,
-        onOutput: (chunk) => {
-          this.emit({ type: "agent:output", runId, nodeId, data: { taskId, chunk } });
-        },
-      });
+        // Add openconclave_next tool for routing
+        if (routeTargets && routeTargets.length >= 2) {
+          ollamaTools.push("openconclave_next");
+        }
+
+        result = await runOllamaAgent({
+          model: modelName,
+          prompt: attempt === 0 ? augmentedConfig.prompt : `Previous attempt failed: you must call openconclave_next to choose a route. Try again. ${augmentedConfig.prompt}`,
+          systemPrompt: augmentedConfig.systemPrompt,
+          input,
+          tools: ollamaTools.length > 0 ? ollamaTools : undefined,
+          mcpServers: config.mcpServers,
+          onOutput: (chunk) => {
+            this.emit({ type: "agent:output", runId, nodeId, data: { taskId, chunk } });
+          },
+        });
+      } else {
+        result = await agentPool.submit(taskId, {
+          config: augmentedConfig,
+          input,
+          onOutput: (chunk) => {
+            this.emit({ type: "agent:output", runId, nodeId, data: { taskId, chunk } });
+          },
+        });
+      }
+
+      // If no routing needed, break immediately
+      if (!routeTargets || routeTargets.length < 2) break;
+
+      // Parse routing from output
+      routedTo = this.parseRoute(result.output, routeTargets);
+      if (routedTo) break;
+
+      // No valid route found — retry
+      if (attempt < MAX_ROUTE_RETRIES) {
+        logger.warn(`Agent didn't route, retry ${attempt + 1}/${MAX_ROUTE_RETRIES}`, { runId, nodeId });
+      }
+    }
+
+    // Store route in output metadata
+    if (routedTo) {
+      result.output = JSON.stringify({ __routeTo: routedTo, content: result.output });
     }
 
     const completedAt = new Date().toISOString();
@@ -485,6 +585,31 @@ export class WorkflowExecutor {
     }
 
     return tools;
+  }
+
+  private parseRoute(output: string, targets: RouteTarget[]): string | null {
+    const validIds = new Set(targets.map((t) => t.nodeId));
+
+    // Check for ROUTE:nodeId:content format (from Ollama openconclave_next tool)
+    const routeMatch = /ROUTE:([^:]+):/.exec(output);
+    if (routeMatch?.[1] && validIds.has(routeMatch[1])) {
+      return routeMatch[1];
+    }
+
+    // Check for openconclave_next tool call pattern in text
+    const toolCallMatch = /openconclave_next\s*\(\s*(?:node_id\s*=\s*)?["']([^"']+)["']/.exec(output);
+    if (toolCallMatch?.[1] && validIds.has(toolCallMatch[1])) {
+      return toolCallMatch[1];
+    }
+
+    // Check for node ID mentioned directly in output
+    for (const target of targets) {
+      if (output.includes(target.nodeId)) {
+        return target.nodeId;
+      }
+    }
+
+    return null;
   }
 
   // ── Code Execution ───────────────────────────────────────
