@@ -151,71 +151,39 @@ export class WorkflowExecutor {
         const ready: QueueEntry[] = [];
         const waiting: QueueEntry[] = [];
 
-        // Deduplicate: group entries by nodeId, track all triggeredBy sources
-        const byNode = new Map<string, QueueEntry[]>();
         for (const entry of batch) {
-          const list = byNode.get(entry.nodeId) ?? [];
-          list.push(entry);
-          byNode.set(entry.nodeId, list);
-        }
+          const node = nodeMap.get(entry.nodeId);
+          if (!node) continue;
 
-        for (const [nodeId, entries] of byNode) {
-          const incomingEdges = getIncomingEdges(nodeId, edges);
+          if (node.data.type === "merge") {
+            // Merge nodes: wait for ALL inputs before executing once
+            const incomingEdges = getIncomingEdges(entry.nodeId, edges);
+            const activeIncoming = incomingEdges.filter(
+              (e) => nodeOutputs.has(e.source) || e.source === entry.triggeredBy
+            );
 
-          // Count only edges from nodes that have actually produced output
-          const activeIncoming = incomingEdges.filter(
-            (e) => nodeOutputs.has(e.source) || entries.some((en) => en.triggeredBy === e.source)
-          );
-          const expectedInputs = activeIncoming.length;
+            if (!pendingInputs.has(entry.nodeId)) {
+              pendingInputs.set(entry.nodeId, new Map());
+            }
+            const inputs = pendingInputs.get(entry.nodeId)!;
+            if (entry.triggeredBy) {
+              inputs.set(entry.triggeredBy, nodeOutputs.get(entry.triggeredBy));
+            }
 
-          logger.debug(`Fan-in check: ${nodeId}`, {
-            entries: entries.length,
-            incomingEdges: incomingEdges.length,
-            activeIncoming: activeIncoming.length,
-            expectedInputs,
-            triggeredBy: entries.map((e) => e.triggeredBy),
-            nodeOutputKeys: [...nodeOutputs.keys()],
-          });
-
-          if (expectedInputs <= 1) {
-            ready.push(entries[0]);
+            if (inputs.size >= activeIncoming.length) {
+              ready.push(entry);
+              pendingInputs.delete(entry.nodeId);
+            }
           } else {
-            if (!pendingInputs.has(nodeId)) {
-              pendingInputs.set(nodeId, new Map());
-            }
-            const inputs = pendingInputs.get(nodeId)!;
-            for (const entry of entries) {
-              if (entry.triggeredBy) {
-                inputs.set(entry.triggeredBy, nodeOutputs.get(entry.triggeredBy));
-              }
-            }
-
-            logger.debug(`Fan-in pending: ${nodeId}`, {
-              inputsSize: inputs.size,
-              expectedInputs,
-              ready: inputs.size >= expectedInputs,
-            });
-
-            if (inputs.size >= expectedInputs) {
-              ready.push(entries[0]);
-              pendingInputs.delete(nodeId);
-            }
+            // All other nodes: run once per trigger
+            ready.push(entry);
           }
         }
 
-        logger.debug("Batch result", {
-          readyCount: ready.length,
-          pendingNodes: [...pendingInputs.keys()],
-        });
-
         if (ready.length === 0 && pendingInputs.size === 0) {
-          // Nothing ready and nothing pending — done
           break;
         }
-
         if (ready.length === 0) {
-          // Nodes are pending but nothing is ready — stuck, shouldn't happen
-          logger.warn("Fan-in deadlock detected", { pendingNodes: [...pendingInputs.keys()] });
           break;
         }
 
