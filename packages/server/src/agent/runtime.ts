@@ -67,10 +67,22 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
   const { config, input, cwd, abortSignal, onOutput } = options;
   const startTime = Date.now();
 
-  // Build the prompt — inject input data if coming from a predecessor node
-  let prompt = config.prompt;
-  if (input !== undefined) {
-    prompt = `## Input from previous step\n\`\`\`json\n${JSON.stringify(input, null, 2)}\n\`\`\`\n\n## Task\n${config.prompt}`;
+  // Build the prompt from conversation history or input
+  const history = options.conversationHistory;
+  let prompt: string;
+
+  if (history && history.length > 0) {
+    // Build prompt with full conversation context
+    const historyText = history
+      .map((h) => `${h.role === "user" ? "User" : "Assistant"}: ${h.content}`)
+      .join("\n\n");
+    prompt = historyText;
+  } else if (input !== undefined) {
+    // First turn — input is the user message
+    const inputStr = typeof input === "string" ? input : JSON.stringify(input, null, 2);
+    prompt = config.prompt ? `${config.prompt}\n\n${inputStr}` : inputStr;
+  } else {
+    prompt = config.prompt;
   }
 
   // Build CLI args — use stream-json to capture thinking blocks

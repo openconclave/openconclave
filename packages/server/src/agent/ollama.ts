@@ -217,6 +217,7 @@ export type OllamaRunOptions = {
   input?: unknown;
   tools?: string[];
   mcpServers?: string[];
+  conversationHistory?: Array<{ role: string; content: string }>;
   maxTurns?: number;
   abortSignal?: AbortSignal;
   onOutput?: (chunk: string) => void;
@@ -239,17 +240,25 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
   const maxTurns = options.maxTurns ?? 10;
   const startTime = Date.now();
 
-  // Build the full prompt with input from predecessor node
-  let fullPrompt = prompt;
-  if (input !== undefined) {
-    fullPrompt = `## Input from previous step\n${typeof input === "string" ? input : JSON.stringify(input, null, 2)}\n\n## Task\n${prompt}`;
-  }
-
-  const messages: any[] = [];
+  // Build messages array from conversation history or input
+  const messages: Array<{ role: string; content: string }> = [];
   if (systemPrompt) {
     messages.push({ role: "system", content: systemPrompt });
   }
-  messages.push({ role: "user", content: fullPrompt });
+
+  const history = options.conversationHistory;
+  if (history && history.length > 0) {
+    // Use proper chat history with alternating roles
+    for (const h of history) {
+      messages.push({ role: h.role, content: h.content });
+    }
+  } else if (input !== undefined) {
+    // First turn — input is the user message
+    const inputStr = typeof input === "string" ? input : JSON.stringify(input, null, 2);
+    messages.push({ role: "user", content: prompt ? `${prompt}\n\n${inputStr}` : inputStr });
+  } else {
+    messages.push({ role: "user", content: prompt });
+  }
 
   // Collect requested built-in tools
   const requestedTools = options.tools ?? [];

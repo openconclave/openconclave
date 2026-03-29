@@ -114,8 +114,12 @@ export class WorkflowExecutor {
     const { nodes, edges } = workflow;
     const nodeMap = new Map(nodes.map((n) => [n.id, n]));
     const nodeOutputs = new Map<string, unknown>();
-    // Conversation history for agent↔prompt loops: agentNodeId → [{role, content}]
+    // Conversation history per agent: [{role: "user"|"assistant", content}]
     const conversationHistory = new Map<string, Array<{ role: string; content: string }>>();
+    // Workflow context from trigger — injected into every agent's system prompt
+    const workflowContext = triggerPayload
+      ? (typeof triggerPayload === "string" ? triggerPayload : JSON.stringify(triggerPayload))
+      : null;
 
     try {
       // Find entry point
@@ -214,6 +218,7 @@ export class WorkflowExecutor {
               edges,
               nodeOutputs,
               conversationHistory,
+              workflowContext,
               triggerPayload,
               entry.triggeredBy
             );
@@ -312,6 +317,7 @@ export class WorkflowExecutor {
     edges: WorkflowEdge[],
     nodeOutputs: Map<string, unknown>,
     conversationHistory: Map<string, Array<{ role: string; content: string }>>,
+    workflowContext: string | null,
     triggerPayload?: unknown,
     triggeredBy?: string | null
   ): Promise<unknown> {
@@ -363,24 +369,44 @@ export class WorkflowExecutor {
               })
             : undefined;
 
-          // Conversation history — every agent gets one
+          // Build conversation history for this agent
           const history = conversationHistory.get(nodeId) ?? [];
 
-          // If this agent has been triggered by another node, add the input as "user" turn
-          if (input !== undefined && input !== null && history.length > 0) {
+          // Clean input — strip routing metadata
+          let userMessage: string | null = null;
+          if (input !== undefined && input !== null) {
             const inputStr = typeof input === "string" ? input : JSON.stringify(input);
-            // Strip routing metadata from input
-            let cleanInput = inputStr;
             try {
               const parsed = JSON.parse(inputStr);
-              if (parsed?.__routeTo) cleanInput = parsed.content ?? inputStr;
-            } catch { /* not JSON */ }
-            history.push({ role: "user", content: cleanInput });
+              userMessage = parsed?.__routeTo ? (parsed.content ?? inputStr) : inputStr;
+            } catch {
+              userMessage = inputStr;
+            }
           }
 
-          output = await this.executeAgent(runId, nodeId, node.data.config as AgentConfig, input, routeTargets, history);
+          // Add user message to history (input from previous node)
+          if (userMessage) {
+            history.push({ role: "user", content: userMessage });
+          }
 
-          // Add this agent's output as "assistant" turn
+          // Build system prompt: agent's instructions + workflow context
+          const agentConfig = node.data.config as AgentConfig;
+          const systemParts: string[] = [];
+          if (agentConfig.systemPrompt) systemParts.push(agentConfig.systemPrompt);
+          if (agentConfig.prompt) systemParts.push(agentConfig.prompt);
+          if (workflowContext) systemParts.push(`\nWorkflow context: ${workflowContext}`);
+          const fullSystemPrompt = systemParts.join("\n\n");
+
+          // Execute with proper chat model: system + history
+          const chatConfig = {
+            ...agentConfig,
+            systemPrompt: fullSystemPrompt,
+            prompt: userMessage ?? agentConfig.prompt, // fallback for first turn with no input
+          };
+
+          output = await this.executeAgent(runId, nodeId, chatConfig, input, routeTargets, history);
+
+          // Add agent's output as "assistant" turn
           const agentOutput = typeof output === "string" ? output : JSON.stringify(output);
           let cleanOutput = agentOutput;
           try {
@@ -491,15 +517,8 @@ export class WorkflowExecutor {
       augmentedConfig.systemPrompt = (config.systemPrompt ?? "") + routeInstruction;
     }
 
-    // Conversation history available via openconclave_history MCP tool
-    // Also inject into system prompt as backup for models that don't call tools proactively
-    if (conversationHistory && conversationHistory.length > 0) {
-      const historyText = conversationHistory
-        .map((h) => `${h.role === "user" ? "User" : "You"}: ${h.content}`)
-        .join("\n");
-      augmentedConfig.systemPrompt = (augmentedConfig.systemPrompt ?? "") +
-        "\n\n## Conversation History\nPrevious turns (also available via openconclave_history tool):\n" + historyText;
-    }
+    // Conversation history — pass to runtime for proper chat message building
+    // History is built by the executor with perspective-dependent roles
 
     await db.insert(agentTasks).values({
       id: taskId,
@@ -536,6 +555,7 @@ export class WorkflowExecutor {
           input,
           tools: ollamaTools.length > 0 ? ollamaTools : undefined,
           mcpServers: config.mcpServers,
+          conversationHistory,
           onOutput: (chunk) => {
             this.emit({ type: "agent:output", runId, nodeId, data: { taskId, chunk } });
           },
