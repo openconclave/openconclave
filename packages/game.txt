@@ -1,0 +1,14 @@
+NUMBER GUESSING GAME LOG
+=======================
+
+Secret Number: 73
+
+Guess History:
+1. Guess: 50  → Response: Greater
+2. Guess: 75  → Response: Less
+3. Guess: 62  → Response: Greater
+4. Guess: 68  → Response: Greater
+5. Guess: 71  → Response: Greater
+6. Guess: 73  → Response: CORRECT
+
+Result: Guesser found the secret number in 6 attempts!

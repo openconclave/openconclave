@@ -220,6 +220,7 @@ export type OllamaRunOptions = {
   tools?: string[];
   mcpServers?: string[];
   sessionFile?: string;
+  thinking?: boolean;
   maxTurns?: number;
   abortSignal?: AbortSignal;
   onOutput?: (chunk: string) => void;
@@ -317,7 +318,7 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
         model,
         messages,
         stream: false,
-        think: true, // Enable thinking/reasoning output
+        think: options.thinking ?? true,
       };
 
       if (hasTools) {

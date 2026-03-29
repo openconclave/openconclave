@@ -208,6 +208,7 @@ function AgentFields({ nodeId, config }: { nodeId: string; config: AgentConfig }
           </Field>
         </>
       ) : (
+        <>
         <Field label="Ollama Model">
           {ollamaStatus === null ? (
             <p className="text-xs text-muted-foreground">Checking Ollama...</p>
@@ -225,6 +226,16 @@ function AgentFields({ nodeId, config }: { nodeId: string; config: AgentConfig }
             </select>
           )}
         </Field>
+        <label className="flex items-center gap-2 px-1 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={config.thinking ?? true}
+            onChange={(e) => update({ thinking: e.target.checked })}
+            className="rounded border-border"
+          />
+          <span className="text-xs text-muted-foreground">Enable thinking (disable if model loops with tools)</span>
+        </label>
+        </>
       )}
 
       <div className="border-t border-border pt-3 mt-3">

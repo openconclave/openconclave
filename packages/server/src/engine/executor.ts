@@ -581,6 +581,7 @@ export class WorkflowExecutor {
           tools: ollamaTools.length > 0 ? ollamaTools : undefined,
           mcpServers: config.mcpServers,
           sessionFile: ollamaSessionFile,
+          thinking: config.thinking ?? true,
           onOutput: (chunk) => {
             this.emit({ type: "agent:output", runId, nodeId, data: { taskId, chunk } });
           },

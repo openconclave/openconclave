@@ -30,6 +30,7 @@ export interface AgentConfig {
   systemPrompt?: string;
   model?: string;
   ollamaModel?: string;
+  thinking?: boolean;
   maxTurns?: number;
   maxBudgetUsd?: number;
   allowedTools?: string[];
