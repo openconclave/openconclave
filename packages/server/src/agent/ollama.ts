@@ -2,6 +2,7 @@ import { spawn } from "bun";
 import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync } from "fs";
 import { dirname } from "path";
 import { McpBridge } from "./mcp-bridge";
+import { logger } from "../lib/logger";
 
 const OLLAMA_URL = process.env.OLLAMA_URL ?? "http://localhost:11434";
 
@@ -324,6 +325,17 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
       if (hasTools) {
         body.tools = activeTools;
       }
+
+      logger.debug(`Ollama API call (turn ${turn + 1})`, {
+        model,
+        messageCount: messages.length,
+        messages: messages.map((m) => ({
+          role: m.role,
+          content: m.content.length > 100 ? m.content.slice(0, 100) + "..." : m.content,
+        })),
+        toolCount: hasTools ? activeTools.length : 0,
+        sessionFile: sessionFile ?? "none",
+      });
 
       const res = await fetch(`${OLLAMA_URL}/api/chat`, {
         method: "POST",
