@@ -123,12 +123,35 @@ export function WorkflowEditorPage() {
   }, [activeRunId]);
 
   const handleSave = async () => {
+    // Check for duplicate labels and auto-fix
+    const labelCount = new Map<string, number>();
+    for (const n of nodes) {
+      const count = (labelCount.get(n.data.label) ?? 0) + 1;
+      labelCount.set(n.data.label, count);
+    }
+    const hasDuplicates = [...labelCount.values()].some((c) => c > 1);
+    if (hasDuplicates) {
+      // Auto-fix: append numbers to duplicates
+      const seen = new Map<string, number>();
+      for (const n of nodes) {
+        const count = labelCount.get(n.data.label) ?? 1;
+        if (count > 1) {
+          const idx = (seen.get(n.data.label) ?? 0) + 1;
+          seen.set(n.data.label, idx);
+          useWorkflowStore.getState().updateNodeData(n.id, { label: `${n.data.label} ${idx}` });
+        }
+      }
+      toast("Duplicate node labels renamed automatically", "success");
+    }
+
     setSaving(true);
     try {
+      // Re-read nodes after potential rename
+      const currentNodes = useWorkflowStore.getState().nodes;
       const payload = {
         name: workflowName,
         description: workflowDescription,
-        nodes: nodes.map((n) => ({
+        nodes: currentNodes.map((n) => ({
           id: n.id,
           type: n.data.type,
           position: n.position,

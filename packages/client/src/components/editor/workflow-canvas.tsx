@@ -70,12 +70,21 @@ export function WorkflowCanvas() {
       position.x = Math.round(position.x / 20) * 20;
       position.y = Math.round(position.y / 20) * 20;
 
+      // Auto-number labels to ensure uniqueness
+      const existingLabels = new Set(nodes.map((n) => n.data.label));
+      let uniqueLabel = label;
+      if (existingLabels.has(uniqueLabel)) {
+        let counter = 2;
+        while (existingLabels.has(`${label} ${counter}`)) counter++;
+        uniqueLabel = `${label} ${counter}`;
+      }
+
       const id = `${type}_${++nodeId}`;
       const newNode = {
         id,
         type,
         position,
-        data: { label, type, config } as WorkflowNodeData,
+        data: { label: uniqueLabel, type, config } as WorkflowNodeData,
       };
 
       addNode(newNode);
