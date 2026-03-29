@@ -122,6 +122,10 @@ export class WorkflowExecutor {
         nodeId: n.id,
         triggeredBy: null,
       }));
+
+      // Fan-in tracking: count how many inputs each node has received
+      // Nodes with multiple incoming edges wait until all have arrived
+      const pendingInputs = new Map<string, Map<string, unknown>>(); // nodeId → (sourceId → output)
       let iterations = 0;
 
       while (queue.length > 0) {
@@ -143,8 +147,43 @@ export class WorkflowExecutor {
         // Batch: take all entries from the current queue and run in parallel
         const batch = queue.splice(0, queue.length);
 
+        // Check fan-in: filter out entries that need to wait for more inputs
+        const ready: QueueEntry[] = [];
+        const waiting: QueueEntry[] = [];
+
+        for (const entry of batch) {
+          const incomingEdges = getIncomingEdges(entry.nodeId, edges);
+          const expectedInputs = incomingEdges.length;
+
+          if (expectedInputs <= 1) {
+            // Single input or entry node — ready immediately
+            ready.push(entry);
+          } else {
+            // Multiple inputs — track arrivals
+            if (!pendingInputs.has(entry.nodeId)) {
+              pendingInputs.set(entry.nodeId, new Map());
+            }
+            const inputs = pendingInputs.get(entry.nodeId)!;
+            if (entry.triggeredBy) {
+              inputs.set(entry.triggeredBy, nodeOutputs.get(entry.triggeredBy));
+            }
+
+            if (inputs.size >= expectedInputs) {
+              // All inputs arrived — ready to execute
+              ready.push(entry);
+              pendingInputs.delete(entry.nodeId);
+            }
+            // Otherwise stays out of queue — will be re-added when more inputs arrive
+          }
+        }
+
+        if (ready.length === 0 && waiting.length === 0) {
+          // Nothing ready and nothing waiting — we're stuck or done
+          break;
+        }
+
         const results = await Promise.all(
-          batch.map(async (entry) => {
+          ready.map(async (entry) => {
             const node = nodeMap.get(entry.nodeId);
             if (!node) return [];
 
@@ -224,20 +263,22 @@ export class WorkflowExecutor {
     const node = nodeMap.get(nodeId);
     if (!node) return undefined;
 
-    // Resolve input from triggering source
+    // Resolve input
     let input: unknown;
-    if (triggeredBy) {
-      input = nodeOutputs.get(triggeredBy);
-    } else {
-      const incomingEdges = getIncomingEdges(nodeId, edges);
-      if (incomingEdges.length === 1) {
-        input = nodeOutputs.get(incomingEdges[0].source);
-      } else if (incomingEdges.length > 1) {
-        for (const e of incomingEdges) {
-          const val = nodeOutputs.get(e.source);
-          if (val !== undefined) input = val;
-        }
+    const incomingEdges = getIncomingEdges(nodeId, edges);
+
+    if (incomingEdges.length > 1) {
+      // Fan-in: collect all inputs as an array
+      const inputs: unknown[] = [];
+      for (const e of incomingEdges) {
+        const val = nodeOutputs.get(e.source);
+        if (val !== undefined) inputs.push(val);
       }
+      input = inputs;
+    } else if (triggeredBy) {
+      input = nodeOutputs.get(triggeredBy);
+    } else if (incomingEdges.length === 1) {
+      input = nodeOutputs.get(incomingEdges[0].source);
     }
 
     this.emit({ type: "node:started", runId, nodeId });
