@@ -1,6 +1,8 @@
 #!/usr/bin/env bun
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { writeFileSync, mkdirSync } from "fs";
+import { join } from "path";
 import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
@@ -183,10 +185,24 @@ function connectWebSocket() {
           if (data.data?.success !== undefined) meta.success = String(data.data.success);
           if (data.data?.durationMs) meta.duration_ms = String(data.data.durationMs);
 
-          const content =
+          const fullContent =
             typeof data.data === "string"
               ? data.data
-              : JSON.stringify(data.data ?? {});
+              : JSON.stringify(data.data ?? {}, null, 2);
+
+          // Save full output to temp file
+          const outputDir = join(process.cwd(), ".openconclave-outputs");
+          mkdirSync(outputDir, { recursive: true });
+          const fileName = `output-${data.runId ?? "unknown"}-${Date.now()}.md`;
+          const filePath = join(outputDir, fileName);
+          writeFileSync(filePath, fullContent);
+          meta.output_file = filePath;
+
+          // Truncate inline content if too large
+          const MAX_INLINE = 2000;
+          const content = fullContent.length > MAX_INLINE
+            ? fullContent.slice(0, MAX_INLINE) + `\n\n--- truncated (${fullContent.length} chars) ---\nFull output: ${filePath}`
+            : fullContent;
 
           await mcp.notification({
             method: "notifications/claude/channel",
