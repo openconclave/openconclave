@@ -3,7 +3,8 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type { WorkflowDefinition, WorkflowListResponse } from "@openconclave/shared";
-import { GitBranch, Pause, Play, Clock } from "lucide-react";
+import { GitBranch, Pause, Play, Clock, Trash2 } from "lucide-react";
+import { confirm } from "@/components/ui/confirm";
 
 type ScheduleEntry = { workflowId: string; cron: string; nextRun: string; enabled: boolean };
 
@@ -38,6 +39,15 @@ export function WorkflowsPage() {
   };
 
   useEffect(() => { load(); }, []);
+
+  const deleteWorkflow = async (e: React.MouseEvent, id: string, name: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const confirmed = await confirm("Delete workflow", `Are you sure you want to delete "${name}"? This cannot be undone.`);
+    if (!confirmed) return;
+    await api.delete(`/workflows/${id}`);
+    load();
+  };
 
   const toggleEnabled = async (e: React.MouseEvent, wf: WorkflowDefinition) => {
     e.preventDefault();
@@ -81,19 +91,28 @@ export function WorkflowsPage() {
                   )}
                 >
                   <div className="flex items-center justify-between">
-                    <h3 className="font-semibold">{wf.name}</h3>
-                    <button
-                      onClick={(e) => toggleEnabled(e, wf)}
-                      className={cn(
-                        "flex h-7 w-7 items-center justify-center rounded-md transition-colors",
-                        wf.enabled
-                          ? "bg-success/20 text-success hover:bg-success/30"
-                          : "bg-muted text-muted-foreground hover:bg-accent"
-                      )}
-                      title={wf.enabled ? "Pause workflow" : "Enable workflow"}
-                    >
-                      {wf.enabled ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
-                    </button>
+                    <h3 className="font-semibold truncate flex-1">{wf.name}</h3>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        onClick={(e) => toggleEnabled(e, wf)}
+                        className={cn(
+                          "flex h-7 w-7 items-center justify-center rounded-md transition-colors",
+                          wf.enabled
+                            ? "bg-success/20 text-success hover:bg-success/30"
+                            : "bg-muted text-muted-foreground hover:bg-accent"
+                        )}
+                        title={wf.enabled ? "Pause workflow" : "Enable workflow"}
+                      >
+                        {wf.enabled ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+                      </button>
+                      <button
+                        onClick={(e) => deleteWorkflow(e, wf.id, wf.name)}
+                        className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/20 hover:text-destructive transition-colors"
+                        title="Delete workflow"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   </div>
                   {wf.description && (
                     <p className="mt-1 text-sm text-muted-foreground line-clamp-2">

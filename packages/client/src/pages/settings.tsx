@@ -21,13 +21,6 @@ const settingsConfig = [
     secret: false,
     placeholder: "http://localhost:11434",
   },
-  {
-    key: "max_concurrent_agents",
-    label: "Max Concurrent Agents",
-    description: "Maximum number of Claude Code agents running simultaneously.",
-    secret: false,
-    placeholder: "3",
-  },
 ];
 
 export function SettingsPage() {

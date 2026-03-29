@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 
 import { db } from "../db/client";
-import { workflows } from "../db/schema";
+import { workflows, runs, agentTasks, runEvents } from "../db/schema";
 import {
   createWorkflowSchema,
   updateWorkflowSchema,
@@ -70,6 +70,15 @@ export const workflowRoutes = new Hono()
 
   .delete("/:id", async (c) => {
     const { id } = c.req.param();
+
+    // Delete related data first (cascade)
+    const workflowRuns = await db.select().from(runs).where(eq(runs.workflowId, id));
+    for (const run of workflowRuns) {
+      await db.delete(runEvents).where(eq(runEvents.runId, run.id));
+      await db.delete(agentTasks).where(eq(agentTasks.runId, run.id));
+    }
+    await db.delete(runs).where(eq(runs.workflowId, id));
     await db.delete(workflows).where(eq(workflows.id, id));
+
     return c.json({ deleted: true });
   });

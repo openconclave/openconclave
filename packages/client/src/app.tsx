@@ -1,5 +1,6 @@
 import { Shell } from "@/components/layout/shell";
 import { ToastContainer } from "@/components/ui/toast";
+import { ConfirmDialog } from "@/components/ui/confirm";
 import { DashboardPage } from "@/pages/dashboard";
 import { WorkflowsPage } from "@/pages/workflows";
 import { WorkflowEditorPage } from "@/pages/workflow-editor";
@@ -23,6 +24,7 @@ export default function App() {
     <>
       <Shell>{getPage()}</Shell>
       <ToastContainer />
+      <ConfirmDialog />
     </>
   );
 }
