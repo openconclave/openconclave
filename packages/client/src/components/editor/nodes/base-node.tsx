@@ -56,6 +56,7 @@ export function BaseNode({
         <Handle
           type="target"
           position={Position.Top}
+          style={{ left: "50%" }}
           className="!h-3 !w-3 !border-2 !border-border !bg-muted"
         />
       )}
@@ -78,6 +79,7 @@ export function BaseNode({
         <Handle
           type="source"
           position={Position.Bottom}
+          style={{ left: "50%" }}
           className="!h-3 !w-3 !border-2 !border-border !bg-muted"
         />
       )}
