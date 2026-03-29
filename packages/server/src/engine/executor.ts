@@ -114,6 +114,8 @@ export class WorkflowExecutor {
     const { nodes, edges } = workflow;
     const nodeMap = new Map(nodes.map((n) => [n.id, n]));
     const nodeOutputs = new Map<string, unknown>();
+    // Conversation history for agent↔prompt loops: agentNodeId → [{role, content}]
+    const conversationHistory = new Map<string, Array<{ role: string; content: string }>>();
 
     try {
       // Find entry point
@@ -211,6 +213,7 @@ export class WorkflowExecutor {
               nodeMap,
               edges,
               nodeOutputs,
+              conversationHistory,
               triggerPayload,
               entry.triggeredBy
             );
@@ -308,6 +311,7 @@ export class WorkflowExecutor {
     nodeMap: Map<string, WorkflowNode>,
     edges: WorkflowEdge[],
     nodeOutputs: Map<string, unknown>,
+    conversationHistory: Map<string, Array<{ role: string; content: string }>>,
     triggerPayload?: unknown,
     triggeredBy?: string | null
   ): Promise<unknown> {
@@ -358,7 +362,34 @@ export class WorkflowExecutor {
                 };
               })
             : undefined;
-          output = await this.executeAgent(runId, nodeId, node.data.config as AgentConfig, input, routeTargets);
+
+          // Check if this agent connects to a Prompt node (conversational loop)
+          const hasPromptOutput = outEdges.some((e) => {
+            const target = nodeMap.get(e.target);
+            return target?.data.type === "prompt";
+          });
+
+          // Get or create conversation history for this agent
+          const history = hasPromptOutput
+            ? (conversationHistory.get(nodeId) ?? [])
+            : undefined;
+
+          output = await this.executeAgent(runId, nodeId, node.data.config as AgentConfig, input, routeTargets, history);
+
+          // Update conversation history if this agent is in a prompt loop
+          if (hasPromptOutput && history) {
+            // Add the user input (from prompt response) if it exists and is from a prompt
+            const triggeredByNode = triggeredBy ? nodeMap.get(triggeredBy) : null;
+            if (triggeredByNode?.data.type === "prompt" && input) {
+              history.push({ role: "user", content: typeof input === "string" ? input : JSON.stringify(input) });
+            }
+            // Add the agent's output
+            const agentOutput = typeof output === "string" ? output : JSON.stringify(output);
+            // Strip routing markers from history
+            const cleanOutput = agentOutput.replace(/\[\[ROUTE:[^\]]+\]\]/g, "").trim();
+            history.push({ role: "assistant", content: cleanOutput });
+            conversationHistory.set(nodeId, history);
+          }
           break;
         }
 
@@ -432,7 +463,8 @@ export class WorkflowExecutor {
     nodeId: string,
     config: AgentConfig,
     input: unknown,
-    routeTargets?: RouteTarget[]
+    routeTargets?: RouteTarget[],
+    conversationHistory?: Array<{ role: string; content: string }>
   ): Promise<string> {
     const taskId = nanoid();
     const now = new Date().toISOString();
@@ -469,6 +501,15 @@ export class WorkflowExecutor {
             "Do NOT skip the routing line. It MUST be the last line of your response.",
           ].join("\n");
       augmentedConfig.systemPrompt = (config.systemPrompt ?? "") + routeInstruction;
+    }
+
+    // Inject conversation history for prompt loops
+    if (conversationHistory && conversationHistory.length > 0) {
+      const historyText = conversationHistory
+        .map((h) => `${h.role === "user" ? "User" : "You"}: ${h.content}`)
+        .join("\n");
+      augmentedConfig.systemPrompt = (augmentedConfig.systemPrompt ?? "") +
+        "\n\n## Conversation History\nThis is an ongoing conversation. Continue from where you left off:\n" + historyText;
     }
 
     await db.insert(agentTasks).values({
