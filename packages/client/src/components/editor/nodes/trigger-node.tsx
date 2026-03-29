@@ -1,0 +1,16 @@
+import { type NodeProps } from "@xyflow/react";
+import { Zap } from "lucide-react";
+import { BaseNode } from "./base-node";
+import type { WorkflowNodeData, TriggerConfig } from "@openconclave/shared";
+
+export function TriggerNode(props: NodeProps) {
+  const data = props.data as unknown as WorkflowNodeData;
+  const config = data.config as TriggerConfig;
+
+  return (
+    <BaseNode {...props} data={data} icon={Zap} showTargetHandle={false}>
+      <span className="capitalize">{config.type}</span>
+      {config.type === "cron" && config.cron && <span className="ml-1 font-mono">{config.cron}</span>}
+    </BaseNode>
+  );
+}
