@@ -8,6 +8,7 @@ const nodeColors: Record<string, string> = {
   agent: "border-node-agent",
   condition: "border-node-condition",
   transform: "border-node-transform",
+  merge: "border-info",
   output: "border-node-output",
 };
 
@@ -16,6 +17,7 @@ const nodeBgDots: Record<string, string> = {
   agent: "bg-node-agent",
   condition: "bg-node-condition",
   transform: "bg-node-transform",
+  merge: "bg-info",
   output: "bg-node-output",
 };
 

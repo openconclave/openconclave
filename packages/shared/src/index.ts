@@ -12,6 +12,7 @@ export type {
   ConditionConfig,
   CodeConfig,
   TransformConfig,
+  MergeConfig,
   OutputConfig,
   WorkflowNodeConfig,
   WorkflowNodeData,

@@ -46,6 +46,11 @@ export interface CodeConfig {
   code: string;
 }
 
+export interface MergeConfig {
+  // Merge uses source node labels as keys by default
+  // No config needed — it's automatic
+}
+
 export interface OutputConfig {
   type: OutputType;
   chatId?: string;
@@ -60,6 +65,7 @@ export type WorkflowNodeConfig =
   | AgentConfig
   | ConditionConfig
   | CodeConfig
+  | MergeConfig
   | OutputConfig;
 
 // ── Node Data ────────────────────────────────────────────────

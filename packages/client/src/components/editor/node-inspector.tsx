@@ -64,6 +64,11 @@ export function NodeInspector() {
         {data.type === "transform" && (
           <CodeFields nodeId={selectedNode.id} config={data.config as CodeConfig} />
         )}
+        {data.type === "merge" && (
+          <p className="text-xs text-muted-foreground">
+            Waits for all connected inputs to complete, then combines them into a single object using each source node's label as the key.
+          </p>
+        )}
         {data.type === "output" && (
           <OutputFields nodeId={selectedNode.id} config={data.config as OutputConfig} />
         )}

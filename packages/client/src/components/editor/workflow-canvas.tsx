@@ -14,6 +14,7 @@ import { TriggerNode } from "./nodes/trigger-node";
 import { AgentNode } from "./nodes/agent-node";
 import { ConditionNode } from "./nodes/condition-node";
 import { TransformNode } from "./nodes/transform-node";
+import { MergeNode } from "./nodes/merge-node";
 import { OutputNode } from "./nodes/output-node";
 import type { WorkflowNodeData, NodeType } from "@openconclave/shared";
 
@@ -22,6 +23,7 @@ const nodeTypes = {
   agent: AgentNode,
   condition: ConditionNode,
   transform: TransformNode,
+  merge: MergeNode,
   output: OutputNode,
 };
 

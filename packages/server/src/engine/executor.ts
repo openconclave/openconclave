@@ -315,6 +315,20 @@ export class WorkflowExecutor {
           output = await this.executeCode(node.data.config as CodeConfig, input);
           break;
 
+        case "merge": {
+          // Merge node: combine all inputs into a keyed object using source node labels
+          const inEdges = getIncomingEdges(nodeId, edges);
+          const merged: Record<string, unknown> = {};
+          for (const edge of inEdges) {
+            const sourceNode = nodeMap.get(edge.source);
+            const key = sourceNode?.data.label ?? edge.source;
+            const val = nodeOutputs.get(edge.source);
+            if (val !== undefined) merged[key] = val;
+          }
+          output = merged;
+          break;
+        }
+
         case "output": {
           const config = node.data.config as OutputConfig;
           output = input;
