@@ -269,17 +269,13 @@ export class WorkflowExecutor {
                 if (targetEdge) {
                   next.push({ nodeId: targetEdge.target, triggeredBy: entry.nodeId });
                 } else {
-                  // Invalid route — fall through to all edges
                   logger.warn("Agent routed to invalid target", { routeTo, nodeId: entry.nodeId });
-                  for (const edge of outgoing) {
-                    next.push({ nodeId: edge.target, triggeredBy: entry.nodeId });
-                  }
+                  throw new Error(`Agent "${node.data.label}" routed to unknown target "${routeTo}"`);
                 }
               } else {
-                // No routing — trigger all edges (backward compat)
-                for (const edge of outgoing) {
-                  next.push({ nodeId: edge.target, triggeredBy: entry.nodeId });
-                }
+                // Agent with 2+ outputs MUST route — fail if it didn't after retries
+                logger.error("Agent failed to route after retries", { nodeId: entry.nodeId });
+                throw new Error(`Agent "${node.data.label}" has ${outgoing.length} outputs but did not call openconclave_next to choose one`);
               }
             } else {
               for (const edge of outgoing) {

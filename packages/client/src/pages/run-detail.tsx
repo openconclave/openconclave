@@ -178,6 +178,7 @@ function formatEventData(event: RunEvent): string | null {
 
 export function RunDetailPage() {
   const [data, setData] = useState<RunDetail | null>(null);
+  const [nodeLabels, setNodeLabels] = useState<Map<string, string>>(new Map());
   const [expandedTasks, setExpandedTasks] = useState<string[]>([]);
   const [expandedEvents, setExpandedEvents] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<number[]>([]);
@@ -192,7 +193,20 @@ export function RunDetailPage() {
     const load = () => {
       api
         .get<RunDetail>(`/runs/${runId}`)
-        .then(setData)
+        .then((d) => {
+          setData(d);
+          // Fetch workflow to resolve node labels
+          if (d.run.workflowId && nodeLabels.size === 0) {
+            api.get<any>(`/workflows/${d.run.workflowId}`).then((wf) => {
+              const def = wf.definition ?? wf;
+              const labels = new Map<string, string>();
+              for (const n of def.nodes ?? []) {
+                labels.set(n.id, n.data?.label ?? n.id);
+              }
+              setNodeLabels(labels);
+            }).catch(() => {});
+          }
+        })
         .catch(() => setData(null));
     };
 
@@ -350,6 +364,9 @@ export function RunDetailPage() {
                   )}
                   {statusIcon[task.status]}
                   <div className="flex-1 min-w-0">
+                    {nodeLabels.get(task.nodeId) && (
+                      <span className="text-[10px] font-medium text-primary/70">{nodeLabels.get(task.nodeId)}</span>
+                    )}
                     <div className="text-sm truncate">
                       <Md>{typeof task.prompt === "string" ? task.prompt.split("\n")[0] : String(task.prompt)}</Md>
                     </div>

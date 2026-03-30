@@ -61,3 +61,15 @@ export function getPendingPromptForRun(runId: string): PendingPrompt | undefined
   }
   return undefined;
 }
+
+export function clearPromptsForRun(runId: string): number {
+  let cleared = 0;
+  for (const [key, entry] of pending) {
+    if (entry.runId === runId) {
+      entry.resolve("[cancelled]");
+      pending.delete(key);
+      cleared++;
+    }
+  }
+  return cleared;
+}

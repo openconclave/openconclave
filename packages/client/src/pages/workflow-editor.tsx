@@ -8,6 +8,13 @@ import { api } from "@/lib/api";
 import { Save, Play, Square } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
+function toSnakeCase(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_|_$/g, "");
+}
+
 export function WorkflowEditorPage() {
   const { nodes, edges, workflowName, workflowDescription, isDirty, setWorkflowMeta, loadWorkflow, reset } =
     useWorkflowStore();
@@ -152,7 +159,31 @@ export function WorkflowEditorPage() {
     try {
       // Re-read nodes after potential rename
       const currentNodes = useWorkflowStore.getState().nodes;
-      const currentToolName = useWorkflowStore.getState().toolName;
+      // Auto-generate tool_name if missing
+      const currentToolName = useWorkflowStore.getState().toolName || toSnakeCase(workflowName);
+      if (currentToolName) {
+        useWorkflowStore.setState({ toolName: currentToolName });
+      }
+
+      // Check uniqueness of name and toolName
+      const allWorkflows = await api.get<{ workflows: Array<{ id: string; name: string; definition: any }> }>("/workflows");
+      const others = allWorkflows.workflows.filter((w) => w.id !== existingId);
+      const nameTaken = others.some((w) => w.name === workflowName);
+      if (nameTaken) {
+        toast(`Workflow name "${workflowName}" is already taken`, "error");
+        setSaving(false);
+        return;
+      }
+      const toolTaken = others.some((w) => {
+        const def = w.definition ?? {};
+        return def.toolName === currentToolName;
+      });
+      if (toolTaken) {
+        toast(`Tool name "${currentToolName}" is already taken`, "error");
+        setSaving(false);
+        return;
+      }
+
       const payload = {
         name: workflowName,
         description: workflowDescription,
@@ -181,6 +212,7 @@ export function WorkflowEditorPage() {
       }
 
       useWorkflowStore.setState({ isDirty: false });
+      toast("Saved. Run /mcp in Claude Code to refresh tools.", "success");
     } finally {
       setSaving(false);
     }
@@ -223,28 +255,34 @@ export function WorkflowEditorPage() {
     <>
       <Header
         title={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col gap-0.5">
             <input
               type="text"
               value={workflowName}
-              onChange={(e) => setWorkflowMeta(e.target.value, workflowDescription)}
-              className="bg-transparent text-lg font-semibold border-none outline-none focus:ring-0 w-44"
-              placeholder="Name..."
+              onChange={(e) => {
+                setWorkflowMeta(e.target.value, workflowDescription);
+                // Auto-generate tool_name from workflow name if not manually set
+                const current = useWorkflowStore.getState().toolName;
+                if (!current || current === toSnakeCase(workflowName)) {
+                  useWorkflowStore.setState({ toolName: toSnakeCase(e.target.value) || undefined });
+                }
+              }}
+              className="bg-transparent text-lg font-semibold border-none outline-none focus:ring-0 w-80"
+              placeholder="Workflow name..."
             />
-            <input
-              type="text"
-              value={useWorkflowStore.getState().toolName ?? ""}
-              onChange={(e) => useWorkflowStore.setState({ toolName: e.target.value || undefined, isDirty: true })}
-              className="bg-transparent text-[11px] font-mono text-muted-foreground border border-border/40 rounded px-2 py-1 w-28"
-              placeholder="tool_name"
-            />
-            <input
-              type="text"
-              value={workflowDescription}
-              onChange={(e) => setWorkflowMeta(workflowName, e.target.value)}
-              className="bg-transparent text-xs text-muted-foreground border border-border/40 rounded px-2 py-1 w-52"
-              placeholder="Tool description for Claude..."
-            />
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-mono text-muted-foreground/50">
+                {useWorkflowStore.getState().toolName || toSnakeCase(workflowName) || "tool_name"}
+              </span>
+              <span className="text-[10px] text-muted-foreground/30">·</span>
+              <input
+                type="text"
+                value={workflowDescription}
+                onChange={(e) => setWorkflowMeta(workflowName, e.target.value)}
+                className="bg-transparent text-[11px] text-muted-foreground border-none outline-none focus:ring-0 flex-1 min-w-0"
+                placeholder="Description for Claude..."
+              />
+            </div>
           </div>
         }
         actions={

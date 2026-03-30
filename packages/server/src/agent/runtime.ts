@@ -72,7 +72,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
 
   // Build the prompt — just the current user message
   let prompt: string;
-  if (input !== undefined) {
+  if (input !== undefined && input !== null && input !== "") {
     prompt = typeof input === "string" ? input : JSON.stringify(input, null, 2);
   } else {
     prompt = "Start";

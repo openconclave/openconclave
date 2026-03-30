@@ -238,6 +238,7 @@ export interface OllamaResult {
   durationMs: number;
   thinking?: ThinkingBlock[];
   sessionId?: string;
+  routeTo?: string;
 }
 
 export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaResult> {
@@ -326,16 +327,7 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
         body.tools = activeTools;
       }
 
-      logger.debug(`Ollama API call (turn ${turn + 1})`, {
-        model,
-        messageCount: messages.length,
-        messages: messages.map((m) => ({
-          role: m.role,
-          content: m.content.length > 100 ? m.content.slice(0, 100) + "..." : m.content,
-        })),
-        toolCount: hasTools ? activeTools.length : 0,
-        sessionFile: sessionFile ?? "none",
-      });
+      logger.debug(`Ollama turn ${turn + 1}`, { model, messages: messages.length });
 
       const res = await fetch(`${OLLAMA_URL}/api/chat`, {
         method: "POST",
@@ -370,9 +362,19 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
       if (assistantMsg.tool_calls?.length > 0) {
         onOutput?.(`[Tool calls: ${assistantMsg.tool_calls.map((tc: any) => tc.function.name).join(", ")}]\n`);
 
+        let routeTo: string | undefined;
+        let routeContent: string | undefined;
+
         for (const toolCall of assistantMsg.tool_calls) {
           const fnName = toolCall.function.name;
           const fnArgs = toolCall.function.arguments;
+
+          // Capture routing before executing
+          if (fnName === "openconclave_next" && fnArgs?.node_id) {
+            routeTo = fnArgs.node_id;
+            routeContent = fnArgs.content ?? "";
+          }
+
           const executor = toolExecutors.get(fnName);
 
           let result: string;
@@ -390,6 +392,23 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
           });
 
           onOutput?.(`[${fnName} result: ${result.slice(0, 200)}${result.length > 200 ? "..." : ""}]\n`);
+        }
+
+        // If agent routed, return immediately with the route info
+        if (routeTo) {
+          if (sessionFile) {
+            mkdirSync(dirname(sessionFile), { recursive: true });
+            const linesToSave = messages.map((m) => JSON.stringify(m)).join("\n") + "\n";
+            writeFileSync(sessionFile, linesToSave);
+          }
+          if (mcpBridge) await mcpBridge.disconnect();
+          return {
+            success: true,
+            output: routeContent ?? "",
+            routeTo,
+            durationMs: Date.now() - startTime,
+            thinking: thinkingBlocks.length > 0 ? thinkingBlocks : undefined,
+          };
         }
 
         // Continue the loop — model will process tool results

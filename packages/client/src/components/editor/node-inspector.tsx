@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useWorkflowStore } from "@/stores/workflow-store";
+import { cn } from "@/lib/utils";
 import { X, Trash2 } from "lucide-react";
 import { ToolPicker } from "./tool-picker";
 import type {
@@ -129,6 +130,30 @@ function TriggerFields({ nodeId, config }: { nodeId: string; config: TriggerConf
       {config.type === "cron" && (
         <Field label="Cron Expression">
           <input type="text" value={config.cron ?? ""} onChange={(e) => update({ cron: e.target.value })} placeholder="0 9 * * 1-5" className={MONO_INPUT_CLASS} />
+          <div className="flex flex-wrap gap-1 mt-1.5">
+            {[
+              { label: "Every 5m", cron: "*/5 * * * *" },
+              { label: "Every 15m", cron: "*/15 * * * *" },
+              { label: "Hourly", cron: "0 * * * *" },
+              { label: "Daily 9am", cron: "0 9 * * *" },
+              { label: "Weekdays 9am", cron: "0 9 * * 1-5" },
+              { label: "Mon 9am", cron: "0 9 * * 1" },
+              { label: "Midnight", cron: "0 0 * * *" },
+            ].map((p) => (
+              <button
+                key={p.cron}
+                onClick={() => update({ cron: p.cron })}
+                className={cn(
+                  "rounded px-1.5 py-0.5 text-[10px] border transition-colors",
+                  config.cron === p.cron
+                    ? "bg-primary/20 border-primary/40 text-primary"
+                    : "border-border/40 text-muted-foreground hover:bg-accent/30"
+                )}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
         </Field>
       )}
       {config.type === "webhook" && (

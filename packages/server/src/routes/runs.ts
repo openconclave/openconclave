@@ -3,6 +3,7 @@ import { eq, desc } from "drizzle-orm";
 
 import { db } from "../db/client";
 import { runs, agentTasks, runEvents } from "../db/schema";
+import { clearPromptsForRun } from "../engine/prompt-registry";
 import { AppError } from "@openconclave/shared";
 
 export const runRoutes = new Hono()
@@ -57,5 +58,6 @@ export const runRoutes = new Hono()
       .update(agentTasks)
       .set({ status: "cancelled", completedAt: now })
       .where(eq(agentTasks.runId, id));
+    clearPromptsForRun(id);
     return c.json({ cancelled: true });
   });
