@@ -12,14 +12,16 @@
       "command": "bun",
       "args": ["run", "${CLAUDE_PLUGIN_ROOT}/../packages/server/src/mcp/server.ts"],
       "cwd": "${CLAUDE_PLUGIN_ROOT}/.."
+    },
+    "openconclave-channel": {
+      "command": "bun",
+      "args": ["run", "${CLAUDE_PLUGIN_ROOT}/../packages/server/src/channel/openconclave-channel.ts"],
+      "cwd": "${CLAUDE_PLUGIN_ROOT}/.."
     }
   },
   "channels": [
     {
-      "id": "openconclave-channel",
-      "command": "bun",
-      "args": ["run", "${CLAUDE_PLUGIN_ROOT}/../packages/server/src/channel/openconclave-channel.ts"],
-      "cwd": "${CLAUDE_PLUGIN_ROOT}/.."
+      "server": "openconclave-channel"
     }
   ]
 }
