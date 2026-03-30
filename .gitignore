@@ -18,3 +18,4 @@ dist/
 # Screenshots (local only)
 *.png
 !packages/client/public/*.png
+!docs/*.png
