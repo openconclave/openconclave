@@ -310,6 +310,68 @@ export function createMcpServer() {
     }
   );
 
+  // ── Dynamic Workflow Tools ──────────────────────────────────
+
+  // Register workflow tools and poll for changes
+  let registeredWorkflowTools = new Set<string>();
+
+  async function syncWorkflowTools() {
+    try {
+      const data = await ocApi("/workflows") as { workflows: Array<Record<string, unknown>> };
+      const newTools = new Set<string>();
+
+      for (const wf of data.workflows) {
+        if (!wf.enabled) continue;
+        const def = wf.definition as Record<string, unknown>;
+        const toolName = (def.toolName ?? wf.toolName) as string | undefined;
+        if (!toolName) continue;
+
+        const description = (def.description ?? wf.description ?? `Run workflow: ${wf.name}`) as string;
+        const workflowId = wf.id as string;
+
+        if (!registeredWorkflowTools.has(toolName)) {
+          // Register new workflow tool
+          server.tool(
+            toolName,
+            description,
+            {
+              input: z.string().optional().describe("Input data to pass to the workflow trigger"),
+            },
+            async ({ input }) => {
+              try {
+                const result = await ocApi(`/workflows/${workflowId}/run`, "POST", { payload: input });
+                return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+              } catch (err: unknown) {
+                const message = err instanceof Error ? err.message : String(err);
+                return { content: [{ type: "text", text: `Failed: ${message}` }], isError: true };
+              }
+            }
+          );
+        }
+
+        newTools.add(toolName);
+      }
+
+      // Check if tools changed
+      if (newTools.size !== registeredWorkflowTools.size ||
+          [...newTools].some((t) => !registeredWorkflowTools.has(t))) {
+        registeredWorkflowTools = newTools;
+        // Notify client that tools list changed
+        try {
+          await server.server.sendNotification({ method: "notifications/tools/list_changed" });
+        } catch {
+          // Client may not support notifications yet
+        }
+      }
+    } catch {
+      // Server not running yet — will retry
+    }
+  }
+
+  // Initial sync + poll every 10 seconds
+  setTimeout(syncWorkflowTools, 2000);
+  setInterval(syncWorkflowTools, 10000);
+
   return server;
 }
 

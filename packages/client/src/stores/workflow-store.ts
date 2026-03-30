@@ -36,6 +36,7 @@ interface WorkflowState {
   activeNodeId: string | null;
   workflowName: string;
   workflowDescription: string;
+  toolName?: string;
   isDirty: boolean;
 
   onNodesChange: OnNodesChange<Node<WorkflowNodeData>>;
@@ -52,7 +53,8 @@ interface WorkflowState {
     nodes: Node<WorkflowNodeData>[],
     edges: Edge[],
     name: string,
-    description: string
+    description: string,
+    toolName?: string
   ) => void;
   reset: () => void;
 }
@@ -150,12 +152,13 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
     set({ workflowName: name, workflowDescription: description, isDirty: true });
   },
 
-  loadWorkflow: (nodes, edges, name, description) => {
+  loadWorkflow: (nodes, edges, name, description, toolName) => {
     set({
       nodes,
       edges,
       workflowName: name,
       workflowDescription: description,
+      toolName,
       isDirty: false,
       selectedNodeId: null,
       activeNodeId: null,

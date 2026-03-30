@@ -99,6 +99,8 @@ export interface WorkflowDefinition {
   id: string;
   name: string;
   description?: string;
+  toolName?: string;
+  inputSchema?: Record<string, unknown>;
   nodes: WorkflowNode[];
   edges: WorkflowEdge[];
   enabled: boolean;

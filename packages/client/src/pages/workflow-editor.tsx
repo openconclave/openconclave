@@ -42,7 +42,8 @@ export function WorkflowEditorPage() {
           })),
           def.edges ?? [],
           def.name ?? wf.name ?? "Untitled Workflow",
-          def.description ?? wf.description ?? ""
+          def.description ?? wf.description ?? "",
+          def.toolName ?? wf.toolName
         );
         setLoaded(true);
       })
@@ -148,9 +149,11 @@ export function WorkflowEditorPage() {
     try {
       // Re-read nodes after potential rename
       const currentNodes = useWorkflowStore.getState().nodes;
+      const currentToolName = useWorkflowStore.getState().toolName;
       const payload = {
         name: workflowName,
         description: workflowDescription,
+        toolName: currentToolName || undefined,
         nodes: currentNodes.map((n) => ({
           id: n.id,
           type: n.data.type,
@@ -216,13 +219,22 @@ export function WorkflowEditorPage() {
     <>
       <Header
         title={
-          <input
-            type="text"
-            value={workflowName}
-            onChange={(e) => setWorkflowMeta(e.target.value, workflowDescription)}
-            className="bg-transparent text-lg font-semibold border-none outline-none focus:ring-0 w-64"
-            placeholder="Workflow name..."
-          />
+          <div className="flex items-center gap-3">
+            <input
+              type="text"
+              value={workflowName}
+              onChange={(e) => setWorkflowMeta(e.target.value, workflowDescription)}
+              className="bg-transparent text-lg font-semibold border-none outline-none focus:ring-0 w-48"
+              placeholder="Workflow name..."
+            />
+            <input
+              type="text"
+              value={useWorkflowStore.getState().toolName ?? ""}
+              onChange={(e) => useWorkflowStore.setState({ toolName: e.target.value || undefined, isDirty: true })}
+              className="bg-transparent text-xs font-mono text-muted-foreground border border-border/40 rounded px-2 py-1 w-36"
+              placeholder="tool_name (MCP)"
+            />
+          </div>
         }
         actions={
           <div className="flex items-center gap-2">
