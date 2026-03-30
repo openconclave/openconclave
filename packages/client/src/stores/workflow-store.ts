@@ -15,17 +15,20 @@ import type {
   NodeType,
 } from "@openconclave/shared";
 
-// ── Edge Colors ──────────────────────────────────────────────
+// ── Edge Colors (by source handle, matching handle dot colors) ─
 
-const EDGE_COLORS: Record<string, string> = {
-  trigger: "oklch(0.65 0.18 145)",
-  agent: "oklch(0.65 0.18 260)",
-  condition: "oklch(0.70 0.16 80)",
-  transform: "oklch(0.65 0.15 300)",
-  merge: "oklch(0.65 0.15 230)",
-  prompt: "oklch(0.70 0.16 80)",
-  output: "oklch(0.60 0.15 20)",
+const HANDLE_STROKE: Record<string, string> = {
+  bottom: "oklch(0.65 0.18 200)",     // cyan — top/bottom handles
+  "top-out": "oklch(0.65 0.18 200)",  // cyan
+  left: "oklch(0.65 0.18 260)",       // blue — left handle
+  right: "oklch(0.65 0.15 320)",      // purple — right handle
 };
+const DEFAULT_STROKE = "oklch(0.65 0.18 200)";
+
+export function edgeStyle(sourceHandle?: string | null) {
+  const stroke = HANDLE_STROKE[sourceHandle ?? "bottom"] ?? DEFAULT_STROKE;
+  return { stroke, strokeWidth: 2 };
+}
 
 // ── Store Types ──────────────────────────────────────────────
 
@@ -85,21 +88,13 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   },
 
   onConnect: (connection) => {
-    const HANDLE_COLORS: Record<string, string> = {
-      left: "oklch(0.65 0.18 200)",
-      center: "oklch(0.65 0.18 260)",
-      right: "oklch(0.65 0.15 320)",
-    };
-    const handleId = connection.sourceHandle ?? "center";
-    const stroke = HANDLE_COLORS[handleId] ?? HANDLE_COLORS.center;
-
     set({
       edges: addEdge(
         {
           ...connection,
           type: "default",
           animated: true,
-          style: { stroke, strokeWidth: 2 },
+          style: edgeStyle(connection.sourceHandle),
         },
         get().edges
       ),

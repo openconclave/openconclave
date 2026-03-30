@@ -466,7 +466,7 @@ export class WorkflowExecutor {
         }
 
         case "prompt": {
-          // Channel-in-the-loop: send agent's output to channel, wait for response
+          // Channel Loop: send agent's output to channel, wait for response
           const content = typeof input === "string" ? input : JSON.stringify(input, null, 2);
 
           this.emit({

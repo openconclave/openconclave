@@ -9,7 +9,7 @@ export function PromptNode(props: NodeProps) {
   const config = data.config as PromptConfig;
 
   return (
-    <BaseNode {...props} data={data} icon={MessageCircleQuestion} subtitle="Channel-in-the-loop">
+    <BaseNode {...props} data={data} icon={MessageCircleQuestion} subtitle="Channel Loop">
       <p className="truncate text-[10px]">{config.description || "Ask via channel"}</p>
     </BaseNode>
   );

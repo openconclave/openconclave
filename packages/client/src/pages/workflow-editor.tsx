@@ -3,7 +3,7 @@ import { Header } from "@/components/layout/header";
 import { NodePalette } from "@/components/editor/node-palette";
 import { WorkflowCanvas } from "@/components/editor/workflow-canvas";
 import { NodeInspector } from "@/components/editor/node-inspector";
-import { useWorkflowStore } from "@/stores/workflow-store";
+import { useWorkflowStore, edgeStyle } from "@/stores/workflow-store";
 import { api } from "@/lib/api";
 import { Save, Play, Square } from "lucide-react";
 import { toast } from "@/components/ui/toast";
@@ -40,7 +40,12 @@ export function WorkflowEditorPage() {
             position: n.position,
             data: n.data,
           })),
-          def.edges ?? [],
+          (def.edges ?? []).map((e: any) => ({
+            ...e,
+            type: "default",
+            animated: true,
+            style: edgeStyle(e.sourceHandle),
+          })),
           def.name ?? wf.name ?? "Untitled Workflow",
           def.description ?? wf.description ?? "",
           def.toolName ?? wf.toolName
@@ -165,6 +170,7 @@ export function WorkflowEditorPage() {
           source: e.source,
           target: e.target,
           sourceHandle: e.sourceHandle ?? undefined,
+          targetHandle: e.targetHandle ?? undefined,
           label: "label" in e ? String(e.label) : undefined,
         })),
       };

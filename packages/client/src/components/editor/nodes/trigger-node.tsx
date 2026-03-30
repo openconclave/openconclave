@@ -1,7 +1,8 @@
-import { type NodeProps } from "@xyflow/react";
+import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { Zap } from "lucide-react";
-import { BaseNode } from "./base-node";
+import { cn } from "@/lib/utils";
 import { useNodeData } from "@/hooks/use-node-data";
+import { useWorkflowStore } from "@/stores/workflow-store";
 import type { TriggerConfig } from "@openconclave/shared";
 
 const triggerLabels: Record<string, string> = {
@@ -12,21 +13,47 @@ const triggerLabels: Record<string, string> = {
   telegram: "Telegram",
 };
 
+const handleBase = "!h-3 !w-3 !rounded-full !border-2 !bg-card transition-colors";
+const handleColor = "!border-[oklch(0.65_0.18_200)] hover:!bg-[oklch(0.65_0.18_200/0.3)]";
+
 export function TriggerNode(props: NodeProps) {
   const data = useNodeData(props);
   const config = data.config as TriggerConfig;
+  const setSelectedNode = useWorkflowStore((s) => s.setSelectedNode);
+  const activeNodeId = useWorkflowStore((s) => s.activeNodeId);
+  const isActive = activeNodeId === props.id;
 
   return (
-    <BaseNode {...props} data={data} icon={Zap} showTargetHandle={false} subtitle={triggerLabels[config.type] ?? config.type}>
-      {config.type === "cron" && config.cron && (
-        <div className="font-mono text-[11px] bg-secondary/50 rounded px-1.5 py-0.5 inline-block">{config.cron}</div>
+    <div
+      className={cn(
+        "w-[220px] rounded-full border bg-gradient-to-b from-card to-card/80 transition-all duration-200 cursor-pointer",
+        "border-node-trigger/60",
+        "shadow-[0_0_15px_-3px] shadow-node-trigger/20",
+        props.selected && "!border-primary ring-1 ring-primary/30 ring-offset-1 ring-offset-background",
+        isActive && "animate-pulse !border-warning ring-1 ring-warning/30"
       )}
-      {config.prompt && (
-        <p className="truncate mt-1 text-[10px] opacity-70">{config.prompt}</p>
-      )}
-      {config.type === "telegram" && config.chatId && (
-        <p className="text-[10px] font-mono opacity-60">ID: {config.chatId}</p>
-      )}
-    </BaseNode>
+      onClick={() => setSelectedNode(props.id)}
+    >
+      {/* Only bottom handle — triggers are entry points */}
+      <Handle
+        type="source"
+        id="bottom"
+        position={Position.Bottom}
+        style={{ left: "50%", transform: "translateX(-50%)" }}
+        className={cn(handleBase, handleColor)}
+      />
+
+      <div className="flex items-center gap-2.5 px-5 py-3">
+        <div className="flex h-8 w-8 items-center justify-center rounded-full shrink-0 bg-node-trigger">
+          <Zap className="h-4 w-4 text-white" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <span className="text-sm font-semibold truncate block">{data.label}</span>
+          <span className="text-[10px] text-muted-foreground/70 uppercase tracking-wider">
+            {triggerLabels[config.type] ?? config.type}
+          </span>
+        </div>
+      </div>
+    </div>
   );
 }

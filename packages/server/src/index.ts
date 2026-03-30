@@ -6,6 +6,7 @@ import { logger } from "./lib/logger";
 import { errorHandler } from "./lib/errors";
 import { db } from "./db/client";
 import { runMigrations } from "./db/migrate";
+import { recoverStaleRuns } from "./engine/recovery";
 import { workflows, runs, agentTasks, runEvents, settings } from "./db/schema";
 import { respondToPrompt, getPendingPrompts } from "./engine/prompt-registry";
 import { workflowRoutes } from "./routes/workflows";
@@ -24,6 +25,7 @@ import { API_PORT } from "@openconclave/shared";
 
 // ── Database ─────────────────────────────────────────────────
 runMigrations();
+await recoverStaleRuns();
 
 // ── App ──────────────────────────────────────────────────────
 const app = new Hono();

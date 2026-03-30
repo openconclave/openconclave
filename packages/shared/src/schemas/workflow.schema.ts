@@ -62,6 +62,7 @@ export const workflowEdgeSchema = z.object({
   source: z.string(),
   target: z.string(),
   sourceHandle: z.string().optional(),
+  targetHandle: z.string().optional(),
   label: z.string().optional(),
 });
 

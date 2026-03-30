@@ -92,6 +92,7 @@ export interface WorkflowEdge {
   source: string;
   target: string;
   sourceHandle?: string;
+  targetHandle?: string;
   label?: string;
 }
 

@@ -50,7 +50,7 @@ export function NodeInspector() {
         </Field>
 
         <div className="text-xs text-muted-foreground uppercase tracking-wider">
-          {data.type} config
+          {data.type === "prompt" ? "channel loop" : data.type} config
         </div>
 
         {data.type === "trigger" && (
@@ -323,7 +323,7 @@ function PromptFields({ nodeId, config }: { nodeId: string; config: PromptConfig
         />
       </Field>
       <p className="text-[10px] text-muted-foreground px-1">
-        Channel-in-the-loop: pauses workflow, sends agent's output to the connected Claude Code session, waits for response, then continues. The description is shown to the agent as the routing tool description.
+        Channel Loop: pauses workflow, sends agent's output to the connected Claude Code session, waits for response, then continues. The description is shown to the agent as the routing tool description.
       </p>
     </>
   );
