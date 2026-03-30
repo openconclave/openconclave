@@ -1,11 +1,20 @@
 node_modules/
 dist/
+
+# Data
 *.db
 *.db-wal
 *.db-shm
 .openconclave/
 .openconclave-tmp/
 .openconclave-outputs/
+
+# Temp / tools
 .playwright-mcp/
 .claude/
 *.output
+*.bat
+
+# Screenshots (local only)
+*.png
+!packages/client/public/*.png
