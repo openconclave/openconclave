@@ -12,6 +12,31 @@ console.log(`
   ╚═══════════════════════════════════════╝
 `);
 
+// Open browser once server is ready
+async function openBrowser(url: string) {
+  const cmd = process.platform === "win32"
+    ? ["powershell.exe", "-Command", `Start-Process '${url}'`]
+    : process.platform === "darwin"
+    ? ["open", url]
+    : ["xdg-open", url];
+  spawn({ cmd, stdout: "ignore", stderr: "ignore" });
+}
+
+async function waitAndOpenBrowser() {
+  for (let i = 0; i < 30; i++) {
+    try {
+      const res = await fetch(`http://localhost:${port}/api/health`);
+      if (res.ok) {
+        openBrowser(`http://localhost:${clientPort}`);
+        return;
+      }
+    } catch {}
+    await Bun.sleep(500);
+  }
+}
+
+waitAndOpenBrowser();
+
 const server = spawn({
   cmd: ["bun", "run", "--watch", "packages/server/src/index.ts"],
   cwd: import.meta.dir,
