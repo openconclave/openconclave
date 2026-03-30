@@ -53,16 +53,25 @@ const client = spawn({
   env: { ...process.env, CLIENT_PORT: clientPort },
 });
 
-process.on("SIGINT", () => {
+function shutdown() {
   server.kill();
   client.kill();
   process.exit(0);
-});
+}
 
-process.on("SIGTERM", () => {
-  server.kill();
-  client.kill();
-  process.exit(0);
-});
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
+
+// If launched by a parent (e.g. Claude Code hook), exit when parent dies
+const parentPid = Number(process.env.OPENCONCLAVE_PARENT_PID);
+if (parentPid) {
+  setInterval(() => {
+    try {
+      process.kill(parentPid, 0); // signal 0 = check if alive
+    } catch {
+      shutdown();
+    }
+  }, 5000);
+}
 
 await Promise.all([server.exited, client.exited]);
