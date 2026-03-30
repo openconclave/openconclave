@@ -137,6 +137,15 @@ export function WorkflowCanvas() {
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        isValidConnection={(connection) => {
+          // Prevent duplicate edges between same source and target nodes
+          const currentEdges = useWorkflowStore.getState().edges;
+          const exists = currentEdges.some(
+            (e) => e.source === connection.source && e.target === connection.target
+          );
+          // Also prevent self-connections
+          return !exists && connection.source !== connection.target;
+        }}
         onDragOver={onDragOver}
         onDrop={onDrop}
         onInit={(instance) => {
