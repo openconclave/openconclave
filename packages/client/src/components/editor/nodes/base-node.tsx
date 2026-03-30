@@ -3,17 +3,17 @@ import { cn } from "@/lib/utils";
 import type { WorkflowNodeData } from "@openconclave/shared";
 import { useWorkflowStore } from "@/stores/workflow-store";
 
-const nodeColors: Record<string, string> = {
-  trigger: "border-node-trigger",
-  agent: "border-node-agent",
-  condition: "border-node-condition",
-  transform: "border-node-transform",
-  merge: "border-info",
-  prompt: "border-warning",
-  output: "border-node-output",
+const nodeBorderColors: Record<string, string> = {
+  trigger: "border-node-trigger/60",
+  agent: "border-node-agent/60",
+  condition: "border-node-condition/60",
+  transform: "border-node-transform/60",
+  merge: "border-info/60",
+  prompt: "border-warning/60",
+  output: "border-node-output/60",
 };
 
-const nodeBgDots: Record<string, string> = {
+const nodeAccentColors: Record<string, string> = {
   trigger: "bg-node-trigger",
   agent: "bg-node-agent",
   condition: "bg-node-condition",
@@ -23,12 +23,25 @@ const nodeBgDots: Record<string, string> = {
   output: "bg-node-output",
 };
 
+const nodeGlowColors: Record<string, string> = {
+  trigger: "shadow-[0_0_15px_-3px] shadow-node-trigger/20",
+  agent: "shadow-[0_0_15px_-3px] shadow-node-agent/20",
+  condition: "shadow-[0_0_15px_-3px] shadow-node-condition/20",
+  transform: "shadow-[0_0_15px_-3px] shadow-node-transform/20",
+  merge: "shadow-[0_0_15px_-3px] shadow-info/20",
+  prompt: "shadow-[0_0_15px_-3px] shadow-warning/20",
+  output: "shadow-[0_0_15px_-3px] shadow-node-output/20",
+};
+
+const handleClass = "!h-3 !w-3 !rounded-full !border-2 !border-muted-foreground/40 !bg-card hover:!border-primary hover:!bg-primary/20 transition-colors";
+
 export function BaseNode({
   id,
   data,
   selected,
   icon: Icon,
   children,
+  subtitle,
   showTargetHandle = true,
   showSourceHandle = true,
   sourceHandles,
@@ -36,6 +49,7 @@ export function BaseNode({
   data: WorkflowNodeData;
   icon: React.ElementType;
   children?: React.ReactNode;
+  subtitle?: string;
   showTargetHandle?: boolean;
   showSourceHandle?: boolean;
   sourceHandles?: { id: string; label: string; position: number }[];
@@ -47,10 +61,11 @@ export function BaseNode({
   return (
     <div
       className={cn(
-        "w-[200px] rounded-lg border-2 bg-card transition-all cursor-pointer",
-        nodeColors[data.type],
-        selected && "ring-2 ring-primary ring-offset-2 ring-offset-background",
-        isActive && "animate-pulse ring-2 ring-warning ring-offset-2 ring-offset-background"
+        "w-[220px] rounded-xl border bg-gradient-to-b from-card to-card/80 transition-all duration-200 cursor-pointer",
+        nodeBorderColors[data.type],
+        nodeGlowColors[data.type],
+        selected && "!border-primary ring-1 ring-primary/30 ring-offset-1 ring-offset-background",
+        isActive && "animate-pulse !border-warning ring-1 ring-warning/30"
       )}
       onClick={() => setSelectedNode(id)}
     >
@@ -59,30 +74,42 @@ export function BaseNode({
           type="target"
           position={Position.Top}
           style={{ left: "50%" }}
-          className="!h-3 !w-3 !border-2 !border-border !bg-muted"
+          className={handleClass}
         />
       )}
 
-      <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+      {/* Header */}
+      <div className="flex items-center gap-2.5 px-3 py-2.5">
         <div
           className={cn(
-            "flex h-6 w-6 items-center justify-center rounded",
-            nodeBgDots[data.type]
+            "flex h-8 w-8 items-center justify-center rounded-lg shrink-0",
+            nodeAccentColors[data.type]
           )}
         >
-          <Icon className="h-3.5 w-3.5 text-white" />
+          <Icon className="h-4 w-4 text-white" />
         </div>
-        <span className="text-sm font-medium truncate">{data.label}</span>
+        <div className="min-w-0 flex-1">
+          <span className="text-sm font-semibold truncate block">{data.label}</span>
+          {subtitle && (
+            <span className="text-[10px] text-muted-foreground/70 uppercase tracking-wider">{subtitle}</span>
+          )}
+        </div>
       </div>
 
-      {children && <div className="px-3 py-2 text-xs text-muted-foreground">{children}</div>}
+      {/* Content */}
+      {children && (
+        <div className="border-t border-border/40 px-3 py-2 text-xs text-muted-foreground">
+          {children}
+        </div>
+      )}
 
+      {/* Source handle */}
       {showSourceHandle && !sourceHandles && (
         <Handle
           type="source"
           position={Position.Bottom}
           style={{ left: "50%" }}
-          className="!h-3 !w-3 !border-2 !border-border !bg-muted"
+          className={handleClass}
         />
       )}
 
@@ -92,10 +119,10 @@ export function BaseNode({
           id={h.id}
           type="source"
           position={Position.Bottom}
-          className="!h-3 !w-3 !border-2 !border-border !bg-muted"
+          className={handleClass}
           style={{ left: `${h.position}%` }}
         >
-          <span className="absolute top-4 left-1/2 -translate-x-1/2 text-[10px] text-muted-foreground whitespace-nowrap">
+          <span className="absolute top-4 left-1/2 -translate-x-1/2 text-[10px] text-muted-foreground/60 whitespace-nowrap font-medium">
             {h.label}
           </span>
         </Handle>

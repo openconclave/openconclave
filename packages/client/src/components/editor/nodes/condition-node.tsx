@@ -13,13 +13,18 @@ export function ConditionNode(props: NodeProps) {
       {...props}
       data={data}
       icon={GitFork}
+      subtitle="Branch"
       showSourceHandle={false}
       sourceHandles={[
         { id: "true", label: "True", position: 30 },
         { id: "false", label: "False", position: 70 },
       ]}
     >
-      <p className="truncate font-mono">{config.expression || "expression..."}</p>
+      {config.expression ? (
+        <p className="truncate font-mono text-[10px] bg-secondary/40 rounded px-1.5 py-0.5">{config.expression}</p>
+      ) : (
+        <p className="text-[10px] opacity-40 italic">No expression</p>
+      )}
     </BaseNode>
   );
 }
