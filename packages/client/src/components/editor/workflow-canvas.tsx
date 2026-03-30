@@ -4,10 +4,13 @@ import {
   Background,
   Controls,
   MiniMap,
+  Panel,
   BackgroundVariant,
   type ReactFlowInstance,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import dagre from "@dagrejs/dagre";
+import { LayoutGrid } from "lucide-react";
 
 import { useWorkflowStore } from "@/stores/workflow-store";
 import { TriggerNode } from "./nodes/trigger-node";
@@ -30,6 +33,37 @@ const nodeTypes = {
 };
 
 let nodeId = Date.now();
+
+function autoLayout() {
+  const { nodes, edges } = useWorkflowStore.getState();
+  if (nodes.length === 0) return;
+
+  const g = new dagre.graphlib.Graph();
+  g.setDefaultEdgeLabel(() => ({}));
+  g.setGraph({ rankdir: "TB", nodesep: 60, ranksep: 100 });
+
+  for (const node of nodes) {
+    g.setNode(node.id, { width: 220, height: 100 });
+  }
+  for (const edge of edges) {
+    g.setEdge(edge.source, edge.target);
+  }
+
+  dagre.layout(g);
+
+  const layoutedNodes = nodes.map((node) => {
+    const pos = g.node(node.id);
+    return {
+      ...node,
+      position: {
+        x: Math.round((pos.x - 110) / 20) * 20,
+        y: Math.round((pos.y - 50) / 20) * 20,
+      },
+    };
+  });
+
+  useWorkflowStore.setState({ nodes: layoutedNodes, isDirty: true });
+}
 
 export function WorkflowCanvas() {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
@@ -123,6 +157,18 @@ export function WorkflowCanvas() {
           style: { stroke: "oklch(0.65 0.18 260)", strokeWidth: 2 },
         }}
       >
+        <Panel position="top-right" className="flex gap-2">
+          <button
+            onClick={() => {
+              autoLayout();
+              reactFlowInstance.current?.fitView({ padding: 0.2 });
+            }}
+            className="flex items-center gap-1.5 rounded-md bg-card border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+          >
+            <LayoutGrid className="h-3.5 w-3.5" />
+            Auto Layout
+          </button>
+        </Panel>
         <Background
           variant={BackgroundVariant.Dots}
           gap={20}

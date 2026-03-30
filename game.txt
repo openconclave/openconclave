@@ -1,0 +1,3 @@
+=== Number Guessing Game ===
+Secret Number: 47
+Round 1: Agent guesses 75 -> Response: LESS (75 > 47)
