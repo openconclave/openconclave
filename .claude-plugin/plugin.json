@@ -1,0 +1,27 @@
+{
+  "name": "openconclave",
+  "version": "0.1.0",
+  "description": "AI agent orchestration with visual workflow automation. Claude Code + Ollama engines, channel-in-the-loop, workflows-as-MCP-tools.",
+  "author": {
+    "name": "OpenConclave"
+  },
+  "license": "MIT",
+  "keywords": ["workflow", "orchestration", "agents", "ollama", "mcp", "automation"],
+  "mcpServers": {
+    "openconclave": {
+      "command": "bun",
+      "args": ["run", "${CLAUDE_PLUGIN_ROOT}/packages/server/src/mcp/server.ts"],
+      "cwd": "${CLAUDE_PLUGIN_ROOT}"
+    },
+    "openconclave-channel": {
+      "command": "bun",
+      "args": ["run", "${CLAUDE_PLUGIN_ROOT}/packages/server/src/channel/openconclave-channel.ts"],
+      "cwd": "${CLAUDE_PLUGIN_ROOT}"
+    }
+  },
+  "channels": [
+    {
+      "server": "openconclave-channel"
+    }
+  ]
+}
