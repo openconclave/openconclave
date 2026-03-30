@@ -542,13 +542,15 @@ export class WorkflowExecutor {
     // Conversation history — pass to runtime for proper chat message building
     // History is built by the executor with perspective-dependent roles
 
+    // Store user message as prompt, full system prompt separately
+    const userMessage = typeof input === "string" ? input : (input ? JSON.stringify(input) : null);
     await db.insert(agentTasks).values({
       id: taskId,
       runId,
       nodeId,
       status: "running",
-      prompt: config.systemPrompt ?? "(no instructions)",
-      systemPrompt: augmentedConfig.systemPrompt,
+      prompt: userMessage ?? "(no input)",
+      systemPrompt: config.systemPrompt,
       model: `${engine}/${modelName}`,
       input: input ?? null,
       startedAt: now,
