@@ -69,13 +69,13 @@ export function BaseNode({
       )}
       onClick={() => setSelectedNode(id)}
     >
+      {/* Target handles — 3 points for flexible connections */}
       {showTargetHandle && (
-        <Handle
-          type="target"
-          position={Position.Top}
-          style={{ left: "50%" }}
-          className={handleClass}
-        />
+        <>
+          <Handle type="target" id="t-left" position={Position.Top} style={{ left: "25%" }} className={handleClass} />
+          <Handle type="target" id="t-center" position={Position.Top} style={{ left: "50%" }} className={handleClass} />
+          <Handle type="target" id="t-right" position={Position.Top} style={{ left: "75%" }} className={handleClass} />
+        </>
       )}
 
       {/* Header */}
@@ -103,14 +103,13 @@ export function BaseNode({
         </div>
       )}
 
-      {/* Source handle */}
+      {/* Source handles — 3 points for flexible connections */}
       {showSourceHandle && !sourceHandles && (
-        <Handle
-          type="source"
-          position={Position.Bottom}
-          style={{ left: "50%" }}
-          className={handleClass}
-        />
+        <>
+          <Handle type="source" id="left" position={Position.Bottom} style={{ left: "25%" }} className={handleClass} />
+          <Handle type="source" id="center" position={Position.Bottom} style={{ left: "50%" }} className={handleClass} />
+          <Handle type="source" id="right" position={Position.Bottom} style={{ left: "75%" }} className={handleClass} />
+        </>
       )}
 
       {sourceHandles?.map((h) => (
