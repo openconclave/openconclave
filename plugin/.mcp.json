@@ -2,11 +2,8 @@
   "mcpServers": {
     "openconclave": {
       "command": "bun",
-      "args": ["run", "${CLAUDE_PLUGIN_ROOT}/../packages/server/src/mcp/server.ts"]
-    },
-    "openconclave-channel": {
-      "command": "bun",
-      "args": ["run", "${CLAUDE_PLUGIN_ROOT}/../packages/server/src/channel/openconclave-channel.ts"]
+      "args": ["run", "${CLAUDE_PLUGIN_ROOT}/../packages/server/src/mcp/server.ts"],
+      "cwd": "${CLAUDE_PLUGIN_ROOT}/.."
     }
   }
 }

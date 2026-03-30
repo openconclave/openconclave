@@ -1,0 +1,7 @@
+[
+  {
+    "event": "SessionStart",
+    "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/start-server.sh",
+    "timeout": 15000
+  }
+]

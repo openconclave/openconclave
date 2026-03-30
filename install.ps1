@@ -1,93 +1,148 @@
 $ErrorActionPreference = "Stop"
 
 Write-Host ""
-Write-Host "  ╔═══════════════════════════════════════╗"
-Write-Host "  ║      OpenConclave Installer           ║"
-Write-Host "  ║  AI Agent Orchestration Platform      ║"
-Write-Host "  ╚═══════════════════════════════════════╝"
+Write-Host "  ╔═══════════════════════════════════════╗" -ForegroundColor Cyan
+Write-Host "  ║      OpenConclave Installer           ║" -ForegroundColor Cyan
+Write-Host "  ║  AI Agent Orchestration Platform      ║" -ForegroundColor Cyan
+Write-Host "  ╚═══════════════════════════════════════╝" -ForegroundColor Cyan
 Write-Host ""
 
-$InstallDir = if ($env:OPENCONCLAVE_DIR) { $env:OPENCONCLAVE_DIR } else { "$env:USERPROFILE\.openconclave" }
+$InstallDir = if ($env:OPENCONCLAVE_DIR) { $env:OPENCONCLAVE_DIR } else { "$env:USERPROFILE\.openconclave-app" }
 $Repo = "https://github.com/openconclave/openconclave.git"
 
-# Check for bun
+# ── Check prerequisites ──────────────────────────────────────
+
+# Git
+$gitPath = Get-Command git -ErrorAction SilentlyContinue
+if (-not $gitPath) {
+    Write-Host "  [!] Git is required. Install from https://git-scm.com" -ForegroundColor Red
+    exit 1
+}
+
+# Bun
 $bunPath = Get-Command bun -ErrorAction SilentlyContinue
 if (-not $bunPath) {
-    Write-Host ">> Installing Bun..."
+    Write-Host "  >> Installing Bun..." -ForegroundColor Yellow
     irm https://bun.sh/install.ps1 | iex
-    $env:PATH = "$env:USERPROFILE\.bun\bin;$env:PATH"
+    # Refresh PATH
+    $env:BUN_INSTALL = "$env:USERPROFILE\.bun"
+    $env:PATH = "$env:BUN_INSTALL\bin;$env:PATH"
+    $bunPath = Get-Command bun -ErrorAction SilentlyContinue
+    if (-not $bunPath) {
+        Write-Host "  [!] Bun installation failed. Install manually from https://bun.sh" -ForegroundColor Red
+        exit 1
+    }
 }
 
-Write-Host ">> Bun $(bun --version) found"
+$bunVersion = & bun --version
+Write-Host "  >> Bun $bunVersion found" -ForegroundColor Green
 
-# Clone or update
-if (Test-Path $InstallDir) {
-    Write-Host ">> Updating existing installation..."
-    Set-Location $InstallDir
+# ── Clone or update ──────────────────────────────────────────
+
+if (Test-Path "$InstallDir\.git") {
+    Write-Host "  >> Updating existing installation..."
+    Push-Location $InstallDir
     git pull --quiet
+    Pop-Location
 } else {
-    Write-Host ">> Cloning OpenConclave..."
+    if (Test-Path $InstallDir) {
+        Write-Host "  >> Removing old installation..."
+        Remove-Item -Recurse -Force $InstallDir
+    }
+    Write-Host "  >> Cloning OpenConclave..."
     git clone --depth 1 $Repo $InstallDir
-    Set-Location $InstallDir
 }
 
-# Install dependencies
-Write-Host ">> Installing dependencies..."
-bun install --silent
+# ── Install dependencies ─────────────────────────────────────
 
-# Create start script
+Push-Location $InstallDir
+Write-Host "  >> Installing dependencies..."
+bun install --silent 2>$null
+Pop-Location
+
+# ── Create start command ─────────────────────────────────────
+
 $BinDir = "$env:USERPROFILE\.local\bin"
 if (-not (Test-Path $BinDir)) { New-Item -ItemType Directory -Path $BinDir -Force | Out-Null }
 
+# openconclave.cmd — start server + client
 @"
 @echo off
 cd /d "$InstallDir"
-bun run start.ts %*
-"@ | Set-Content "$BinDir\openconclave.cmd"
+bun start %*
+"@ | Set-Content "$BinDir\openconclave.cmd" -Encoding ASCII
 
-# Install Claude Code plugin if claude is available
+# Add to user PATH if not already there
+$UserPath = [Environment]::GetEnvironmentVariable("PATH", "User")
+if ($UserPath -notlike "*$BinDir*") {
+    [Environment]::SetEnvironmentVariable("PATH", "$BinDir;$UserPath", "User")
+    $env:PATH = "$BinDir;$env:PATH"
+    Write-Host "  >> Added $BinDir to PATH" -ForegroundColor Yellow
+}
+
+# ── Configure Claude Code MCP ────────────────────────────────
+
+$ClaudeConfigured = $false
 $claudePath = Get-Command claude -ErrorAction SilentlyContinue
+
 if ($claudePath) {
-    Write-Host ">> Setting up Claude Code MCP integration..."
+    Write-Host "  >> Configuring Claude Code integration..."
 
     $ClaudeDir = "$env:USERPROFILE\.claude"
     if (-not (Test-Path $ClaudeDir)) { New-Item -ItemType Directory -Path $ClaudeDir -Force | Out-Null }
 
-    $McpConfig = "$ClaudeDir\.mcp.json"
-    $mcpJson = @{
-        mcpServers = @{
-            openconclave = @{
-                command = "bun"
-                args = @("run", "$InstallDir\packages\server\src\mcp\server.ts")
-            }
-            "openconclave-channel" = @{
-                command = "bun"
-                args = @("run", "$InstallDir\packages\server\src\channel\openconclave-channel.ts")
-            }
+    $McpConfigPath = "$ClaudeDir\.mcp.json"
+
+    $ocServer = @{
+        command = "bun"
+        args = @("run", "$InstallDir\packages\server\src\mcp\server.ts")
+        cwd = $InstallDir
+    }
+    $ocChannel = @{
+        command = "bun"
+        args = @("run", "$InstallDir\packages\server\src\channel\openconclave-channel.ts")
+        cwd = $InstallDir
+    }
+
+    if (Test-Path $McpConfigPath) {
+        $existing = Get-Content $McpConfigPath -Raw | ConvertFrom-Json
+        if (-not $existing.mcpServers) {
+            $existing | Add-Member -NotePropertyName "mcpServers" -NotePropertyValue @{} -Force
         }
-    }
-
-    if (Test-Path $McpConfig) {
-        $existing = Get-Content $McpConfig | ConvertFrom-Json
-        $existing.mcpServers | Add-Member -NotePropertyName "openconclave" -NotePropertyValue $mcpJson.mcpServers.openconclave -Force
-        $existing.mcpServers | Add-Member -NotePropertyName "openconclave-channel" -NotePropertyValue $mcpJson.mcpServers."openconclave-channel" -Force
-        $existing | ConvertTo-Json -Depth 10 | Set-Content $McpConfig
+        $existing.mcpServers | Add-Member -NotePropertyName "openconclave" -NotePropertyValue $ocServer -Force
+        $existing.mcpServers | Add-Member -NotePropertyName "openconclave-channel" -NotePropertyValue $ocChannel -Force
+        $existing | ConvertTo-Json -Depth 10 | Set-Content $McpConfigPath
     } else {
-        $mcpJson | ConvertTo-Json -Depth 10 | Set-Content $McpConfig
+        @{
+            mcpServers = @{
+                openconclave = $ocServer
+                "openconclave-channel" = $ocChannel
+            }
+        } | ConvertTo-Json -Depth 10 | Set-Content $McpConfigPath
     }
+
+    $ClaudeConfigured = $true
 }
 
+# ── Done ─────────────────────────────────────────────────────
+
 Write-Host ""
-Write-Host "  ✅ OpenConclave installed!"
+Write-Host "  ╔═══════════════════════════════════════╗" -ForegroundColor Green
+Write-Host "  ║      OpenConclave installed!          ║" -ForegroundColor Green
+Write-Host "  ╚═══════════════════════════════════════╝" -ForegroundColor Green
 Write-Host ""
-Write-Host "  Start:    openconclave"
-Write-Host "  Or:       cd $InstallDir; bun start"
+Write-Host "  Start:     openconclave" -ForegroundColor White
+Write-Host "  Or:        cd $InstallDir; bun start" -ForegroundColor DarkGray
 Write-Host ""
-Write-Host "  UI:       http://localhost:5173"
-Write-Host "  API:      http://localhost:4000"
+Write-Host "  UI:        http://localhost:5173" -ForegroundColor Cyan
+Write-Host "  API:       http://localhost:4000" -ForegroundColor Cyan
 Write-Host ""
-if ($claudePath) {
-    Write-Host "  Claude Code MCP: configured"
-    Write-Host "  Channel: run with --dangerously-load-development-channels server:openconclave-channel"
+
+if ($ClaudeConfigured) {
+    Write-Host "  Claude Code MCP: configured in ~/.claude/.mcp.json" -ForegroundColor Green
+    Write-Host "  With channel:    claude --dangerously-load-development-channels server:openconclave-channel" -ForegroundColor DarkGray
+} else {
+    Write-Host "  Claude Code: not found. Install it, then re-run this script." -ForegroundColor Yellow
 }
+
 Write-Host ""
