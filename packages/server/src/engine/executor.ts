@@ -225,6 +225,7 @@ export class WorkflowExecutor {
               conversationHistory,
               agentSessions,
               workflowContext,
+              workflow,
               triggerPayload,
               entry.triggeredBy
             );
@@ -325,6 +326,7 @@ export class WorkflowExecutor {
     conversationHistory: Map<string, Array<{ role: string; content: string }>>,
     agentSessions: Map<string, string>,
     workflowContext: string | null,
+    workflow: WorkflowDefinition,
     triggerPayload?: unknown,
     triggeredBy?: string | null
   ): Promise<unknown> {
@@ -471,11 +473,21 @@ export class WorkflowExecutor {
           // Channel Loop: send agent's output to channel, wait for response
           const content = typeof input === "string" ? input : JSON.stringify(input, null, 2);
 
+          // Find which agent sent this (the node that triggered this prompt)
+          const senderNode = triggeredBy ? nodeMap.get(triggeredBy) : null;
+
           this.emit({
             type: "prompt:question",
             runId,
             nodeId,
-            data: { question: content, waitingForResponse: true },
+            data: {
+              question: content,
+              waitingForResponse: true,
+              workflowName: workflow.name,
+              nodeLabel: node.data.label,
+              senderNode: senderNode?.data.label ?? triggeredBy ?? "unknown",
+              senderType: senderNode?.data.type ?? "unknown",
+            },
           });
 
           logger.info("Channel-in-the-loop waiting for response", { runId, nodeId });
@@ -486,7 +498,7 @@ export class WorkflowExecutor {
         case "output": {
           const config = node.data.config as OutputConfig;
           output = input;
-          await this.handleOutput(config, input, runId, nodeId);
+          await this.handleOutput(config, input, runId, nodeId, workflow.name, node.data.label);
           break;
         }
       }
@@ -739,11 +751,13 @@ export class WorkflowExecutor {
     config: OutputConfig,
     data: unknown,
     runId: string,
-    nodeId: string
+    nodeId: string,
+    workflowName?: string,
+    nodeLabel?: string
   ): Promise<void> {
     switch (config.type) {
       case "claude-code":
-        this.emit({ type: "channel:output", runId, nodeId, data });
+        this.emit({ type: "channel:output", runId, nodeId, data: { content: data, workflowName, nodeLabel } });
         break;
 
       case "telegram":

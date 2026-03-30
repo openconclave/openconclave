@@ -215,6 +215,10 @@ function connectWebSocket() {
           if (data.data?.status) meta.status = data.data.status;
           if (data.data?.success !== undefined) meta.success = String(data.data.success);
           if (data.data?.durationMs) meta.duration_ms = String(data.data.durationMs);
+          if (data.data?.workflowName) meta.workflow_name = data.data.workflowName;
+          if (data.data?.nodeLabel) meta.node_label = data.data.nodeLabel;
+          if (data.data?.senderNode) meta.sender_node = data.data.senderNode;
+          if (data.data?.senderType) meta.sender_type = data.data.senderType;
 
           const fullContent =
             typeof data.data === "string"

@@ -17,6 +17,7 @@ import {
   ChevronDown,
   ChevronRight,
   AlertTriangle,
+  Square,
 } from "lucide-react";
 
 type RunDetail = {
@@ -224,6 +225,17 @@ export function RunDetailPage() {
     );
   };
 
+  const isActive = data?.run.status === "running" || data?.run.status === "queued";
+
+  const handleCancel = async () => {
+    if (!runId) return;
+    try {
+      await api.post(`/runs/${runId}/cancel`, {});
+      // Reload to reflect new status
+      api.get<RunDetail>(`/runs/${runId}`).then(setData);
+    } catch {}
+  };
+
   if (!data) {
     return (
       <>
@@ -260,6 +272,15 @@ export function RunDetailPage() {
               {run.status}
             </span>
             <span className="font-mono text-sm text-muted-foreground">{run.id}</span>
+            {isActive && (
+              <button
+                onClick={handleCancel}
+                className="ml-auto inline-flex items-center gap-1.5 rounded-md bg-destructive px-3 py-1 text-xs font-medium text-white hover:bg-destructive/90 transition-colors"
+              >
+                <Square className="h-3 w-3" />
+                Stop
+              </button>
+            )}
           </div>
 
           <div className="grid grid-cols-4 gap-4">

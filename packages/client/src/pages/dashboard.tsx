@@ -287,23 +287,39 @@ export function DashboardPage() {
               </h3>
             </div>
             <div className="divide-y divide-border/50">
-              {data.recentOutputs.slice(0, 5).map((out) => (
-                <a
-                  key={out.id}
-                  href={`/runs/${out.runId}`}
-                  className="block px-5 py-3 transition-colors hover:bg-secondary/30"
-                >
-                  <div className="flex items-start gap-2">
-                    <Terminal className="h-3 w-3 mt-1 text-primary shrink-0" />
-                    <p className="text-xs line-clamp-2 text-muted-foreground leading-relaxed">
-                      {typeof out.data === "string" ? out.data : JSON.stringify(out.data).slice(0, 150)}
+              {data.recentOutputs.slice(0, 5).map((out) => {
+                // Extract content from new { content, workflowName, nodeLabel } shape or legacy string
+                const outData = out.data as Record<string, unknown> | string;
+                const content = typeof outData === "string"
+                  ? outData
+                  : typeof outData?.content === "string"
+                    ? outData.content
+                    : JSON.stringify(outData);
+                const workflowName = typeof outData === "object" && outData?.workflowName
+                  ? String(outData.workflowName)
+                  : null;
+
+                return (
+                  <a
+                    key={out.id}
+                    href={`/runs/${out.runId}`}
+                    className="block px-5 py-3 transition-colors hover:bg-secondary/30"
+                  >
+                    {workflowName && (
+                      <p className="text-[10px] font-medium text-primary/70 mb-1">{workflowName}</p>
+                    )}
+                    <div className="flex items-start gap-2">
+                      <Terminal className="h-3 w-3 mt-1 text-primary shrink-0" />
+                      <p className="text-xs line-clamp-2 text-muted-foreground leading-relaxed">
+                        {content.slice(0, 200)}
+                      </p>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground/50 mt-1.5 pl-5">
+                      {new Date(out.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                     </p>
-                  </div>
-                  <p className="text-[10px] text-muted-foreground/50 mt-1.5 pl-5">
-                    {new Date(out.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                  </p>
-                </a>
-              ))}
+                  </a>
+                );
+              })}
               {data.recentOutputs.length === 0 && (
                 <div className="flex flex-col items-center py-8 text-muted-foreground/50">
                   <Terminal className="h-8 w-8 mb-2" />

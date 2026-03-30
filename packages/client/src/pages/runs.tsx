@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type { Run } from "@openconclave/shared";
-import { Play, Clock, DollarSign, Timer, ChevronLeft, ChevronRight } from "lucide-react";
+import { Play, Clock, DollarSign, Timer, ChevronLeft, ChevronRight, Square } from "lucide-react";
 
 type RunWithMeta = Run & { totalCost?: number; durationMs?: number | null };
 
@@ -37,6 +37,17 @@ export function RunsPage() {
       })
       .catch(() => {});
   }, []);
+
+  const reload = () => {
+    api.get<{ runs: RunWithMeta[] }>("/runs").then((d) => setRuns(d.runs)).catch(() => {});
+  };
+
+  const handleCancel = async (e: React.MouseEvent, runId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    await api.post(`/runs/${runId}/cancel`, {});
+    reload();
+  };
 
   const totalPages = Math.ceil(runs.length / PAGE_SIZE);
   const pagedRuns = runs.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
@@ -91,6 +102,15 @@ export function RunsPage() {
                       <Clock className="h-3 w-3" />
                       {run.createdAt ? new Date(run.createdAt).toLocaleString() : "—"}
                     </span>
+                    {(run.status === "running" || run.status === "queued") && (
+                      <button
+                        onClick={(e) => handleCancel(e, run.id)}
+                        className="inline-flex items-center gap-1 rounded-md bg-destructive px-2 py-1 text-[10px] font-medium text-white hover:bg-destructive/90 transition-colors"
+                      >
+                        <Square className="h-3 w-3" />
+                        Stop
+                      </button>
+                    )}
                   </div>
                 </a>
               ))}

@@ -1,4 +1,6 @@
 import { cn } from "@/lib/utils";
+import { Square } from "lucide-react";
+import { api } from "@/lib/api";
 import type { Run } from "@openconclave/shared";
 
 const statusColors: Record<string, string> = {
@@ -9,7 +11,13 @@ const statusColors: Record<string, string> = {
   cancelled: "bg-muted text-muted-foreground",
 };
 
-export function RunHistoryTable({ runs }: { runs: Run[] }) {
+export function RunHistoryTable({ runs, onUpdate }: { runs: Run[]; onUpdate?: () => void }) {
+  const handleCancel = async (e: React.MouseEvent, runId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    await api.post(`/runs/${runId}/cancel`, {});
+    onUpdate?.();
+  };
   return (
     <div className="rounded-lg border border-border bg-card">
       <div className="border-b border-border px-4 py-3">
@@ -40,9 +48,20 @@ export function RunHistoryTable({ runs }: { runs: Run[] }) {
                 {run.id.slice(0, 8)}
               </span>
             </div>
-            <span className="text-xs text-muted-foreground">
-              {run.createdAt ? new Date(run.createdAt).toLocaleString() : "—"}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">
+                {run.createdAt ? new Date(run.createdAt).toLocaleString() : "—"}
+              </span>
+              {(run.status === "running" || run.status === "queued") && (
+                <button
+                  onClick={(e) => handleCancel(e, run.id)}
+                  className="inline-flex items-center gap-1 rounded-md bg-destructive px-2 py-0.5 text-[10px] font-medium text-white hover:bg-destructive/90 transition-colors"
+                >
+                  <Square className="h-2.5 w-2.5" />
+                  Stop
+                </button>
+              )}
+            </div>
           </a>
         ))}
       </div>
