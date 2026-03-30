@@ -75,14 +75,18 @@ export function BaseNode({
       )}
       onClick={() => setSelectedNode(id)}
     >
-      {/* Target handles — 3 colored points */}
+      {/* Top handle */}
       {showTargetHandle && (
-        <>
-          <Handle type="target" id="t-left" position={Position.Top} style={{ left: "25%" }} className={cn(handleBase, handleColors[0])} />
-          <Handle type="target" id="t-center" position={Position.Top} style={{ left: "50%" }} className={cn(handleBase, handleColors[1])} />
-          <Handle type="target" id="t-right" position={Position.Top} style={{ left: "75%" }} className={cn(handleBase, handleColors[2])} />
-        </>
+        <Handle type="target" id="top" position={Position.Top} style={{ left: "50%" }} className={cn(handleBase, handleColors[0])} />
       )}
+
+      {/* Left handle — both source and target */}
+      <Handle type="source" id="left" position={Position.Left} style={{ top: "50%" }} className={cn(handleBase, handleColors[1])} />
+      <Handle type="target" id="t-left" position={Position.Left} style={{ top: "50%", left: "-6px", opacity: 0, width: 12, height: 12 }} />
+
+      {/* Right handle — both source and target */}
+      <Handle type="source" id="right" position={Position.Right} style={{ top: "50%" }} className={cn(handleBase, handleColors[2])} />
+      <Handle type="target" id="t-right" position={Position.Right} style={{ top: "50%", right: "-6px", opacity: 0, width: 12, height: 12 }} />
 
       {/* Header */}
       <div className="flex items-center gap-2.5 px-3 py-2.5">
@@ -109,13 +113,9 @@ export function BaseNode({
         </div>
       )}
 
-      {/* Source handles — 3 colored points */}
+      {/* Bottom handle */}
       {showSourceHandle && !sourceHandles && (
-        <>
-          <Handle type="source" id="left" position={Position.Bottom} style={{ left: "25%" }} className={cn(handleBase, handleColors[0])} />
-          <Handle type="source" id="center" position={Position.Bottom} style={{ left: "50%" }} className={cn(handleBase, handleColors[1])} />
-          <Handle type="source" id="right" position={Position.Bottom} style={{ left: "75%" }} className={cn(handleBase, handleColors[2])} />
-        </>
+        <Handle type="source" id="bottom" position={Position.Bottom} style={{ left: "50%" }} className={cn(handleBase, handleColors[0])} />
       )}
 
       {sourceHandles?.map((h) => (
