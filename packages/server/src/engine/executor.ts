@@ -47,6 +47,7 @@ interface RouteTarget {
   nodeId: string;
   label: string;
   type: string;
+  description?: string;
 }
 
 interface AgentOutput {
@@ -365,10 +366,13 @@ export class WorkflowExecutor {
           const routeTargets = outEdges.length >= 2
             ? outEdges.map((e) => {
                 const target = nodeMap.get(e.target);
+                const targetConfig = target?.data.config as Record<string, unknown> | undefined;
+                const description = targetConfig?.description as string | undefined;
                 return {
                   nodeId: e.target,
                   label: target?.data.label ?? e.target,
                   type: target?.data.type ?? "unknown",
+                  description,
                 };
               })
             : undefined;
@@ -462,22 +466,18 @@ export class WorkflowExecutor {
         }
 
         case "prompt": {
-          const config = node.data.config as PromptConfig;
-          // Build the question — include input context if available
-          const question = input
-            ? `${config.question}\n\nContext:\n${typeof input === "string" ? input : JSON.stringify(input, null, 2)}`
-            : config.question;
+          // Channel-in-the-loop: send agent's output to channel, wait for response
+          const content = typeof input === "string" ? input : JSON.stringify(input, null, 2);
 
-          // Send question via channel and wait for response
           this.emit({
             type: "prompt:question",
             runId,
             nodeId,
-            data: { question, waitingForResponse: true },
+            data: { question: content, waitingForResponse: true },
           });
 
-          logger.info(`Prompt node waiting for response`, { runId, nodeId });
-          output = await registerPrompt(runId, nodeId, question, input);
+          logger.info("Channel-in-the-loop waiting for response", { runId, nodeId });
+          output = await registerPrompt(runId, nodeId, content, input);
           break;
         }
 
@@ -524,7 +524,10 @@ export class WorkflowExecutor {
     const augmentedConfig = { ...config };
     if (routeTargets && routeTargets.length >= 2) {
       const routeList = routeTargets
-        .map((r) => `  - "${r.nodeId}" → ${r.label} (${r.type} node)`)
+        .map((r) => {
+          const desc = r.description ? ` — ${r.description}` : "";
+          return `  - "${r.nodeId}" → ${r.label} (${r.type})${desc}`;
+        })
         .join("\n");
       const routeInstruction = [
         "\n\n## Routing",

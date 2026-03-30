@@ -313,17 +313,17 @@ function PromptFields({ nodeId, config }: { nodeId: string; config: PromptConfig
 
   return (
     <>
-      <Field label="Question">
-        <textarea
-          value={config.question ?? ""}
-          onChange={(e) => updateNodeConfig(nodeId, { question: e.target.value })}
-          placeholder="What should the workflow ask? e.g., 'Should I proceed with deployment?'"
-          rows={3}
-          className={`${INPUT_CLASS} resize-none`}
+      <Field label="Description">
+        <input
+          type="text"
+          value={config.description ?? ""}
+          onChange={(e) => updateNodeConfig(nodeId, { description: e.target.value })}
+          placeholder="Ask a question if needed"
+          className={INPUT_CLASS}
         />
       </Field>
       <p className="text-[10px] text-muted-foreground px-1">
-        Pauses the workflow and sends this question via the channel. The workflow resumes when a response is received. Input from the previous node is included as context.
+        Channel-in-the-loop: pauses workflow, sends agent's output to the connected Claude Code session, waits for response, then continues. The description is shown to the agent as the routing tool description.
       </p>
     </>
   );

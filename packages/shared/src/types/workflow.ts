@@ -51,7 +51,7 @@ export interface MergeConfig {
 }
 
 export interface PromptConfig {
-  question: string;
+  description?: string;
 }
 
 export interface OutputConfig {

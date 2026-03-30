@@ -50,7 +50,10 @@ const server = new McpServer({
 if (ROUTE_TARGETS.length >= 2) {
   const validIds = ROUTE_TARGETS.map((t) => t.nodeId);
   const routeDescription = ROUTE_TARGETS
-    .map((t) => `  - "${t.nodeId}" → ${t.label} (${t.type} node)`)
+    .map((t) => {
+      const desc = (t as Record<string, unknown>).description as string | undefined;
+      return `  - "${t.nodeId}" → ${t.label} (${t.type})${desc ? ` — ${desc}` : ""}`;
+    })
     .join("\n");
 
   server.tool(
