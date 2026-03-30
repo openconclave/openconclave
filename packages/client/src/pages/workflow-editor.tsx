@@ -219,20 +219,27 @@ export function WorkflowEditorPage() {
     <>
       <Header
         title={
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             <input
               type="text"
               value={workflowName}
               onChange={(e) => setWorkflowMeta(e.target.value, workflowDescription)}
-              className="bg-transparent text-lg font-semibold border-none outline-none focus:ring-0 w-48"
-              placeholder="Workflow name..."
+              className="bg-transparent text-lg font-semibold border-none outline-none focus:ring-0 w-44"
+              placeholder="Name..."
             />
             <input
               type="text"
               value={useWorkflowStore.getState().toolName ?? ""}
               onChange={(e) => useWorkflowStore.setState({ toolName: e.target.value || undefined, isDirty: true })}
-              className="bg-transparent text-xs font-mono text-muted-foreground border border-border/40 rounded px-2 py-1 w-36"
-              placeholder="tool_name (MCP)"
+              className="bg-transparent text-[11px] font-mono text-muted-foreground border border-border/40 rounded px-2 py-1 w-28"
+              placeholder="tool_name"
+            />
+            <input
+              type="text"
+              value={workflowDescription}
+              onChange={(e) => setWorkflowMeta(workflowName, e.target.value)}
+              className="bg-transparent text-xs text-muted-foreground border border-border/40 rounded px-2 py-1 w-52"
+              placeholder="Tool description for Claude..."
             />
           </div>
         }
