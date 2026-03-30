@@ -75,16 +75,13 @@ export function BaseNode({
       )}
       onClick={() => setSelectedNode(id)}
     >
-      {/* All 4 handles — each is both source and target */}
+      {/* All handles are type="source" — connectionMode="loose" on canvas allows any-to-any */}
       {showTargetHandle && (
-        <Handle type="target" id="top" position={Position.Top} style={{ left: "50%" }} className={cn(handleBase, handleColors[0])} />
+        <Handle type="source" id="top" position={Position.Top} style={{ left: "50%" }} className={cn(handleBase, handleColors[0])} />
       )}
-      <Handle type="source" id="top-out" position={Position.Top} style={{ left: "50%", opacity: 0, pointerEvents: showTargetHandle ? "none" : "auto" }} className={handleBase} />
 
-      <Handle type="target" id="left-in" position={Position.Left} style={{ top: "50%", opacity: 0 }} className={handleBase} />
       <Handle type="source" id="left" position={Position.Left} style={{ top: "50%" }} className={cn(handleBase, handleColors[1])} />
 
-      <Handle type="target" id="right-in" position={Position.Right} style={{ top: "50%", opacity: 0 }} className={handleBase} />
       <Handle type="source" id="right" position={Position.Right} style={{ top: "50%" }} className={cn(handleBase, handleColors[2])} />
 
       {/* Header */}
@@ -112,12 +109,9 @@ export function BaseNode({
         </div>
       )}
 
-      {/* Bottom handle — bidirectional */}
+      {/* Bottom handle */}
       {showSourceHandle && !sourceHandles && (
-        <>
-          <Handle type="source" id="bottom" position={Position.Bottom} style={{ left: "50%" }} className={cn(handleBase, handleColors[0])} />
-          <Handle type="target" id="bottom-in" position={Position.Bottom} style={{ left: "50%", opacity: 0 }} className={handleBase} />
-        </>
+        <Handle type="source" id="bottom" position={Position.Bottom} style={{ left: "50%" }} className={cn(handleBase, handleColors[0])} />
       )}
 
       {sourceHandles?.map((h) => (

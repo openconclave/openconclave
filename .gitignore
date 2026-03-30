@@ -3,7 +3,9 @@ dist/
 *.db
 *.db-wal
 *.db-shm
+.openconclave/
 .openconclave-tmp/
+.openconclave-outputs/
 .playwright-mcp/
 .claude/
 *.output

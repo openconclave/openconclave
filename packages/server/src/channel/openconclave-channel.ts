@@ -222,7 +222,7 @@ function connectWebSocket() {
               : JSON.stringify(data.data ?? {}, null, 2);
 
           // Save full output to temp file
-          const outputDir = join(process.cwd(), ".openconclave-outputs");
+          const outputDir = join(process.cwd(), ".openconclave", "outputs");
           mkdirSync(outputDir, { recursive: true });
           const fileName = `output-${data.runId ?? "unknown"}-${Date.now()}.md`;
           const filePath = join(outputDir, fileName);

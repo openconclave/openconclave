@@ -2,9 +2,10 @@ import { spawn } from "bun";
 import { writeFileSync, unlinkSync, mkdirSync, readFileSync, existsSync } from "fs";
 import { join, resolve } from "path";
 import type { AgentConfig } from "@openconclave/shared";
+import { TMP_DIR } from "../lib/workspace";
 
-// Project root — two levels up from packages/server
-const PROJECT_ROOT = resolve(import.meta.dir, "../../../");
+// Agent working directory = where the server process was started
+const AGENT_CWD = process.cwd();
 
 export interface ThinkingBlock {
   thinking: string;
@@ -132,7 +133,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
     (conversationHistory && conversationHistory.length > 0);
 
   if (needsWorkflowMcp) {
-    const tmpDir = join(process.cwd(), ".openconclave-tmp");
+    const tmpDir = TMP_DIR;
     mkdirSync(tmpDir, { recursive: true });
     stateFile = join(tmpDir, `state-${Date.now()}.json`);
 
@@ -149,7 +150,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
   }
 
   if (Object.keys(mcpServers).length > 0) {
-    const tmpDir = join(process.cwd(), ".openconclave-tmp");
+    const tmpDir = TMP_DIR;
     mkdirSync(tmpDir, { recursive: true });
     mcpConfigPath = join(tmpDir, `mcp-${Date.now()}.json`);
     writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig));
@@ -160,7 +161,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
   try {
     const proc = spawn({
       cmd: ["claude", ...args],
-      cwd: cwd ?? PROJECT_ROOT,
+      cwd: cwd ?? AGENT_CWD,
       stdin: new Blob([prompt]),
       stdout: "pipe",
       stderr: "pipe",

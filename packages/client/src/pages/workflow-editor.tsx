@@ -40,12 +40,10 @@ export function WorkflowEditorPage() {
             position: n.position,
             data: n.data,
           })),
-          (def.edges ?? []).map((e: any) => ({
-            ...e,
-            type: "default",
-            animated: true,
-            style: edgeStyle(e.sourceHandle),
-          })),
+          (def.edges ?? []).map((e: any) => {
+            const { style, markerEnd } = edgeStyle(e.sourceHandle);
+            return { ...e, type: "default", animated: false, style, markerEnd };
+          }),
           def.name ?? wf.name ?? "Untitled Workflow",
           def.description ?? wf.description ?? "",
           def.toolName ?? wf.toolName

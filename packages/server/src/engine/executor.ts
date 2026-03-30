@@ -1,6 +1,6 @@
 import { nanoid } from "nanoid";
 import { eq } from "drizzle-orm";
-import { resolve, join } from "path";
+import { join } from "path";
 
 import { db } from "../db/client";
 import { runs, agentTasks, runEvents, settings } from "../db/schema";
@@ -10,6 +10,7 @@ import { getIncomingEdges, getOutgoingEdges } from "./graph";
 import { evaluateExpression } from "../lib/expression";
 import { registerPrompt } from "./prompt-registry";
 import { logger } from "../lib/logger";
+import { SESSIONS_DIR } from "../lib/workspace";
 import {
   AppError,
   ErrorCode,
@@ -27,7 +28,8 @@ import type {
   OutputConfig,
 } from "@openconclave/shared";
 
-const PROJECT_ROOT = resolve(import.meta.dir, "../../../");
+// Agent working directory = where the server process was started
+const AGENT_CWD = process.cwd();
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -573,7 +575,7 @@ export class WorkflowExecutor {
         }
 
         // Session file for Ollama — always create path, reuse on subsequent turns
-        const tmpDir = join(PROJECT_ROOT, ".openconclave-tmp", "sessions");
+        const tmpDir = SESSIONS_DIR;
         const ollamaSessionFile = sessionId ?? join(tmpDir, `${runId}-${nodeId}.jsonl`);
 
         result = await runOllamaAgent({
@@ -706,7 +708,7 @@ export class WorkflowExecutor {
     }
 
     const proc = Bun.spawn(cmd, {
-      cwd: PROJECT_ROOT,
+      cwd: AGENT_CWD,
       stdin: new Blob([inputStr]),
       stdout: "pipe",
       stderr: "pipe",

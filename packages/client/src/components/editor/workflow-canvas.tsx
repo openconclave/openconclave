@@ -6,6 +6,7 @@ import {
   MiniMap,
   Panel,
   BackgroundVariant,
+  ConnectionMode,
   type ReactFlowInstance,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
@@ -153,6 +154,7 @@ export function WorkflowCanvas() {
         }}
         onPaneClick={() => setSelectedNode(null)}
         nodeTypes={nodeTypes}
+        connectionMode={ConnectionMode.Loose}
         fitView
         snapToGrid
         snapGrid={[20, 20]}
@@ -161,9 +163,10 @@ export function WorkflowCanvas() {
         deleteKeyCode={["Backspace", "Delete"]}
         defaultEdgeOptions={{
           type: "default",
-          animated: true,
+          animated: false,
           selectable: true,
           style: { stroke: "oklch(0.65 0.18 260)", strokeWidth: 2 },
+          markerEnd: { type: "arrowclosed" as any, width: 16, height: 16 },
         }}
       >
         <Panel position="top-right" className="flex gap-2">

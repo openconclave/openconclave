@@ -5,6 +5,7 @@ import {
   type OnNodesChange,
   type OnEdgesChange,
   type OnConnect,
+  MarkerType,
   applyNodeChanges,
   applyEdgeChanges,
   addEdge,
@@ -27,7 +28,10 @@ const DEFAULT_STROKE = "oklch(0.65 0.18 200)";
 
 export function edgeStyle(sourceHandle?: string | null) {
   const stroke = HANDLE_STROKE[sourceHandle ?? "bottom"] ?? DEFAULT_STROKE;
-  return { stroke, strokeWidth: 2 };
+  return {
+    style: { stroke, strokeWidth: 2 },
+    markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16, color: stroke },
+  };
 }
 
 // ── Store Types ──────────────────────────────────────────────
@@ -88,13 +92,15 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   },
 
   onConnect: (connection) => {
+    const { style, markerEnd } = edgeStyle(connection.sourceHandle);
     set({
       edges: addEdge(
         {
           ...connection,
           type: "default",
-          animated: true,
-          style: edgeStyle(connection.sourceHandle),
+          animated: false,
+          style,
+          markerEnd,
         },
         get().edges
       ),

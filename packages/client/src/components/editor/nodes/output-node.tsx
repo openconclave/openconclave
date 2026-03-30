@@ -34,7 +34,7 @@ export function OutputNode(props: NodeProps) {
     >
       {/* Only top handle — outputs are terminal nodes */}
       <Handle
-        type="target"
+        type="source"
         id="top"
         position={Position.Top}
         style={{ left: "50%", transform: "translateX(-50%)" }}
