@@ -83,9 +83,13 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   },
 
   onConnect: (connection) => {
-    const sourceNode = get().nodes.find((n) => n.id === connection.source);
-    const nodeType: NodeType = sourceNode?.data?.type ?? "agent";
-    const stroke = EDGE_COLORS[nodeType] ?? EDGE_COLORS.agent;
+    const HANDLE_COLORS: Record<string, string> = {
+      left: "oklch(0.65 0.18 200)",
+      center: "oklch(0.65 0.18 260)",
+      right: "oklch(0.65 0.15 320)",
+    };
+    const handleId = connection.sourceHandle ?? "center";
+    const stroke = HANDLE_COLORS[handleId] ?? HANDLE_COLORS.center;
 
     set({
       edges: addEdge(
