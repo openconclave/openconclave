@@ -75,18 +75,17 @@ export function BaseNode({
       )}
       onClick={() => setSelectedNode(id)}
     >
-      {/* Top handle */}
+      {/* All 4 handles — each is both source and target */}
       {showTargetHandle && (
         <Handle type="target" id="top" position={Position.Top} style={{ left: "50%" }} className={cn(handleBase, handleColors[0])} />
       )}
+      <Handle type="source" id="top-out" position={Position.Top} style={{ left: "50%", opacity: 0, pointerEvents: showTargetHandle ? "none" : "auto" }} className={handleBase} />
 
-      {/* Left handle — both source and target */}
+      <Handle type="target" id="left-in" position={Position.Left} style={{ top: "50%", opacity: 0 }} className={handleBase} />
       <Handle type="source" id="left" position={Position.Left} style={{ top: "50%" }} className={cn(handleBase, handleColors[1])} />
-      <Handle type="target" id="t-left" position={Position.Left} style={{ top: "50%", left: "-6px", opacity: 0, width: 12, height: 12 }} />
 
-      {/* Right handle — both source and target */}
+      <Handle type="target" id="right-in" position={Position.Right} style={{ top: "50%", opacity: 0 }} className={handleBase} />
       <Handle type="source" id="right" position={Position.Right} style={{ top: "50%" }} className={cn(handleBase, handleColors[2])} />
-      <Handle type="target" id="t-right" position={Position.Right} style={{ top: "50%", right: "-6px", opacity: 0, width: 12, height: 12 }} />
 
       {/* Header */}
       <div className="flex items-center gap-2.5 px-3 py-2.5">
@@ -113,9 +112,12 @@ export function BaseNode({
         </div>
       )}
 
-      {/* Bottom handle */}
+      {/* Bottom handle — bidirectional */}
       {showSourceHandle && !sourceHandles && (
-        <Handle type="source" id="bottom" position={Position.Bottom} style={{ left: "50%" }} className={cn(handleBase, handleColors[0])} />
+        <>
+          <Handle type="source" id="bottom" position={Position.Bottom} style={{ left: "50%" }} className={cn(handleBase, handleColors[0])} />
+          <Handle type="target" id="bottom-in" position={Position.Bottom} style={{ left: "50%", opacity: 0 }} className={handleBase} />
+        </>
       )}
 
       {sourceHandles?.map((h) => (
