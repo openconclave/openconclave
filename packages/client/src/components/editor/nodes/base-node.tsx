@@ -33,7 +33,13 @@ const nodeGlowColors: Record<string, string> = {
   output: "shadow-[0_0_15px_-3px] shadow-node-output/20",
 };
 
-const handleClass = "!h-3 !w-3 !rounded-full !border-2 !border-muted-foreground/40 !bg-card hover:!border-primary hover:!bg-primary/20 transition-colors";
+const handleColors = [
+  "!border-[oklch(0.65_0.18_200)] hover:!bg-[oklch(0.65_0.18_200/0.3)]",
+  "!border-[oklch(0.65_0.18_260)] hover:!bg-[oklch(0.65_0.18_260/0.3)]",
+  "!border-[oklch(0.65_0.15_320)] hover:!bg-[oklch(0.65_0.15_320/0.3)]",
+];
+
+const handleBase = "!h-3 !w-3 !rounded-full !border-2 !bg-card transition-colors";
 
 export function BaseNode({
   id,
@@ -69,12 +75,12 @@ export function BaseNode({
       )}
       onClick={() => setSelectedNode(id)}
     >
-      {/* Target handles — 3 points for flexible connections */}
+      {/* Target handles — 3 colored points */}
       {showTargetHandle && (
         <>
-          <Handle type="target" id="t-left" position={Position.Top} style={{ left: "25%" }} className={handleClass} />
-          <Handle type="target" id="t-center" position={Position.Top} style={{ left: "50%" }} className={handleClass} />
-          <Handle type="target" id="t-right" position={Position.Top} style={{ left: "75%" }} className={handleClass} />
+          <Handle type="target" id="t-left" position={Position.Top} style={{ left: "25%" }} className={cn(handleBase, handleColors[0])} />
+          <Handle type="target" id="t-center" position={Position.Top} style={{ left: "50%" }} className={cn(handleBase, handleColors[1])} />
+          <Handle type="target" id="t-right" position={Position.Top} style={{ left: "75%" }} className={cn(handleBase, handleColors[2])} />
         </>
       )}
 
@@ -103,12 +109,12 @@ export function BaseNode({
         </div>
       )}
 
-      {/* Source handles — 3 points for flexible connections */}
+      {/* Source handles — 3 colored points */}
       {showSourceHandle && !sourceHandles && (
         <>
-          <Handle type="source" id="left" position={Position.Bottom} style={{ left: "25%" }} className={handleClass} />
-          <Handle type="source" id="center" position={Position.Bottom} style={{ left: "50%" }} className={handleClass} />
-          <Handle type="source" id="right" position={Position.Bottom} style={{ left: "75%" }} className={handleClass} />
+          <Handle type="source" id="left" position={Position.Bottom} style={{ left: "25%" }} className={cn(handleBase, handleColors[0])} />
+          <Handle type="source" id="center" position={Position.Bottom} style={{ left: "50%" }} className={cn(handleBase, handleColors[1])} />
+          <Handle type="source" id="right" position={Position.Bottom} style={{ left: "75%" }} className={cn(handleBase, handleColors[2])} />
         </>
       )}
 

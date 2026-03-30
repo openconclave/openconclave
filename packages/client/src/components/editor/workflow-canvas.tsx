@@ -151,7 +151,7 @@ export function WorkflowCanvas() {
         className="bg-background"
         deleteKeyCode={["Backspace", "Delete"]}
         defaultEdgeOptions={{
-          type: "smoothstep",
+          type: "default",
           animated: true,
           selectable: true,
           style: { stroke: "oklch(0.65 0.18 260)", strokeWidth: 2 },
