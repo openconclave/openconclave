@@ -240,6 +240,12 @@ export class WorkflowExecutor {
 
             // Determine next entries
             const next: QueueEntry[] = [];
+
+            // Chat trigger terminal — don't propagate
+            if ((output as Record<string, unknown>)?.__chatTerminal) {
+              return next;
+            }
+
             const outgoing = getOutgoingEdges(entry.nodeId, edges);
 
             if (node.data.type === "condition") {
@@ -371,7 +377,7 @@ export class WorkflowExecutor {
         case "trigger": {
           const config = node.data.config as TriggerConfig;
           if (config.type === "chat" && input !== undefined && input !== null) {
-            // Chat trigger received a response back from the workflow — emit it
+            // Chat trigger received a response back from the workflow — emit and STOP
             const content = typeof input === "string" ? input : JSON.stringify(input, null, 2);
             this.emit({
               type: "chat:response",
@@ -383,7 +389,8 @@ export class WorkflowExecutor {
                 nodeLabel: node.data.label,
               },
             });
-            output = input;
+            // Return __chatTerminal to signal the walker should not propagate
+            output = { __chatTerminal: true };
           } else {
             output = triggerPayload ?? config.prompt ?? null;
           }

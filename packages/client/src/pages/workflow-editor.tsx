@@ -5,7 +5,7 @@ import { WorkflowCanvas } from "@/components/editor/workflow-canvas";
 import { NodeInspector } from "@/components/editor/node-inspector";
 import { useWorkflowStore, edgeStyle } from "@/stores/workflow-store";
 import { api } from "@/lib/api";
-import { Save, Play, Square } from "lucide-react";
+import { Save, Play, Square, MessageSquare } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
 function toSnakeCase(s: string): string {
@@ -220,6 +220,18 @@ export function WorkflowEditorPage() {
 
   const handleRun = async () => {
     if (isNew) return;
+    // If trigger is "chat", open the chat page instead
+    const triggerNode = nodes.find((n) => n.data?.type === "trigger");
+    const triggerConfig = triggerNode?.data?.config as Record<string, unknown> | undefined;
+    if (triggerConfig?.type === "chat") {
+      const toolName = useWorkflowStore.getState().toolName;
+      if (toolName) {
+        window.open(`/${toolName}/chat`, "_blank");
+        return;
+      }
+      toast("Set a tool name first (in workflow settings) to use chat", "error");
+      return;
+    }
     try {
       const result = await api.post<{ runId: string }>(`/workflows/${existingId}/run`, {});
       setActiveRunId(result.runId);
@@ -301,8 +313,13 @@ export function WorkflowEditorPage() {
                   onClick={handleRun}
                   className="inline-flex items-center gap-2 rounded-md bg-success px-3 py-1.5 text-sm font-medium text-white hover:bg-success/90 transition-colors"
                 >
-                  <Play className="h-4 w-4" />
-                  Run
+                  {(() => {
+                    const tn = nodes.find((n) => n.data?.type === "trigger");
+                    const tc = tn?.data?.config as Record<string, unknown> | undefined;
+                    return tc?.type === "chat"
+                      ? <><MessageSquare className="h-4 w-4" /> Chat</>
+                      : <><Play className="h-4 w-4" /> Run</>;
+                  })()}
                 </button>
               )
             )}
