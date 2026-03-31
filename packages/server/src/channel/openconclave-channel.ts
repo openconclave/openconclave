@@ -60,7 +60,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: "oc_trigger_workflow",
-      description: "Trigger a workflow run in OpenConclave",
+      description: "Trigger a workflow run in OpenConclave. Always pass your current working directory as cwd so agents run in the correct project.",
       inputSchema: {
         type: "object",
         properties: {
@@ -70,8 +70,9 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
             description: "Optional payload data to pass to the workflow",
             additionalProperties: true,
           },
+          cwd: { type: "string", description: "Your current working directory — agents will run here" },
         },
-        required: ["workflow_id"],
+        required: ["workflow_id", "cwd"],
       },
     },
     {
@@ -131,8 +132,10 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     }
 
     case "oc_trigger_workflow": {
-      const { workflow_id, payload } = args as { workflow_id: string; payload?: unknown };
-      const data = await ocApi(`/workflows/${workflow_id}/run`, "POST", { payload });
+      const { workflow_id, payload, cwd } = args as { workflow_id: string; payload?: unknown; cwd?: string };
+      // Inject caller's cwd so agents run in the user's project directory
+      const enrichedPayload = { ...(payload as Record<string, unknown> ?? {}), ...(cwd ? { _callerCwd: cwd } : {}) };
+      const data = await ocApi(`/workflows/${workflow_id}/run`, "POST", { payload: enrichedPayload });
       return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
     }
 

@@ -121,6 +121,10 @@ export class WorkflowExecutor {
     const conversationHistory = new Map<string, Array<{ role: string; content: string }>>();
     // Claude CLI session IDs per agent — enables --resume for multi-turn
     const agentSessions = new Map<string, string>();
+    // Extract caller's working directory from trigger payload (injected by channel)
+    const callerCwd = triggerPayload && typeof triggerPayload === "object" && "_callerCwd" in (triggerPayload as Record<string, unknown>)
+      ? (triggerPayload as Record<string, unknown>)._callerCwd as string
+      : undefined;
     // Workflow context from trigger — injected into every agent's system prompt
     const workflowContext = triggerPayload
       ? (typeof triggerPayload === "string" ? triggerPayload : JSON.stringify(triggerPayload))
@@ -227,7 +231,8 @@ export class WorkflowExecutor {
               workflowContext,
               workflow,
               triggerPayload,
-              entry.triggeredBy
+              entry.triggeredBy,
+              callerCwd
             );
 
             // Determine next entries
@@ -324,7 +329,8 @@ export class WorkflowExecutor {
     workflowContext: string | null,
     workflow: WorkflowDefinition,
     triggerPayload?: unknown,
-    triggeredBy?: string | null
+    triggeredBy?: string | null,
+    callerCwd?: string
   ): Promise<unknown> {
     const node = nodeMap.get(nodeId);
     if (!node) return undefined;
@@ -414,7 +420,7 @@ export class WorkflowExecutor {
           };
 
           const existingSessionId = agentSessions.get(nodeId);
-          const agentResult = await this.executeAgent(runId, nodeId, chatConfig, input, routeTargets, history, existingSessionId);
+          const agentResult = await this.executeAgent(runId, nodeId, chatConfig, input, routeTargets, history, existingSessionId, callerCwd);
           output = agentResult.output;
 
           // Add agent's output as "assistant" turn — include thinking so agent remembers its reasoning
@@ -518,7 +524,8 @@ export class WorkflowExecutor {
     input: unknown,
     routeTargets?: RouteTarget[],
     conversationHistory?: Array<{ role: string; content: string }>,
-    sessionId?: string
+    sessionId?: string,
+    cwd?: string
   ): Promise<{ output: string; thinking?: ThinkingBlock[]; sessionId?: string }> {
     const taskId = nanoid();
     const now = new Date().toISOString();
@@ -606,6 +613,7 @@ export class WorkflowExecutor {
         result = await agentPool.submit(taskId, {
           config: augmentedConfig,
           input,
+          cwd,
           routeTargets,
           sessionId,
           onOutput: (chunk) => {

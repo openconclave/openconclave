@@ -1,4 +1,5 @@
-import { spawn } from "bun";
+import { query } from "@anthropic-ai/claude-agent-sdk";
+import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { writeFileSync, unlinkSync, mkdirSync, readFileSync, existsSync } from "fs";
 import { join, resolve } from "path";
 import type { AgentConfig } from "@openconclave/shared";
@@ -36,6 +37,7 @@ export type AgentRunOptions = {
   conversationHistory?: Array<{ role: string; content: string }>;
   input?: unknown;
   cwd?: string;
+  env?: Record<string, string>;
   abortSignal?: AbortSignal;
   onOutput?: (chunk: string) => void;
 };
@@ -67,10 +69,10 @@ const mcpServerConfigs: Record<string, { command: string; args: string[] }> = {
 };
 
 export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentResult> {
-  const { config, input, cwd, abortSignal, onOutput } = options;
+  const { config, input, cwd, env, abortSignal, onOutput } = options;
   const startTime = Date.now();
 
-  // Build the prompt — just the current user message
+  // Build the prompt
   let prompt: string;
   if (input !== undefined && input !== null && input !== "") {
     prompt = typeof input === "string" ? input : JSON.stringify(input, null, 2);
@@ -78,43 +80,9 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
     prompt = "Start";
   }
 
-  // Build CLI args — use stream-json to capture thinking blocks
-  const args: string[] = [
-    "--print",
-    "--verbose",
-    "--output-format", "stream-json",
-    "--max-thinking-tokens", "31999",
-    "--dangerously-skip-permissions",
-  ];
+  // Build MCP server config
+  const mcpServers: Record<string, { command: string; args: string[]; env?: Record<string, string> }> = {};
 
-  // Resume existing session for multi-turn conversations
-  if (options.sessionId) {
-    args.push("--resume", options.sessionId);
-  }
-
-  if (config.model && modelMap[config.model]) {
-    args.push("--model", modelMap[config.model]);
-  }
-
-  if (config.systemPrompt) {
-    args.push("--system-prompt", config.systemPrompt);
-  }
-
-  if (config.maxBudgetUsd) {
-    args.push("--max-budget-usd", String(config.maxBudgetUsd));
-  }
-
-  // Built-in tools
-  if (config.allowedTools?.length) {
-    args.push("--allowedTools", config.allowedTools.join(","));
-  }
-
-  // MCP servers + routing — write a temp config file and pass via --mcp-config
-  let mcpConfigPath: string | null = null;
-  const mcpConfig: Record<string, unknown> = { mcpServers: {} as Record<string, unknown> };
-  const mcpServers = mcpConfig.mcpServers as Record<string, unknown>;
-
-  // Add configured MCP servers
   if (config.mcpServers?.length) {
     for (const serverId of config.mcpServers) {
       const serverConf = mcpServerConfigs[serverId];
@@ -149,124 +117,81 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
     };
   }
 
-  if (Object.keys(mcpServers).length > 0) {
-    const tmpDir = TMP_DIR;
-    mkdirSync(tmpDir, { recursive: true });
-    mcpConfigPath = join(tmpDir, `mcp-${Date.now()}.json`);
-    writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig));
-    args.push("--mcp-config", mcpConfigPath);
-  }
-
-  // Pass prompt via stdin to avoid CLI argument parsing issues with --mcp-config
   try {
-    const proc = spawn({
-      cmd: ["claude", ...args],
-      cwd: cwd ?? AGENT_CWD,
-      stdin: new Blob([prompt]),
-      stdout: "pipe",
-      stderr: "pipe",
-      env: { ...process.env },
-    });
-
-    // Handle abort
-    if (abortSignal) {
-      abortSignal.addEventListener("abort", () => {
-        proc.kill();
-      });
-    }
-
-    // Collect stdout — stream-json emits one JSON object per line
-    const lines: string[] = [];
     const thinkingBlocks: ThinkingBlock[] = [];
-    const reader = proc.stdout.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value);
-
-      // Process complete lines
-      const parts = buffer.split("\n");
-      buffer = parts.pop() ?? "";
-      for (const line of parts) {
-        if (!line.trim()) continue;
-        lines.push(line);
-
-        try {
-          const msg = JSON.parse(line);
-
-          // Capture thinking blocks from assistant messages
-          if (msg.type === "assistant" && Array.isArray(msg.message?.content)) {
-            for (const block of msg.message.content) {
-              if (block.type === "thinking" && block.thinking) {
-                thinkingBlocks.push({
-                  thinking: block.thinking,
-                  signature: block.signature,
-                });
-                onOutput?.(`[thinking: ${block.thinking.slice(0, 100)}...]\n`);
-              }
-            }
-          }
-        } catch {
-          // Not JSON, skip
-        }
-      }
-    }
-
-    // Process remaining buffer
-    if (buffer.trim()) lines.push(buffer.trim());
-
-    // Collect stderr
-    let stderr = "";
-    const errReader = proc.stderr.getReader();
-    while (true) {
-      const { done, value } = await errReader.read();
-      if (done) break;
-      stderr += decoder.decode(value);
-    }
-
-    const exitCode = await proc.exited;
-    const durationMs = Date.now() - startTime;
-
-    // Clean up temp MCP config
-    if (mcpConfigPath) {
-      try { unlinkSync(mcpConfigPath); } catch {}
-    }
-
-    if (exitCode !== 0) {
-      return {
-        success: false,
-        output: lines.join("\n"),
-        error: stderr || `claude exited with code ${exitCode}`,
-        durationMs,
-        thinking: thinkingBlocks.length > 0 ? thinkingBlocks : undefined,
-      };
-    }
-
-    // Parse the result message (last line with type "result")
-    let parsedOutput = "";
+    let resultOutput = "";
     let costUsd: number | undefined;
     let sessionId: string | undefined;
 
-    for (const line of lines) {
-      try {
-        const msg = JSON.parse(line);
-        if (msg.type === "result") {
-          parsedOutput = typeof msg.result === "string" ? msg.result : JSON.stringify(msg.result);
-          costUsd = msg.total_cost_usd;
-          sessionId = msg.session_id;
+    const agentQuery = query({
+      prompt,
+      options: {
+        cwd: cwd ?? AGENT_CWD,
+        env: { ...process.env, ...env } as Record<string, string>,
+        model: config.model && modelMap[config.model] ? modelMap[config.model] : undefined,
+        systemPrompt: config.systemPrompt,
+        maxTurns: config.maxTurns ?? 25,
+        permissionMode: "bypassPermissions",
+        allowDangerouslySkipPermissions: true,
+        tools: config.allowedTools?.length
+          ? config.allowedTools
+          : { type: "preset" as const, preset: "claude_code" as const },
+        mcpServers: Object.keys(mcpServers).length > 0 ? mcpServers : undefined,
+        resume: options.sessionId,
+        thinking: { type: "enabled" as const, budgetTokens: 31999 },
+      },
+    });
+
+    // Consume the async generator
+    for await (const message of agentQuery) {
+      const msg = message as SDKMessage & { type: string; subtype?: string; [key: string]: unknown };
+
+      // Capture thinking blocks from assistant messages
+      if (msg.type === "assistant") {
+        const assistantMsg = msg as unknown as { message?: { content?: Array<{ type: string; thinking?: string; signature?: string }> } };
+        if (assistantMsg.message?.content) {
+          for (const block of assistantMsg.message.content) {
+            if (block.type === "thinking" && block.thinking) {
+              thinkingBlocks.push({
+                thinking: block.thinking,
+                signature: block.signature,
+              });
+              onOutput?.(`[thinking: ${block.thinking.slice(0, 100)}...]\n`);
+            }
+          }
         }
-      } catch {
-        // skip
+      }
+
+      // Capture result
+      if (msg.type === "result") {
+        const resultMsg = msg as unknown as {
+          subtype?: string;
+          result?: string;
+          total_cost_usd?: number;
+          session_id?: string;
+          is_error?: boolean;
+          errors?: string[];
+        };
+        if (resultMsg.subtype === "success") {
+          resultOutput = resultMsg.result ?? "";
+          costUsd = resultMsg.total_cost_usd;
+          sessionId = resultMsg.session_id;
+        } else {
+          // Error result
+          const errorMsg = resultMsg.errors?.join("\n") ?? "Agent failed";
+          return {
+            success: false,
+            output: "",
+            error: errorMsg,
+            costUsd: resultMsg.total_cost_usd,
+            durationMs: Date.now() - startTime,
+            thinking: thinkingBlocks.length > 0 ? thinkingBlocks : undefined,
+          };
+        }
       }
     }
 
-    if (!parsedOutput) {
-      // Fallback — try raw join
-      parsedOutput = lines.join("\n");
-    }
+    const durationMs = Date.now() - startTime;
 
     // Read workflow state file for routing decisions
     let routeTo: string | undefined;
@@ -277,7 +202,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
           if (state.routeTo) {
             routeTo = state.routeTo;
             if (state.routeContent) {
-              parsedOutput = state.routeContent;
+              resultOutput = state.routeContent;
             }
           }
           unlinkSync(stateFile);
@@ -289,26 +214,24 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
 
     return {
       success: true,
-      output: parsedOutput,
+      output: resultOutput,
       costUsd,
       durationMs,
       thinking: thinkingBlocks.length > 0 ? thinkingBlocks : undefined,
       routeTo,
       sessionId,
     };
-  } catch (err: any) {
+  } catch (err: unknown) {
     // Clean up temp files on error
-    if (mcpConfigPath) {
-      try { unlinkSync(mcpConfigPath); } catch {}
-    }
     if (stateFile) {
       try { unlinkSync(stateFile); } catch {}
     }
 
+    const message = err instanceof Error ? err.message : String(err);
     return {
       success: false,
       output: "",
-      error: err.message ?? String(err),
+      error: message,
       durationMs: Date.now() - startTime,
     };
   }
