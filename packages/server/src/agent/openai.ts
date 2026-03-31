@@ -2,6 +2,8 @@ import { readFileSync, appendFileSync, existsSync } from "fs";
 import { join } from "path";
 import { logger } from "../lib/logger";
 import { SESSIONS_DIR } from "../lib/workspace";
+import { createBuiltinTools, TOOL_NAME_MAP } from "./builtin-tools";
+import { McpBridge } from "./mcp-bridge";
 
 const OPENAI_LOG = join(SESSIONS_DIR, "openai-debug.log");
 function openaiLog(label: string, data: unknown) {
@@ -41,6 +43,9 @@ export interface OpenAIRunOptions {
   systemPrompt?: string;
   input?: unknown;
   tools?: OpenAITool[];
+  allowedTools?: string[];
+  mcpServers?: string[];
+  cwd?: string;
   routeTargets?: Array<{ nodeId: string; label: string; type: string }>;
   sessionFile?: string;
   maxTurns?: number;
@@ -303,10 +308,43 @@ async function runChatCompletions(options: OpenAIRunOptions): Promise<OpenAIResu
     messages.push({ role: "user", content: inputStr });
   }
 
-  // Build tools list
+  // Build tools list + executors
   const activeTools: OpenAITool[] = [...(options.tools ?? [])];
+  const toolExecutors = new Map<string, (args: Record<string, unknown>) => Promise<string>>();
+
+  // Add builtin tools (bash, read_file, etc.) based on allowedTools
+  if (options.allowedTools?.length) {
+    const builtins = createBuiltinTools(options.cwd);
+    for (const toolName of options.allowedTools) {
+      const mapped = TOOL_NAME_MAP[toolName];
+      if (mapped && builtins[mapped]) {
+        activeTools.push(builtins[mapped].tool as OpenAITool);
+        toolExecutors.set(mapped, builtins[mapped].execute);
+      }
+    }
+  }
+
+  // Add routing tool
   if (options.routeTargets && options.routeTargets.length >= 2) {
     activeTools.push(createRoutingToolChat(options.routeTargets));
+  }
+
+  // Connect MCP servers
+  let mcpBridge: McpBridge | null = null;
+  if (options.mcpServers?.length) {
+    mcpBridge = new McpBridge();
+    try {
+      await mcpBridge.connect(options.mcpServers);
+      for (const tool of mcpBridge.getTools()) {
+        activeTools.push(tool as OpenAITool);
+        const mcpToolName = tool.function.name;
+        toolExecutors.set(mcpToolName, async (args) => {
+          return mcpBridge!.callTool(mcpToolName, args);
+        });
+      }
+    } catch (err: unknown) {
+      logger.warn("Failed to connect MCP servers", { error: err instanceof Error ? err.message : String(err) });
+    }
   }
 
   const thinkingBlocks: Array<{ thinking: string }> = [];
@@ -322,7 +360,7 @@ async function runChatCompletions(options: OpenAIRunOptions): Promise<OpenAIResu
         body.tools = activeTools;
       }
 
-      openaiLog(`CHAT REQUEST turn ${turn + 1}`, { provider: provider.name, model, messages, tools: activeTools.length > 0 ? activeTools : undefined });
+      openaiLog(`CHAT REQUEST turn ${turn + 1}`, { provider: provider.name, model, messageCount: messages.length, toolCount: activeTools.length });
 
       const res = await fetch(`${provider.baseUrl}/chat/completions`, {
         method: "POST",
@@ -335,6 +373,7 @@ async function runChatCompletions(options: OpenAIRunOptions): Promise<OpenAIResu
 
       if (!res.ok) {
         const errText = await res.text();
+        if (mcpBridge) await mcpBridge.disconnect();
         return {
           success: false,
           output: "",
@@ -346,6 +385,7 @@ async function runChatCompletions(options: OpenAIRunOptions): Promise<OpenAIResu
       const data = await res.json() as any;
       const choice = data.choices?.[0];
       if (!choice) {
+        if (mcpBridge) await mcpBridge.disconnect();
         return {
           success: false,
           output: "",
@@ -382,21 +422,34 @@ async function runChatCompletions(options: OpenAIRunOptions): Promise<OpenAIResu
             fnArgs = {};
           }
 
+          // Check for routing
           if (fnName === "openconclave_next" && fnArgs.node_id) {
             routeTo = fnArgs.node_id as string;
             routeContent = (fnArgs.content as string) ?? "";
           }
 
+          // Execute tool
+          const executor = toolExecutors.get(fnName);
+          let result: string;
+          if (fnName === "openconclave_next") {
+            result = `Routing to: ${routeTo}`;
+          } else if (executor) {
+            onOutput?.(`[Executing ${fnName}...]\n`);
+            result = await executor(fnArgs);
+            onOutput?.(`[${fnName} result: ${result.slice(0, 200)}${result.length > 200 ? "..." : ""}]\n`);
+          } else {
+            result = `Unknown tool: ${fnName}`;
+          }
+
           messages.push({
             role: "tool",
-            content: fnName === "openconclave_next"
-              ? `Routing to: ${routeTo}`
-              : `Tool ${fnName} executed`,
+            content: result,
             tool_call_id: toolCall.id,
           });
         }
 
         if (routeTo) {
+          if (mcpBridge) await mcpBridge.disconnect();
           return {
             success: true,
             output: routeContent ?? "",
@@ -413,6 +466,7 @@ async function runChatCompletions(options: OpenAIRunOptions): Promise<OpenAIResu
       const output = assistantMsg.content ?? "";
       onOutput?.(output);
 
+      if (mcpBridge) await mcpBridge.disconnect();
       return {
         success: true,
         output,
