@@ -28,16 +28,15 @@ OpenConclave lets you build, run, and manage multi-agent workflows visually. Con
 
 ## Core Architecture
 
-### Agent Engines (current)
-- **Claude Code CLI** (`-p` mode) — full tool access, `--resume` for multi-turn sessions, model selection per node (Haiku/Sonnet/Opus), budget + max turn config
-- **Ollama** (local) — free, private, with MCP bridge for tool calling, JSONL session persistence, thinking toggle
-
-### Agent Engines (planned)
-- Microsoft Foundry
-- OpenAI API
-- OpenRouter (access any model)
-- Google Gemini
-- Custom API endpoints
+### Agent Engines
+- **Claude Code** (Agent SDK) — full tool access (Read, Write, Edit, Bash, Grep, WebSearch), `resume` for multi-turn sessions, model selection per node (Haiku/Sonnet/Opus), budget + max turn config. Agents run in the caller's working directory via `cwd` passthrough.
+- **Ollama** (local) — free, private, with MCP bridge for tool calling, JSONL session persistence, thinking toggle. Built-in tools (bash, read_file, write_file) execute in caller's cwd.
+- **OpenAI-compatible** — any provider: OpenAI, OpenRouter, Together AI, Gemini, Groq, or custom endpoints. Two API modes:
+  - **Responses API** (OpenAI) — with reasoning summaries and tool calling
+  - **Chat Completions** (universal) — standard OpenAI-compatible format, captures `reasoning` field when available (e.g. Together AI's Apriel Thinker)
+  - Provider management via Settings page: add/remove providers with API key, base URL, API type
+  - Model auto-discovery from providers that support `/models` endpoint
+  - Session JSONL files managed by executor for conversation persistence
 
 ### Node Types (7)
 1. **Trigger** (pill shape) — start workflows (manual, cron, webhook, channel, telegram)
@@ -63,13 +62,11 @@ OpenConclave lets you build, run, and manage multi-agent workflows visually. Con
 - **MCP servers per agent** — Playwright, Telegram Voice, Filesystem, Fetch. Spawned on demand.
 
 ### Key Technical Features
-- **Conversation history** — agents remember previous turns in loops
-- **Claude `--resume`** — native multi-turn sessions for Claude agents
-- **Ollama JSONL sessions** — file-based session persistence for local models
+- **Conversation history** — agents remember previous turns in loops. Claude uses SDK `resume`, non-Claude engines use executor-managed JSONL session files.
+- **Caller cwd passthrough** — agents run in the user's project directory, not the server's. Channel and MCP tools inject `cwd` automatically.
 - **Ollama MCP bridge** — converts MCP tool schemas to Ollama format; local models use Playwright, web fetch, etc.
-- **Extended thinking visibility** — see agent reasoning in run details
-- **Dynamic routing** — agents choose path via `openconclave_next` tool call; works for both Claude (MCP state file) and Ollama (captured from tool call args)
-- **Perspective-dependent history** — each agent sees conversations from its own POV
+- **Extended thinking visibility** — see agent reasoning in run details (Claude thinking blocks, Ollama `<think>` tags, OpenAI reasoning summaries, Together AI reasoning field)
+- **Dynamic routing** — agents choose path via `openconclave_next` tool call; works for Claude (MCP state file), Ollama (captured from tool call args), and OpenAI (function_call). Route matching by node ID or label (case-insensitive fallback).
 - **Startup recovery** — stale "running" runs marked "interrupted" on server restart (handles hot-reload crashes)
 - **Prompt cleanup** — cancelled runs clear pending prompts from in-memory registry
 
@@ -111,12 +108,13 @@ OpenConclave lets you build, run, and manage multi-agent workflows visually. Con
 - **Protocols**: MCP, WebSocket, Claude Code Channels
 
 ## What Makes It Different
-1. **Deep Claude Code integration** — channel, MCP tools, workflows-as-tools, `--resume` sessions
-2. **Dual engine** — Claude Code + Ollama in the same workflow, parallel multi-model reviews
+1. **Deep Claude Code integration** — channel plugin, MCP tools, workflows-as-tools, Agent SDK with `resume` sessions
+2. **Multi-engine** — Claude Code + Ollama + any OpenAI-compatible provider in the same workflow. Mix models freely across nodes.
 3. **MCP bridge** — local models use Playwright, Telegram, etc. via MCP tool conversion
 4. **Visual + programmatic** — build in UI or from Claude Code via skill/MCP
-5. **Channel-in-the-loop** — workflows pause and ask Claude Code for decisions, with full context metadata
-6. **Thinking visibility** — see agent reasoning in run details (both Claude and Ollama)
+5. **Channel-in-the-loop** — workflows pause and ask the user for decisions, with full context metadata
+6. **Thinking visibility** — see agent reasoning in run details (Claude thinking, Ollama `<think>`, OpenAI reasoning summaries, Together AI reasoning field)
 7. **Dynamic routing** — agents choose their own path, enforced with retries and error on failure
-8. **Crash resilient** — startup recovery, prompt cleanup, no orphaned runs
-9. **Security-aware** — documented threat model, security review workflow, workspace isolation
+8. **Caller cwd isolation** — agents work in the user's project directory, not the server's install location
+9. **Crash resilient** — startup recovery, prompt cleanup, no orphaned runs. Server self-terminates when Claude Code exits.
+10. **Security-aware** — documented threat model, security review workflow, workspace isolation
