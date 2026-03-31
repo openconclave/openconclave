@@ -131,8 +131,44 @@ async function runResponsesAPI(options: OpenAIRunOptions): Promise<OpenAIResult>
     input.push({ role: "user", content: inputStr });
   }
 
-  // Build tools
+  // Build tools + executors
   const tools: Array<Record<string, unknown>> = [];
+  const toolExecutors = new Map<string, (args: Record<string, unknown>) => Promise<string>>();
+
+  // Add builtin tools based on allowedTools
+  if (options.allowedTools?.length) {
+    const builtins = createBuiltinTools(options.cwd);
+    for (const toolName of options.allowedTools) {
+      const mapped = TOOL_NAME_MAP[toolName];
+      if (mapped && builtins[mapped]) {
+        // Responses API tool format: name at top level, not nested under function
+        const bt = builtins[mapped].tool;
+        tools.push({ type: "function", name: bt.function.name, description: bt.function.description, parameters: bt.function.parameters });
+        toolExecutors.set(bt.function.name, builtins[mapped].execute);
+      }
+    }
+  }
+
+  // Connect MCP servers
+  let mcpBridge: McpBridge | null = null;
+  if (options.mcpServers?.length) {
+    mcpBridge = new McpBridge();
+    try {
+      await mcpBridge.connect(options.mcpServers);
+      for (const tool of mcpBridge.getTools()) {
+        // Convert Chat Completions format to Responses API format
+        tools.push({ type: "function", name: tool.function.name, description: tool.function.description, parameters: tool.function.parameters });
+        const mcpToolName = tool.function.name;
+        toolExecutors.set(mcpToolName, async (args) => {
+          return mcpBridge!.callTool(mcpToolName, args);
+        });
+      }
+    } catch (err: unknown) {
+      logger.warn("Failed to connect MCP servers for Responses API", { error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  // Add routing tool
   if (options.routeTargets && options.routeTargets.length >= 2) {
     tools.push(createRoutingToolResponses(options.routeTargets));
   }
@@ -223,19 +259,31 @@ async function runResponsesAPI(options: OpenAIRunOptions): Promise<OpenAIResult>
             routeContent = (fnArgs.content as string) ?? "";
           }
 
+          // Execute tool
+          const executor = toolExecutors.get(item.name);
+          let result: string;
+          if (item.name === "openconclave_next") {
+            result = `Routing to: ${routeTo}`;
+          } else if (executor) {
+            onOutput?.(`[Executing ${item.name}...]\n`);
+            result = await executor(fnArgs);
+            onOutput?.(`[${item.name} result: ${result.slice(0, 200)}${result.length > 200 ? "..." : ""}]\n`);
+          } else {
+            result = `Unknown tool: ${item.name}`;
+          }
+
           // Add function call + result to input for next turn
           input.push(item);
           input.push({
             type: "function_call_output",
             call_id: item.call_id,
-            output: item.name === "openconclave_next"
-              ? `Routing to: ${routeTo}`
-              : `Tool ${item.name} executed`,
+            output: result,
           });
         }
       }
 
       if (routeTo) {
+        if (mcpBridge) await mcpBridge.disconnect();
         return {
           success: true,
           output: routeContent ?? "",
@@ -255,6 +303,7 @@ async function runResponsesAPI(options: OpenAIRunOptions): Promise<OpenAIResult>
         onOutput?.(textOutput);
       }
 
+      if (mcpBridge) await mcpBridge.disconnect();
       return {
         success: true,
         output: textOutput || data.output_text || "",
