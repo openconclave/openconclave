@@ -30,6 +30,10 @@ export interface AgentConfig {
   systemPrompt?: string;
   model?: string;
   ollamaModel?: string;
+  /** OpenAI-compatible provider ID (references a provider in settings) */
+  providerId?: string;
+  /** Model name for OpenAI-compatible providers (e.g. "gpt-4o", "claude-3-opus") */
+  openaiModel?: string;
   thinking?: boolean;
   maxTurns?: number;
   maxBudgetUsd?: number;

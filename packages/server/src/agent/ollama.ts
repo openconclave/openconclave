@@ -3,6 +3,13 @@ import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync } fr
 import { dirname, join } from "path";
 import { McpBridge } from "./mcp-bridge";
 import { logger } from "../lib/logger";
+import { SESSIONS_DIR } from "../lib/workspace";
+
+const OLLAMA_LOG = join(SESSIONS_DIR, "ollama-debug.log");
+function ollamaLog(label: string, data: unknown) {
+  const line = `[${new Date().toISOString()}] ${label}: ${JSON.stringify(data, null, 2)}\n`;
+  try { appendFileSync(OLLAMA_LOG, line); } catch {}
+}
 
 const OLLAMA_URL = process.env.OLLAMA_URL ?? "http://localhost:11434";
 
@@ -191,27 +198,35 @@ function createBuiltinTools(cwd?: string): Record<string, { tool: OllamaTool; ex
       }
     },
   },
-  openconclave_next: {
+  };
+}
+
+// Separate factory for the routing tool — needs route targets
+function createRoutingTool(routeTargets: Array<{ nodeId: string; label: string; type: string }>): { tool: OllamaTool; execute: (args: any) => Promise<string> } {
+  const routeList = routeTargets
+    .map((r) => `  - "${r.nodeId}" → ${r.label} (${r.type})`)
+    .join("\n");
+  const validIds = routeTargets.map((r) => r.nodeId);
+
+  return {
     tool: {
       type: "function",
       function: {
         name: "openconclave_next",
-        description: "Route to the next workflow step. You MUST call this to choose which node to execute next.",
+        description: `Route to the next workflow step. You MUST call this exactly once.\nAvailable routes:\n${routeList}`,
         parameters: {
           type: "object",
           required: ["node_id", "content"],
           properties: {
-            node_id: { type: "string", description: "The ID of the next node to route to" },
+            node_id: { type: "string", enum: validIds, description: "The node ID to route to (must be one of the available routes)" },
             content: { type: "string", description: "Your output message to pass to the next node" },
           },
         },
       },
     },
     execute: async (args: { node_id: string; content: string }) => {
-      // The executor handles routing — this just returns the route info
       return `ROUTE:${args.node_id}:${args.content}`;
     },
-  },
   };
 }
 
@@ -224,6 +239,7 @@ export type OllamaRunOptions = {
   input?: unknown;
   tools?: string[];
   mcpServers?: string[];
+  routeTargets?: Array<{ nodeId: string; label: string; type: string }>;
   cwd?: string;
   sessionFile?: string;
   thinking?: boolean;
@@ -251,12 +267,11 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
   const maxTurns = options.maxTurns ?? 10;
   const startTime = Date.now();
 
-  // Build messages — restore from session file or start fresh
+  // Read messages from session file (managed by executor)
   const sessionFile = options.sessionFile;
   const messages: Array<{ role: string; content: string }> = [];
 
   if (sessionFile && existsSync(sessionFile)) {
-    // Resume: read previous messages from session file
     const lines = readFileSync(sessionFile, "utf8").split("\n").filter(Boolean);
     for (const line of lines) {
       try {
@@ -264,19 +279,14 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
       } catch { /* skip malformed */ }
     }
   } else {
-    // First turn: add system prompt
+    // Fallback: no session file — build minimal messages
     if (systemPrompt) {
       messages.push({ role: "system", content: systemPrompt });
     }
-  }
-
-  // Add current user message
-  if (input !== undefined) {
-    const inputStr = typeof input === "string" ? input : JSON.stringify(input, null, 2);
+    const inputStr = input !== undefined
+      ? (typeof input === "string" ? input : JSON.stringify(input, null, 2))
+      : (prompt || "Start");
     messages.push({ role: "user", content: inputStr });
-  } else if (messages.length <= 1) {
-    // No input and no history — use prompt as first message
-    messages.push({ role: "user", content: prompt || "Start" });
   }
 
   // Collect requested built-in tools — pass cwd for file/process isolation
@@ -286,11 +296,19 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
   const toolExecutors = new Map<string, (args: any) => Promise<string>>();
 
   for (const toolId of requestedTools) {
+    if (toolId === "openconclave_next") continue; // handled below
     const bt = builtinTools[toolId];
     if (bt) {
       activeTools.push(bt.tool);
       toolExecutors.set(bt.tool.function.name, bt.execute);
     }
+  }
+
+  // Add routing tool with actual route targets
+  if (options.routeTargets && options.routeTargets.length >= 2) {
+    const routingTool = createRoutingTool(options.routeTargets);
+    activeTools.push(routingTool.tool);
+    toolExecutors.set("openconclave_next", routingTool.execute);
   }
 
   // Connect MCP servers and discover their tools
@@ -333,7 +351,7 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
         body.tools = activeTools;
       }
 
-      logger.debug(`Ollama turn ${turn + 1}`, { model, messages: messages.length });
+      ollamaLog(`REQUEST turn ${turn + 1}`, { model, messages, tools: hasTools ? activeTools : undefined });
 
       const res = await fetch(`${OLLAMA_URL}/api/chat`, {
         method: "POST",
@@ -354,6 +372,7 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
 
       const data = await res.json() as any;
       const assistantMsg = data.message;
+      ollamaLog(`RESPONSE turn ${turn + 1}`, { thinking: assistantMsg.thinking?.slice(0, 500), content: assistantMsg.content?.slice(0, 500), tool_calls: assistantMsg.tool_calls });
 
       // Capture thinking/reasoning from the response
       if (assistantMsg.thinking) {
@@ -361,8 +380,12 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
         onOutput?.(`[thinking: ${assistantMsg.thinking.slice(0, 100)}...]\n`);
       }
 
-      // Add assistant message to history
-      messages.push(assistantMsg);
+      // Add assistant message to history — include thinking so model remembers its reasoning on resume
+      const savedMsg = { ...assistantMsg };
+      if (assistantMsg.thinking && !assistantMsg.content?.includes(assistantMsg.thinking)) {
+        savedMsg.content = `<think>${assistantMsg.thinking}</think>\n${assistantMsg.content ?? ""}`;
+      }
+      messages.push(savedMsg);
 
       // Check if the model wants to call tools
       if (assistantMsg.tool_calls?.length > 0) {
@@ -402,11 +425,6 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
 
         // If agent routed, return immediately with the route info
         if (routeTo) {
-          if (sessionFile) {
-            mkdirSync(dirname(sessionFile), { recursive: true });
-            const linesToSave = messages.map((m) => JSON.stringify(m)).join("\n") + "\n";
-            writeFileSync(sessionFile, linesToSave);
-          }
           if (mcpBridge) await mcpBridge.disconnect();
           return {
             success: true,
@@ -424,13 +442,6 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
       // No tool calls — model produced a final text response
       const output = assistantMsg.content ?? "";
       onOutput?.(output);
-
-      // Save session to file for resume on next turn
-      if (sessionFile) {
-        mkdirSync(dirname(sessionFile), { recursive: true });
-        const linesToSave = messages.map((m) => JSON.stringify(m)).join("\n") + "\n";
-        writeFileSync(sessionFile, linesToSave);
-      }
 
       if (mcpBridge) await mcpBridge.disconnect();
       return {

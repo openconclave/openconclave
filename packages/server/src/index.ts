@@ -56,6 +56,49 @@ app.put("/api/settings", async (c) => {
   return c.json({ ok: true });
 });
 
+// ── Providers (OpenAI-compatible) ────────────────────────────
+app.get("/api/providers", async (c) => {
+  const all = await db.select().from(settings);
+  const providers = all
+    .filter((s) => s.key.startsWith("provider:"))
+    .map((s) => {
+      const p = JSON.parse(s.value);
+      return { ...p, apiKey: p.apiKey ? "***" : "" }; // mask API key
+    });
+  return c.json({ providers });
+});
+
+app.post("/api/providers", async (c) => {
+  const body = await c.req.json();
+  const { id, name, baseUrl, apiKey, apiType, supportsModelList } = body;
+  if (!id || !name || !baseUrl || !apiKey) {
+    return c.json({ error: { code: "VALIDATION", message: "id, name, baseUrl, apiKey required" } }, 400);
+  }
+  const now = new Date().toISOString();
+  const provider = { id, name, baseUrl: baseUrl.replace(/\/$/, ""), apiKey, apiType: apiType ?? "chat", supportsModelList: supportsModelList ?? false };
+  await db
+    .insert(settings)
+    .values({ key: `provider:${id}`, value: JSON.stringify(provider), updatedAt: now })
+    .onConflictDoUpdate({ target: settings.key, set: { value: JSON.stringify(provider), updatedAt: now } });
+  return c.json({ provider: { ...provider, apiKey: "***" } });
+});
+
+app.delete("/api/providers/:id", async (c) => {
+  const id = c.req.param("id");
+  await db.delete(settings).where(eq(settings.key, `provider:${id}`));
+  return c.json({ ok: true });
+});
+
+app.get("/api/providers/:id/models", async (c) => {
+  const id = c.req.param("id");
+  const row = await db.select().from(settings).where(eq(settings.key, `provider:${id}`)).get();
+  if (!row) return c.json({ error: { code: "NOT_FOUND", message: "Provider not found" } }, 404);
+  const provider = JSON.parse(row.value);
+  const { listOpenAIModels } = await import("./agent/openai");
+  const models = await listOpenAIModels(provider);
+  return c.json({ models });
+});
+
 // ── Ollama ───────────────────────────────────────────────────
 app.get("/api/ollama/status", async (c) => {
   const status = await checkOllama();

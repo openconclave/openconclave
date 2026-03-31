@@ -1,11 +1,13 @@
 import { nanoid } from "nanoid";
 import { eq } from "drizzle-orm";
 import { join } from "path";
+import { appendFileSync, mkdirSync } from "fs";
 
 import { db } from "../db/client";
 import { runs, agentTasks, runEvents, settings } from "../db/schema";
 import { agentPool } from "../agent/pool";
 import { runOllamaAgent } from "../agent/ollama";
+import { runOpenAIAgent, type OpenAIProvider } from "../agent/openai";
 import { getIncomingEdges, getOutgoingEdges } from "./graph";
 import { evaluateExpression } from "../lib/expression";
 import { registerPrompt } from "./prompt-registry";
@@ -117,9 +119,7 @@ export class WorkflowExecutor {
     const { nodes, edges } = workflow;
     const nodeMap = new Map(nodes.map((n) => [n.id, n]));
     const nodeOutputs = new Map<string, unknown>();
-    // Conversation history per agent: [{role: "user"|"assistant", content}]
-    const conversationHistory = new Map<string, Array<{ role: string; content: string }>>();
-    // Claude CLI session IDs per agent — enables --resume for multi-turn
+    // Session IDs per agent — Claude: SDK session ID, non-Claude: JSONL file path
     const agentSessions = new Map<string, string>();
     // Extract caller's working directory from trigger payload (injected by channel)
     let callerCwd: string | undefined;
@@ -230,7 +230,6 @@ export class WorkflowExecutor {
               nodeMap,
               edges,
               nodeOutputs,
-              conversationHistory,
               agentSessions,
               workflowContext,
               workflow,
@@ -273,8 +272,13 @@ export class WorkflowExecutor {
               }
 
               if (routeTo) {
-                // Route to the chosen edge only
-                const targetEdge = outgoing.find((e) => e.target === routeTo);
+                // Route to the chosen edge — match by node ID or label (case-insensitive)
+                const routeLower = routeTo.toLowerCase();
+                const targetEdge = outgoing.find((e) => {
+                  if (e.target === routeTo) return true;
+                  const targetNode = nodeMap.get(e.target);
+                  return targetNode?.data.label?.toLowerCase() === routeLower;
+                });
                 if (targetEdge) {
                   next.push({ nodeId: targetEdge.target, triggeredBy: entry.nodeId });
                 } else {
@@ -328,7 +332,6 @@ export class WorkflowExecutor {
     nodeMap: Map<string, WorkflowNode>,
     edges: WorkflowEdge[],
     nodeOutputs: Map<string, unknown>,
-    conversationHistory: Map<string, Array<{ role: string; content: string }>>,
     agentSessions: Map<string, string>,
     workflowContext: string | null,
     workflow: WorkflowDefinition,
@@ -387,9 +390,6 @@ export class WorkflowExecutor {
               })
             : undefined;
 
-          // Build conversation history for this agent
-          const history = conversationHistory.get(nodeId) ?? [];
-
           // Clean input — strip routing metadata
           let userMessage: string | null = null;
           if (input !== undefined && input !== null) {
@@ -402,14 +402,6 @@ export class WorkflowExecutor {
             }
           }
 
-          // Always add user message to history (input from previous node)
-          if (userMessage) {
-            history.push({ role: "user", content: userMessage });
-          } else if (history.length === 0 && workflowContext) {
-            // First turn with no explicit input — use workflow context as first user message
-            history.push({ role: "user", content: workflowContext });
-          }
-
           // Build system prompt: agent's instructions + workflow context
           const agentConfig = node.data.config as AgentConfig;
           const systemParts: string[] = [];
@@ -417,35 +409,55 @@ export class WorkflowExecutor {
           if (workflowContext) systemParts.push(`\nWorkflow context: ${workflowContext}`);
           const fullSystemPrompt = systemParts.join("\n\n");
 
-          // Execute with proper chat model: system + session resume
           const chatConfig = {
             ...agentConfig,
             systemPrompt: fullSystemPrompt,
           };
 
-          const existingSessionId = agentSessions.get(nodeId);
-          const agentResult = await this.executeAgent(runId, nodeId, chatConfig, input, routeTargets, history, existingSessionId, callerCwd);
-          output = agentResult.output;
+          const engine = agentConfig.engine ?? "claude";
 
-          // Add agent's output as "assistant" turn — include thinking so agent remembers its reasoning
-          let cleanOutput = typeof output === "string" ? output : JSON.stringify(output);
-          try {
-            const parsed = JSON.parse(cleanOutput);
-            if (parsed?.__routeTo) cleanOutput = parsed.content ?? cleanOutput;
-          } catch { /* not JSON */ }
+          if (engine === "claude") {
+            // Claude agents: SDK handles session via resume — no history management needed
+            const existingSessionId = agentSessions.get(nodeId);
+            const agentResult = await this.executeAgent(runId, nodeId, chatConfig, userMessage ?? input, routeTargets, existingSessionId, callerCwd);
+            output = agentResult.output;
+            if (agentResult.sessionId) {
+              agentSessions.set(nodeId, agentResult.sessionId);
+            }
+          } else {
+            // Non-Claude agents: executor manages session JSONL file
+            const sessionDir = SESSIONS_DIR;
+            mkdirSync(sessionDir, { recursive: true });
+            const sessionFile = agentSessions.get(nodeId) ?? join(sessionDir, `${runId}-${nodeId}.jsonl`);
 
-          // Prepend thinking to the assistant turn so agent remembers its own reasoning
-          let assistantContent = cleanOutput;
-          if (agentResult.thinking && agentResult.thinking.length > 0) {
-            const thinkingText = agentResult.thinking.map((t) => t.thinking).join("\n");
-            assistantContent = `[internal reasoning: ${thinkingText}]\n\n${cleanOutput}`;
-          }
-          history.push({ role: "assistant", content: assistantContent });
-          conversationHistory.set(nodeId, history);
+            // Write system prompt on first turn
+            if (!agentSessions.has(nodeId)) {
+              appendFileSync(sessionFile, JSON.stringify({ role: "system", content: fullSystemPrompt }) + "\n");
+            }
 
-          // Save Claude session ID for resume on next turn
-          if (agentResult.sessionId) {
-            agentSessions.set(nodeId, agentResult.sessionId);
+            // Append user message
+            const userContent = userMessage ?? workflowContext ?? "Start";
+            appendFileSync(sessionFile, JSON.stringify({ role: "user", content: userContent }) + "\n");
+
+            // Execute agent — it reads the session file for messages
+            const agentResult = await this.executeAgent(runId, nodeId, chatConfig, userMessage ?? input, routeTargets, sessionFile, callerCwd);
+            output = agentResult.output;
+
+            // Append assistant response (with thinking) to session file
+            let cleanOutput = typeof output === "string" ? output : JSON.stringify(output);
+            try {
+              const parsed = JSON.parse(cleanOutput);
+              if (parsed?.__routeTo) cleanOutput = parsed.content ?? cleanOutput;
+            } catch { /* not JSON */ }
+
+            let assistantContent = cleanOutput;
+            if (agentResult.thinking && agentResult.thinking.length > 0) {
+              const thinkingText = agentResult.thinking.map((t) => t.thinking).join("\n");
+              assistantContent = `<think>${thinkingText}</think>\n${cleanOutput}`;
+            }
+            appendFileSync(sessionFile, JSON.stringify({ role: "assistant", content: assistantContent }) + "\n");
+
+            agentSessions.set(nodeId, sessionFile);
           }
           break;
         }
@@ -527,7 +539,6 @@ export class WorkflowExecutor {
     config: AgentConfig,
     input: unknown,
     routeTargets?: RouteTarget[],
-    conversationHistory?: Array<{ role: string; content: string }>,
     sessionId?: string,
     cwd?: string
   ): Promise<{ output: string; thinking?: ThinkingBlock[]; sessionId?: string }> {
@@ -538,8 +549,13 @@ export class WorkflowExecutor {
     if (engine === "ollama" && !config.ollamaModel) {
       throw new AppError(ErrorCode.AGENT_NO_MODEL, "No Ollama model selected");
     }
+    if (engine === "openai" && !config.openaiModel) {
+      throw new AppError(ErrorCode.AGENT_NO_MODEL, "No OpenAI model selected");
+    }
 
-    const modelName = engine === "ollama" ? config.ollamaModel! : (config.model ?? "sonnet");
+    const modelName = engine === "ollama" ? config.ollamaModel!
+      : engine === "openai" ? config.openaiModel!
+      : (config.model ?? "sonnet");
 
     // Build routing-aware config
     const augmentedConfig = { ...config };
@@ -603,6 +619,7 @@ export class WorkflowExecutor {
           systemPrompt: augmentedConfig.systemPrompt,
           input,
           tools: ollamaTools.length > 0 ? ollamaTools : undefined,
+          routeTargets,
           mcpServers: config.mcpServers,
           cwd,
           sessionFile: ollamaSessionFile,
@@ -614,6 +631,34 @@ export class WorkflowExecutor {
 
         // Store session file path for next turn
         result.sessionId = ollamaSessionFile;
+      } else if (engine === "openai") {
+        // OpenAI-compatible provider — load provider config from settings
+        const providerId = config.providerId;
+        if (!providerId) {
+          throw new AppError(ErrorCode.AGENT_NO_MODEL, "No OpenAI provider selected");
+        }
+        const providerRow = await db.select().from(settings).where(eq(settings.key, `provider:${providerId}`)).get();
+        if (!providerRow) {
+          throw new AppError(ErrorCode.AGENT_NO_MODEL, `Provider "${providerId}" not found in settings`);
+        }
+        const provider = JSON.parse(providerRow.value) as OpenAIProvider;
+
+        const openaiSessionFile = sessionId ?? join(SESSIONS_DIR, `${runId}-${nodeId}.jsonl`);
+
+        result = await runOpenAIAgent({
+          provider,
+          model: modelName,
+          systemPrompt: augmentedConfig.systemPrompt,
+          input,
+          routeTargets,
+          sessionFile: openaiSessionFile,
+          maxTurns: config.maxTurns ?? 10,
+          onOutput: (chunk) => {
+            this.emit({ type: "agent:output", runId, nodeId, data: { taskId, chunk } });
+          },
+        });
+
+        result.sessionId = openaiSessionFile;
       } else {
         result = await agentPool.submit(taskId, {
           config: augmentedConfig,

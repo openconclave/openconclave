@@ -34,7 +34,6 @@ export type AgentRunOptions = {
   config: AgentConfig;
   routeTargets?: RouteTarget[];
   sessionId?: string;
-  conversationHistory?: Array<{ role: string; content: string }>;
   input?: unknown;
   cwd?: string;
   env?: Record<string, string>;
@@ -92,15 +91,11 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
     }
   }
 
-  // Add OpenConclave workflow MCP server for routing + history
+  // Add OpenConclave workflow MCP server for routing
   const routeTargets = options.routeTargets;
-  const conversationHistory = options.conversationHistory;
   let stateFile: string | null = null;
 
-  const needsWorkflowMcp = (routeTargets && routeTargets.length >= 2) ||
-    (conversationHistory && conversationHistory.length > 0);
-
-  if (needsWorkflowMcp) {
+  if (routeTargets && routeTargets.length >= 2) {
     const tmpDir = TMP_DIR;
     mkdirSync(tmpDir, { recursive: true });
     stateFile = join(tmpDir, `state-${Date.now()}.json`);
@@ -112,7 +107,6 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
       env: {
         OC_STATE_FILE: stateFile,
         OC_ROUTE_TARGETS: JSON.stringify(routeTargets ?? []),
-        OC_CONVERSATION_HISTORY: JSON.stringify(conversationHistory ?? []),
       },
     };
   }
