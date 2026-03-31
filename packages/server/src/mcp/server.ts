@@ -143,14 +143,16 @@ export function createMcpServer() {
 
   server.tool(
     "trigger_workflow",
-    "Trigger a workflow run",
+    "Trigger a workflow run. Always pass your current working directory as cwd so agents run in the correct project.",
     {
       workflowId: z.string().describe("The workflow ID to trigger"),
       payload: z.record(z.unknown()).optional().describe("Optional trigger payload data"),
+      cwd: z.string().describe("Your current working directory — agents will run here"),
     },
-    async ({ workflowId, payload }) => {
+    async ({ workflowId, payload, cwd }) => {
       try {
-        const data = await ocApi(`/workflows/${workflowId}/run`, "POST", { payload });
+        const enrichedPayload = { ...(payload ?? {}), ...(cwd ? { _callerCwd: cwd } : {}) };
+        const data = await ocApi(`/workflows/${workflowId}/run`, "POST", { payload: enrichedPayload });
         return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
       } catch {
         return { content: [{ type: "text", text: "Workflow not found" }], isError: true };
@@ -333,13 +335,15 @@ export function createMcpServer() {
           // Register new workflow tool
           server.tool(
             toolName,
-            description,
+            `${description}. Always pass your current working directory as cwd so agents run in the correct project.`,
             {
               input: z.string().optional().describe("Input data to pass to the workflow trigger"),
+              cwd: z.string().describe("Your current working directory — agents will run here"),
             },
-            async ({ input }) => {
+            async ({ input, cwd }) => {
               try {
-                const result = await ocApi(`/workflows/${workflowId}/run`, "POST", { payload: input });
+                const payload = cwd ? { ...(input ? { input } : {}), _callerCwd: cwd } : input;
+                const result = await ocApi(`/workflows/${workflowId}/run`, "POST", { payload });
                 return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
               } catch (err: unknown) {
                 const message = err instanceof Error ? err.message : String(err);
