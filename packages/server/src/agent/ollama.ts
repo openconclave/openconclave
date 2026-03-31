@@ -1,6 +1,6 @@
 import { spawn } from "bun";
 import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync } from "fs";
-import { dirname } from "path";
+import { dirname, join } from "path";
 import { McpBridge } from "./mcp-bridge";
 import { logger } from "../lib/logger";
 
@@ -43,8 +43,10 @@ type OllamaTool = {
   };
 };
 
-// Built-in tools that Ollama agents can use
-const builtinTools: Record<string, { tool: OllamaTool; execute: (args: any) => Promise<string> }> = {
+// Built-in tools that Ollama agents can use — factory takes cwd for file/process operations
+function createBuiltinTools(cwd?: string): Record<string, { tool: OllamaTool; execute: (args: any) => Promise<string> }> {
+  const resolvePath = (p: string) => cwd && !p.startsWith("/") && !p.match(/^[a-zA-Z]:/) ? join(cwd, p) : p;
+  return {
   bash: {
     tool: {
       type: "function",
@@ -64,6 +66,7 @@ const builtinTools: Record<string, { tool: OllamaTool; execute: (args: any) => P
       try {
         const proc = spawn({
           cmd: ["bash", "-c", args.command],
+          cwd,
           stdout: "pipe",
           stderr: "pipe",
         });
@@ -95,7 +98,7 @@ const builtinTools: Record<string, { tool: OllamaTool; execute: (args: any) => P
     },
     execute: async (args: { path: string }) => {
       try {
-        const file = Bun.file(args.path);
+        const file = Bun.file(resolvePath(args.path));
         return await file.text();
       } catch (err: any) {
         return `Error: ${err.message}`;
@@ -120,7 +123,7 @@ const builtinTools: Record<string, { tool: OllamaTool; execute: (args: any) => P
     },
     execute: async (args: { path: string; content: string }) => {
       try {
-        await Bun.write(args.path, args.content);
+        await Bun.write(resolvePath(args.path), args.content);
         return `File written: ${args.path}`;
       } catch (err: any) {
         return `Error: ${err.message}`;
@@ -209,7 +212,8 @@ const builtinTools: Record<string, { tool: OllamaTool; execute: (args: any) => P
       return `ROUTE:${args.node_id}:${args.content}`;
     },
   },
-};
+  };
+}
 
 // ── Ollama agent runtime with tool calling ───────────────────
 
@@ -220,6 +224,7 @@ export type OllamaRunOptions = {
   input?: unknown;
   tools?: string[];
   mcpServers?: string[];
+  cwd?: string;
   sessionFile?: string;
   thinking?: boolean;
   maxTurns?: number;
@@ -274,7 +279,8 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
     messages.push({ role: "user", content: prompt || "Start" });
   }
 
-  // Collect requested built-in tools
+  // Collect requested built-in tools — pass cwd for file/process isolation
+  const builtinTools = createBuiltinTools(options.cwd);
   const requestedTools = options.tools ?? [];
   const activeTools: OllamaTool[] = [];
   const toolExecutors = new Map<string, (args: any) => Promise<string>>();

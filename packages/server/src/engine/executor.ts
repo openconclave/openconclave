@@ -122,12 +122,16 @@ export class WorkflowExecutor {
     // Claude CLI session IDs per agent — enables --resume for multi-turn
     const agentSessions = new Map<string, string>();
     // Extract caller's working directory from trigger payload (injected by channel)
-    const callerCwd = triggerPayload && typeof triggerPayload === "object" && "_callerCwd" in (triggerPayload as Record<string, unknown>)
-      ? (triggerPayload as Record<string, unknown>)._callerCwd as string
-      : undefined;
+    let callerCwd: string | undefined;
+    let cleanPayload = triggerPayload;
+    if (triggerPayload && typeof triggerPayload === "object" && "_callerCwd" in (triggerPayload as Record<string, unknown>)) {
+      const { _callerCwd, ...rest } = triggerPayload as Record<string, unknown>;
+      callerCwd = _callerCwd as string;
+      cleanPayload = Object.keys(rest).length > 0 ? rest : undefined;
+    }
     // Workflow context from trigger — injected into every agent's system prompt
-    const workflowContext = triggerPayload
-      ? (typeof triggerPayload === "string" ? triggerPayload : JSON.stringify(triggerPayload))
+    const workflowContext = cleanPayload
+      ? (typeof cleanPayload === "string" ? cleanPayload : JSON.stringify(cleanPayload))
       : null;
 
     try {
@@ -230,7 +234,7 @@ export class WorkflowExecutor {
               agentSessions,
               workflowContext,
               workflow,
-              triggerPayload,
+              cleanPayload,
               entry.triggeredBy,
               callerCwd
             );
@@ -600,6 +604,7 @@ export class WorkflowExecutor {
           input,
           tools: ollamaTools.length > 0 ? ollamaTools : undefined,
           mcpServers: config.mcpServers,
+          cwd,
           sessionFile: ollamaSessionFile,
           thinking: config.thinking ?? true,
           onOutput: (chunk) => {
