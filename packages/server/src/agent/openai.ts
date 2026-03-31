@@ -225,7 +225,11 @@ async function runResponsesAPI(options: OpenAIRunOptions): Promise<OpenAIResult>
       let routeContent: string | undefined;
       let hasFunctionCalls = false;
 
+      // Push ALL output items to input for next turn (reasoning items must accompany function_calls)
+      const functionResults: Array<{ call_id: string; output: string }> = [];
+
       for (const item of (data.output ?? [])) {
+        // Capture reasoning summaries
         if (item.type === "reasoning" && item.summary) {
           const summaryText = item.summary
             .filter((s: any) => s.type === "summary_text")
@@ -237,6 +241,7 @@ async function runResponsesAPI(options: OpenAIRunOptions): Promise<OpenAIResult>
           }
         }
 
+        // Capture text output
         if (item.type === "message" && item.content) {
           for (const block of item.content) {
             if (block.type === "output_text") {
@@ -245,6 +250,7 @@ async function runResponsesAPI(options: OpenAIRunOptions): Promise<OpenAIResult>
           }
         }
 
+        // Execute function calls
         if (item.type === "function_call") {
           hasFunctionCalls = true;
           let fnArgs: Record<string, unknown>;
@@ -259,7 +265,6 @@ async function runResponsesAPI(options: OpenAIRunOptions): Promise<OpenAIResult>
             routeContent = (fnArgs.content as string) ?? "";
           }
 
-          // Execute tool
           const executor = toolExecutors.get(item.name);
           let result: string;
           if (item.name === "openconclave_next") {
@@ -272,14 +277,16 @@ async function runResponsesAPI(options: OpenAIRunOptions): Promise<OpenAIResult>
             result = `Unknown tool: ${item.name}`;
           }
 
-          // Add function call + result to input for next turn
-          input.push(item);
-          input.push({
-            type: "function_call_output",
-            call_id: item.call_id,
-            output: result,
-          });
+          functionResults.push({ call_id: item.call_id, output: result });
         }
+
+        // Add every output item to input (reasoning + function_call + message)
+        input.push(item);
+      }
+
+      // Append function call results after all output items
+      for (const fr of functionResults) {
+        input.push({ type: "function_call_output", call_id: fr.call_id, output: fr.output });
       }
 
       if (routeTo) {
