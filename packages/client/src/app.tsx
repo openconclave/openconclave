@@ -17,8 +17,8 @@ function getPage() {
   if (path === "/runs") return <RunsPage />;
   if (path.startsWith("/runs/")) return <RunDetailPage />;
   if (path === "/settings") return <SettingsPage />;
-  // /:toolName/chat — chat UI for workflows with a chat trigger
-  if (path.endsWith("/chat") && path.split("/").length === 3) return <ChatPage />;
+  // /:toolName/chat or /:toolName/chat/:sessionId
+  if (path.split("/")[2] === "chat") return <ChatPage />;
   return <DashboardPage />;
 }
 

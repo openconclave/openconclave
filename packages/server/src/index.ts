@@ -181,6 +181,31 @@ app.post("/api/workflows/:id/run", async (c) => {
   return c.json({ runId, status: "running" }, 201);
 });
 
+// ── Chat Message (continue existing run) ─────────────────────
+app.post("/api/runs/:runId/message", async (c) => {
+  const { runId } = c.req.param();
+  const run = await db.select().from(runs).where(eq(runs.id, runId)).get();
+  if (!run) return c.json({ error: { code: "NOT_FOUND", message: "Run not found" } }, 404);
+
+  const wf = await db.select().from(workflows).where(eq(workflows.id, run.workflowId)).get();
+  if (!wf) return c.json({ error: { code: "NOT_FOUND", message: "Workflow not found" } }, 404);
+
+  const body = await c.req.json().catch(() => ({}));
+  const message = (body as Record<string, unknown>).message as string;
+  const definition = wf.definition as Record<string, unknown>;
+  const nodes = (definition.nodes ?? []) as Array<{ id: string; data?: { type?: string } }>;
+  const triggerNode = nodes.find((n) => n.data?.type === "trigger");
+
+  await executor.executeInRun(
+    runId,
+    definition as never,
+    message,
+    triggerNode?.id
+  );
+
+  return c.json({ runId, status: "running" });
+});
+
 // ── Workflow by toolName (for chat UI) ──────────────────────
 app.get("/api/workflows/by-tool/:toolName", async (c) => {
   const { toolName } = c.req.param();

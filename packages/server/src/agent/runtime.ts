@@ -59,11 +59,11 @@ const mcpServerConfigs: Record<string, { command: string; args: string[] }> = {
   },
   filesystem: {
     command: "npx",
-    args: ["@anthropic-ai/mcp-server-filesystem@latest"],
+    args: ["@modelcontextprotocol/server-filesystem@latest"],
   },
   fetch: {
     command: "npx",
-    args: ["@anthropic-ai/mcp-server-fetch@latest"],
+    args: ["@modelcontextprotocol/server-fetch@latest"],
   },
 };
 

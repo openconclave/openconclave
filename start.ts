@@ -38,7 +38,7 @@ async function waitAndOpenBrowser() {
 waitAndOpenBrowser();
 
 const server = spawn({
-  cmd: ["bun", "run", "--watch", "packages/server/src/index.ts"],
+  cmd: ["bun", "run", "packages/server/src/index.ts"],
   cwd: import.meta.dir,
   stdout: "inherit",
   stderr: "inherit",

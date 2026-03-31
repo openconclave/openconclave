@@ -1,7 +1,7 @@
 import { nanoid } from "nanoid";
 import { eq } from "drizzle-orm";
 import { join } from "path";
-import { appendFileSync, mkdirSync } from "fs";
+import { appendFileSync, mkdirSync, existsSync } from "fs";
 
 import { db } from "../db/client";
 import { runs, agentTasks, runEvents, settings } from "../db/schema";
@@ -78,6 +78,21 @@ export class WorkflowExecutor {
     this.onEvent = onEvent;
   }
 
+  /** Continue an existing run with a new message (chat) */
+  async executeInRun(
+    runId: string,
+    workflow: WorkflowDefinition,
+    triggerPayload?: unknown,
+    triggerNodeId?: string
+  ): Promise<void> {
+    this.executeGraph(runId, workflow, triggerPayload, triggerNodeId).catch(
+      (err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        logger.error(`Run ${runId} continued message failed`, { error: message });
+      }
+    );
+  }
+
   async execute(
     workflow: WorkflowDefinition,
     triggerPayload?: unknown,
@@ -121,7 +136,7 @@ export class WorkflowExecutor {
     const nodeOutputs = new Map<string, unknown>();
     // Session IDs per agent — Claude: SDK session ID, non-Claude: JSONL file path
     const agentSessions = new Map<string, string>();
-    // Extract caller's working directory from trigger payload (injected by channel)
+    // Extract internal fields from trigger payload
     let callerCwd: string | undefined;
     let cleanPayload = triggerPayload;
     if (triggerPayload && typeof triggerPayload === "object" && "_callerCwd" in (triggerPayload as Record<string, unknown>)) {
@@ -453,8 +468,8 @@ export class WorkflowExecutor {
             mkdirSync(sessionDir, { recursive: true });
             const sessionFile = agentSessions.get(nodeId) ?? join(sessionDir, `${runId}-${nodeId}.jsonl`);
 
-            // Write system prompt on first turn
-            if (!agentSessions.has(nodeId)) {
+            // Write system prompt only if session file is new (not a continuation)
+            if (!existsSync(sessionFile)) {
               appendFileSync(sessionFile, JSON.stringify({ role: "system", content: fullSystemPrompt }) + "\n");
             }
 

@@ -1,23 +1,34 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
-import { Send, Loader2, Bot, User } from "lucide-react";
+import { Send, Loader2, Bot, User, PlusCircle } from "lucide-react";
 
 interface ChatMessage {
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "agent";
   content: string;
+  label?: string;
   runId?: string;
   status?: "pending" | "done" | "error";
+}
+
+interface WorkflowNode {
+  id: string;
+  data: { label: string; type: string };
 }
 
 interface WorkflowInfo {
   id: string;
   name: string;
   description?: string;
+  nodes: WorkflowNode[];
 }
 
 export function ChatPage() {
-  const toolName = window.location.pathname.split("/")[1];
+  const parts = window.location.pathname.split("/");
+  const toolName = parts[1];
+  const urlRunId = parts[3]; // /:toolName/chat/:runId — set after first message
   const [workflow, setWorkflow] = useState<WorkflowInfo | null>(null);
+  const workflowRef = useRef<WorkflowInfo | null>(null);
+  const [chatRunId, setChatRunId] = useState<string | null>(urlRunId || null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -30,11 +41,14 @@ export function ChatPage() {
     api.get<{ workflow: { id: string; name: string; definition: Record<string, unknown> } }>(`/workflows/by-tool/${toolName}`)
       .then((data) => {
         const def = data.workflow.definition;
-        setWorkflow({
+        const wf = {
           id: data.workflow.id,
           name: (def.name as string) ?? data.workflow.name,
           description: def.description as string | undefined,
-        });
+          nodes: (def.nodes as WorkflowNode[]) ?? [],
+        };
+        setWorkflow(wf);
+        workflowRef.current = wf;
       })
       .catch(() => setError(`Workflow "${toolName}" not found`));
   }, [toolName]);
@@ -51,39 +65,44 @@ export function ChatPage() {
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        if (data.type === "chat:response" && data.data?.content) {
+        // Show intermediate agent outputs
+        if (data.type === "node:completed" && data.nodeId && data.runId) {
           setMessages((prev) => {
-            // Find the pending message for this runId and mark it done
-            const updated = prev.map((m) =>
-              m.runId === data.runId && m.role === "assistant" && m.status === "pending"
-                ? { ...m, content: data.data.content, status: "done" as const }
-                : m
-            );
-            // If no pending message found, add a new one
-            if (!updated.some((m) => m.runId === data.runId && m.status === "done")) {
-              updated.push({ role: "assistant", content: data.data.content, runId: data.runId, status: "done" });
+            const node = workflowRef.current?.nodes.find((n: WorkflowNode) => n.id === data.nodeId);
+            if (!node || node.data.type !== "agent") return prev;
+            const content = typeof data.data === "string" ? data.data : JSON.stringify(data.data, null, 2);
+            // Strip routing metadata from content
+            let cleanContent = content;
+            try {
+              const parsed = JSON.parse(content);
+              if (parsed?.__routeTo) cleanContent = parsed.content ?? content;
+            } catch { /* not JSON */ }
+            // Insert agent message before the pending message
+            const pendingIdx = prev.findIndex((m) => m.status === "pending");
+            const agentMsg: ChatMessage = { role: "agent", content: cleanContent, label: node.data.label, runId: data.runId, status: "done" };
+            if (pendingIdx >= 0) {
+              const updated = [...prev];
+              updated.splice(pendingIdx, 0, agentMsg);
+              return updated;
+            }
+            return [...prev, agentMsg];
+          });
+        }
+
+        if (data.type === "chat:response") {
+          setLoading(false);
+        }
+
+        // Handle run completion — clean up pending messages
+        if (data.type === "run:completed" && data.data) {
+          setMessages((prev) => {
+            const updated = prev.filter((m) => !(m.status === "pending" && m.runId === data.runId));
+            if (data.data.status === "failure") {
+              updated.push({ role: "assistant", content: `Error: ${data.data.error ?? "Workflow failed"}`, runId: data.runId, status: "error" });
             }
             return updated;
           });
           setLoading(false);
-        }
-
-        // Also handle run completion (success/failure) to update pending messages
-        if (data.type === "run:completed" && data.data) {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.runId === data.runId && m.status === "pending"
-                ? {
-                    ...m,
-                    content: data.data.status === "failure"
-                      ? `Error: ${data.data.error ?? "Workflow failed"}`
-                      : m.content,
-                    status: data.data.status === "failure" ? "error" as const : m.status,
-                  }
-                : m
-            )
-          );
-          if (data.data.status === "failure") setLoading(false);
         }
       } catch { /* ignore parse errors */ }
     };
@@ -111,14 +130,23 @@ export function ChatPage() {
     setMessages((prev) => [...prev, { role: "user", content: userMessage }]);
 
     try {
-      const data = await api.post<{ runId: string }>(`/workflows/${workflow.id}/run`, {
-        payload: userMessage,
-      });
+      let runId: string;
+      if (chatRunId) {
+        // Continue existing run
+        await api.post(`/runs/${chatRunId}/message`, { message: userMessage });
+        runId = chatRunId;
+      } else {
+        // First message — create new run
+        const data = await api.post<{ runId: string }>(`/workflows/${workflow.id}/run`, { payload: userMessage });
+        runId = data.runId;
+        setChatRunId(runId);
+        window.history.replaceState(null, "", `/${toolName}/chat/${runId}`);
+      }
 
       // Add pending assistant message
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: "", runId: data.runId, status: "pending" },
+        { role: "assistant", content: "", runId, status: "pending" },
       ]);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -149,11 +177,20 @@ export function ChatPage() {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="border-b border-border px-6 py-4">
-        <h1 className="text-lg font-semibold">{workflow.name}</h1>
-        {workflow.description && (
+      <div className="border-b border-border px-6 py-4 flex items-center justify-between">
+        <div>
+          <h1 className="text-lg font-semibold">{workflow.name}</h1>
+          {workflow.description && (
           <p className="text-xs text-muted-foreground mt-0.5">{workflow.description}</p>
         )}
+        </div>
+        <button
+          onClick={() => { window.location.href = `/${toolName}/chat`; }}
+          className="inline-flex items-center gap-1.5 rounded-md bg-primary/10 text-primary px-3 py-1.5 text-sm hover:bg-primary/20 transition-colors"
+        >
+          <PlusCircle className="h-4 w-4" />
+          New Chat
+        </button>
       </div>
 
       {/* Messages */}
@@ -167,7 +204,7 @@ export function ChatPage() {
 
         {messages.map((msg, i) => (
           <div key={i} className={`flex gap-3 ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-            {msg.role === "assistant" && (
+            {(msg.role === "assistant" || msg.role === "agent") && (
               <div className="flex-shrink-0 w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center">
                 <Bot className="h-4 w-4 text-primary" />
               </div>
@@ -178,9 +215,14 @@ export function ChatPage() {
                   ? "bg-primary text-primary-foreground"
                   : msg.status === "error"
                     ? "bg-destructive/10 text-destructive border border-destructive/20"
-                    : "bg-card border border-border"
+                    : msg.role === "agent"
+                      ? "bg-card/60 border border-border/50"
+                      : "bg-card border border-border"
               }`}
             >
+              {msg.label && (
+                <span className="text-[10px] text-muted-foreground/70 uppercase tracking-wider block mb-1">{msg.label}</span>
+              )}
               {msg.status === "pending" ? (
                 <div className="flex items-center gap-2 text-muted-foreground">
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
