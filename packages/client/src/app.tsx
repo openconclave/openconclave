@@ -7,6 +7,7 @@ import { WorkflowEditorPage } from "@/pages/workflow-editor";
 import { RunsPage } from "@/pages/runs";
 import { RunDetailPage } from "@/pages/run-detail";
 import { SettingsPage } from "@/pages/settings";
+import { ChatPage } from "@/pages/chat";
 
 function getPage() {
   const path = window.location.pathname;
@@ -16,6 +17,8 @@ function getPage() {
   if (path === "/runs") return <RunsPage />;
   if (path.startsWith("/runs/")) return <RunDetailPage />;
   if (path === "/settings") return <SettingsPage />;
+  // /:toolName/chat — chat UI for workflows with a chat trigger
+  if (path.endsWith("/chat") && path.split("/").length === 3) return <ChatPage />;
   return <DashboardPage />;
 }
 

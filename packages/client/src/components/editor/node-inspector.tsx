@@ -119,8 +119,14 @@ function TriggerFields({ nodeId, config }: { nodeId: string; config: TriggerConf
           <option value="webhook">Webhook</option>
           <option value="channel">Channel (Claude Code)</option>
           <option value="telegram">Telegram</option>
+          <option value="chat">Chat (Web UI)</option>
         </select>
       </Field>
+      {config.type === "chat" && (
+        <p className="text-[10px] text-muted-foreground px-1">
+          Users can chat with this workflow at <span className="font-mono text-primary">/{"{toolName}"}/chat</span>. Connect an output edge back to this trigger to send responses to the chat.
+        </p>
+      )}
       {config.type === "telegram" && (
         <Field label="Chat ID">
           <input type="text" value={config.chatId ?? ""} onChange={(e) => update({ chatId: e.target.value })} placeholder="1470461098" className={MONO_INPUT_CLASS} />

@@ -370,7 +370,23 @@ export class WorkflowExecutor {
       switch (node.data.type) {
         case "trigger": {
           const config = node.data.config as TriggerConfig;
-          output = triggerPayload ?? config.prompt ?? null;
+          if (config.type === "chat" && input !== undefined && input !== null) {
+            // Chat trigger received a response back from the workflow — emit it
+            const content = typeof input === "string" ? input : JSON.stringify(input, null, 2);
+            this.emit({
+              type: "chat:response",
+              runId,
+              nodeId,
+              data: {
+                content,
+                workflowName: workflow.name,
+                nodeLabel: node.data.label,
+              },
+            });
+            output = input;
+          } else {
+            output = triggerPayload ?? config.prompt ?? null;
+          }
           break;
         }
 

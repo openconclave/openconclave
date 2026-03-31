@@ -11,6 +11,7 @@ const triggerLabels: Record<string, string> = {
   webhook: "Webhook",
   channel: "Channel",
   telegram: "Telegram",
+  chat: "Chat",
 };
 
 const handleBase = "!h-3 !w-3 !rounded-full !border-2 !bg-card transition-colors";
@@ -34,7 +35,17 @@ export function TriggerNode(props: NodeProps) {
       )}
       onClick={() => setSelectedNode(props.id)}
     >
-      {/* Only bottom handle — triggers are entry points */}
+      {/* Chat triggers have a top handle (input) for receiving responses back */}
+      {config.type === "chat" && (
+        <Handle
+          type="source"
+          id="top"
+          position={Position.Top}
+          style={{ left: "50%", transform: "translateX(-50%)" }}
+          className={cn(handleBase, handleColor)}
+        />
+      )}
+      {/* Bottom handle — output to workflow */}
       <Handle
         type="source"
         id="bottom"

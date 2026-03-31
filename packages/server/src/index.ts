@@ -181,6 +181,18 @@ app.post("/api/workflows/:id/run", async (c) => {
   return c.json({ runId, status: "running" }, 201);
 });
 
+// ── Workflow by toolName (for chat UI) ──────────────────────
+app.get("/api/workflows/by-tool/:toolName", async (c) => {
+  const { toolName } = c.req.param();
+  const all = await db.select().from(workflows);
+  const match = all.find((w) => {
+    const def = w.definition as Record<string, unknown>;
+    return def.toolName === toolName;
+  });
+  if (!match) return c.json({ error: { code: "NOT_FOUND", message: `No workflow with toolName "${toolName}"` } }, 404);
+  return c.json({ workflow: match });
+});
+
 app.get("/api/agents/pool", (c) => c.json(agentPool.stats));
 
 // ── Prompt (Human/Claude-in-the-loop) ────────────────────────
