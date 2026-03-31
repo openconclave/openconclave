@@ -8,7 +8,9 @@ export function AgentNode(props: NodeProps) {
   const data = useNodeData(props);
   const config = data.config as AgentConfig;
   const engine = config.engine ?? "claude";
-  const model = engine === "ollama" ? config.ollamaModel ?? "ollama" : config.model ?? "sonnet";
+  const model = engine === "ollama" ? config.ollamaModel ?? "ollama"
+    : engine === "openai" ? config.openaiModel ?? "openai"
+    : config.model ?? "sonnet";
 
   return (
     <BaseNode {...props} data={data} icon={Cpu} subtitle={`${engine} · ${model}`}>
