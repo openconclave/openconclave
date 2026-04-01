@@ -5,8 +5,10 @@ import { SESSIONS_DIR } from "../lib/workspace";
 import { createBuiltinTools, TOOL_NAME_MAP } from "./builtin-tools";
 import { McpBridge } from "./mcp-bridge";
 
+const DEBUG = process.env.OPENCONCLAVE_DEBUG === "1";
 const OPENAI_LOG = join(SESSIONS_DIR, "openai-debug.log");
 function openaiLog(label: string, data: unknown) {
+  if (!DEBUG) return;
   const line = `[${new Date().toISOString()}] ${label}: ${JSON.stringify(data, null, 2)}\n`;
   try { appendFileSync(OPENAI_LOG, line); } catch {}
 }

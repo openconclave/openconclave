@@ -5,8 +5,10 @@ import { McpBridge } from "./mcp-bridge";
 import { logger } from "../lib/logger";
 import { SESSIONS_DIR } from "../lib/workspace";
 
+const DEBUG = process.env.OPENCONCLAVE_DEBUG === "1";
 const OLLAMA_LOG = join(SESSIONS_DIR, "ollama-debug.log");
 function ollamaLog(label: string, data: unknown) {
+  if (!DEBUG) return;
   const line = `[${new Date().toISOString()}] ${label}: ${JSON.stringify(data, null, 2)}\n`;
   try { appendFileSync(OLLAMA_LOG, line); } catch {}
 }

@@ -167,7 +167,7 @@ export function WorkflowEditorPage() {
 
       // Check uniqueness of name and toolName
       const allWorkflows = await api.get<{ workflows: Array<{ id: string; name: string; definition: any }> }>("/workflows");
-      const others = allWorkflows.workflows.filter((w) => w.id !== existingId);
+      const others = allWorkflows.workflows.filter((w) => String(w.id) !== existingId);
       const nameTaken = others.some((w) => w.name === workflowName);
       if (nameTaken) {
         toast(`Workflow name "${workflowName}" is already taken`, "error");
