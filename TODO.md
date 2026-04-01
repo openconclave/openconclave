@@ -8,6 +8,12 @@
 - [ ] Workflow templates — pre-built installable workflows
 - [ ] Workflow versioning / history
 
+## AI Engines
+
+- [ ] **Custom provider system** — Settings page: Add Provider (name, base URL, API key). One OpenAI-compatible runtime handles all. Model list fetched live from `/v1/models`. Agent node picks provider + model from saved list.
+- [ ] Built-in providers: Together AI, OpenRouter, OpenAI, Google Gemini, Groq, Mistral, Azure OpenAI, AWS Bedrock
+- [ ] Together AI account already registered
+
 ## Features
 
 - [ ] Webhook trigger implementation
