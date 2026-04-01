@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Header } from "@/components/layout/header";
 import { api } from "@/lib/api";
 import { toast } from "@/components/ui/toast";
-import { Save, Eye, EyeOff, Plus, Trash2, Plug, TestTube } from "lucide-react";
+import { Save, Eye, EyeOff, Plus, Trash2, Plug, TestTube, Pencil } from "lucide-react";
 
 type SettingsMap = Record<string, string>;
 
@@ -87,6 +87,11 @@ export function SettingsPage() {
       const message = err instanceof Error ? err.message : String(err);
       toast(`Failed to add provider: ${message}`, "error");
     }
+  };
+
+  const handleEditProvider = (p: ProviderInfo) => {
+    setNewProvider({ id: p.id, name: p.name, baseUrl: p.baseUrl, apiKey: "", apiType: p.apiType, supportsModelList: p.supportsModelList });
+    setShowAddProvider(true);
   };
 
   const handleDeleteProvider = async (id: string) => {
@@ -191,7 +196,8 @@ export function SettingsPage() {
                       value={newProvider.id}
                       onChange={(e) => setNewProvider({ ...newProvider, id: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "") })}
                       placeholder="openai"
-                      className={INPUT}
+                      readOnly={providers.some((p) => p.id === newProvider.id)}
+                      className={`${INPUT}${providers.some((p) => p.id === newProvider.id) ? " opacity-50" : ""}`}
                     />
                   </div>
                   <div>
@@ -216,12 +222,12 @@ export function SettingsPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-muted-foreground mb-1">API Key</label>
+                  <label className="block text-xs text-muted-foreground mb-1">API Key{providers.some((p) => p.id === newProvider.id) ? " (leave blank to keep current)" : ""}</label>
                   <input
                     type="password"
                     value={newProvider.apiKey}
                     onChange={(e) => setNewProvider({ ...newProvider, apiKey: e.target.value })}
-                    placeholder="sk-..."
+                    placeholder={providers.some((p) => p.id === newProvider.id) ? "Leave blank to keep current key" : "sk-..."}
                     className={INPUT + " w-full"}
                   />
                 </div>
@@ -280,6 +286,13 @@ export function SettingsPage() {
                         <p className="text-xs text-muted-foreground mt-0.5 font-mono">{p.baseUrl}</p>
                       </div>
                       <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => handleEditProvider(p)}
+                          className="text-muted-foreground hover:text-foreground p-1.5"
+                          title="Edit provider"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </button>
                         <button
                           onClick={() => handleTestProvider(p.id)}
                           disabled={testingProvider === p.id}

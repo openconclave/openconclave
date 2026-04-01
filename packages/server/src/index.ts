@@ -71,11 +71,21 @@ app.get("/api/providers", async (c) => {
 app.post("/api/providers", async (c) => {
   const body = await c.req.json();
   const { id, name, baseUrl, apiKey, apiType, supportsModelList } = body;
-  if (!id || !name || !baseUrl || !apiKey) {
-    return c.json({ error: { code: "VALIDATION", message: "id, name, baseUrl, apiKey required" } }, 400);
+  if (!id || !name || !baseUrl) {
+    return c.json({ error: { code: "VALIDATION", message: "id, name, baseUrl required" } }, 400);
+  }
+  // On edit, keep existing API key if not provided
+  let finalApiKey = apiKey;
+  if (!finalApiKey) {
+    const existing = await db.select().from(settings).where(eq(settings.key, `provider:${id}`)).get();
+    if (existing) {
+      finalApiKey = JSON.parse(existing.value).apiKey;
+    } else {
+      return c.json({ error: { code: "VALIDATION", message: "apiKey required for new providers" } }, 400);
+    }
   }
   const now = new Date().toISOString();
-  const provider = { id, name, baseUrl: baseUrl.replace(/\/$/, ""), apiKey, apiType: apiType ?? "chat", supportsModelList: supportsModelList ?? false };
+  const provider = { id, name, baseUrl: baseUrl.replace(/\/$/, ""), apiKey: finalApiKey, apiType: apiType ?? "chat", supportsModelList: supportsModelList ?? false };
   await db
     .insert(settings)
     .values({ key: `provider:${id}`, value: JSON.stringify(provider), updatedAt: now })
