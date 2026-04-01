@@ -53,14 +53,23 @@ const client = spawn({
   env: { ...process.env, CLIENT_PORT: clientPort },
 });
 
+let exiting = false;
 function shutdown() {
-  server.kill();
-  client.kill();
+  if (exiting) return;
+  exiting = true;
+  try { server.kill(); } catch {}
+  try { client.kill(); } catch {}
+  // On Windows, child processes may not die from .kill() — force via taskkill
+  if (process.platform === "win32") {
+    try { Bun.spawnSync({ cmd: ["taskkill", "/PID", String(server.pid), "/F", "/T"], stdout: "ignore", stderr: "ignore" }); } catch {}
+    try { Bun.spawnSync({ cmd: ["taskkill", "/PID", String(client.pid), "/F", "/T"], stdout: "ignore", stderr: "ignore" }); } catch {}
+  }
   process.exit(0);
 }
 
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
+process.on("exit", shutdown);
 
 // If launched by a parent (e.g. Claude Code hook), exit when parent dies
 const parentPid = Number(process.env.OPENCONCLAVE_PARENT_PID);
