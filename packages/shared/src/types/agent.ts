@@ -3,8 +3,8 @@ import type { RunStatus, TaskStatus } from "./workflow";
 export type { TaskStatus, RunStatus };
 
 export interface AgentTask {
-  id: string;
-  runId: string;
+  id: number;
+  runId: number;
   nodeId: string;
   status: TaskStatus;
   prompt: string;
@@ -21,8 +21,8 @@ export interface AgentTask {
 }
 
 export interface Run {
-  id: string;
-  workflowId: string;
+  id: number;
+  workflowId: number;
   status: RunStatus;
   triggerType?: string;
   triggerPayload?: unknown;
@@ -34,7 +34,7 @@ export interface Run {
 
 export interface RunEvent {
   id: number;
-  runId: string;
+  runId: number;
   nodeId?: string;
   type: string;
   data?: unknown;

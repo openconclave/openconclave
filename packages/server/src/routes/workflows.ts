@@ -1,7 +1,6 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { eq } from "drizzle-orm";
-import { nanoid } from "nanoid";
 
 import { db } from "../db/client";
 import { workflows, runs, agentTasks, runEvents } from "../db/schema";
@@ -27,29 +26,32 @@ export const workflowRoutes = new Hono()
   .post("/", zValidator("json", createWorkflowSchema), async (c) => {
     const body = c.req.valid("json");
     const now = new Date().toISOString();
-    const id = nanoid();
-    const definition = { id, ...body, enabled: true, createdAt: now, updatedAt: now };
 
-    await db.insert(workflows).values({
-      id,
+    const result = await db.insert(workflows).values({
       name: body.name,
       description: body.description,
-      definition,
+      definition: { ...body, enabled: true, createdAt: now, updatedAt: now },
       enabled: true,
       createdAt: now,
       updatedAt: now,
-    });
+    }).returning({ id: workflows.id });
 
-    return c.json(definition, 201);
+    const id = result[0].id;
+    // Update definition with the generated ID
+    await db.update(workflows)
+      .set({ definition: { id, ...body, enabled: true, createdAt: now, updatedAt: now } })
+      .where(eq(workflows.id, id));
+
+    return c.json({ id, ...body, enabled: true, createdAt: now, updatedAt: now }, 201);
   })
 
   .put("/:id", zValidator("json", updateWorkflowSchema), async (c) => {
-    const { id } = c.req.param();
+    const id = Number(c.req.param("id"));
     const body = c.req.valid("json");
     const now = new Date().toISOString();
 
     const [prev] = await db.select().from(workflows).where(eq(workflows.id, id));
-    if (!prev) throw AppError.notFound("Workflow", id);
+    if (!prev) throw AppError.notFound("Workflow", String(id));
 
     const updated = {
       name: body.name ?? prev.name,
@@ -69,7 +71,7 @@ export const workflowRoutes = new Hono()
   })
 
   .delete("/:id", async (c) => {
-    const { id } = c.req.param();
+    const id = Number(c.req.param("id"));
 
     // Delete related data first (cascade)
     const workflowRuns = await db.select().from(runs).where(eq(runs.workflowId, id));

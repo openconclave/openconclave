@@ -5,7 +5,7 @@
  */
 
 interface PendingPrompt {
-  runId: string;
+  runId: number;
   nodeId: string;
   question: string;
   input: unknown;
@@ -16,7 +16,7 @@ interface PendingPrompt {
 const pending = new Map<string, PendingPrompt>();
 
 export function registerPrompt(
-  runId: string,
+  runId: number,
   nodeId: string,
   question: string,
   input: unknown
@@ -35,7 +35,7 @@ export function registerPrompt(
   });
 }
 
-export function respondToPrompt(runId: string, nodeId: string, response: string): boolean {
+export function respondToPrompt(runId: number, nodeId: string, response: string): boolean {
   const key = `${runId}:${nodeId}`;
   const entry = pending.get(key);
   if (!entry) return false;
@@ -46,7 +46,7 @@ export function respondToPrompt(runId: string, nodeId: string, response: string)
 }
 
 export function getPendingPrompts(): Array<{
-  runId: string;
+  runId: number;
   nodeId: string;
   question: string;
   input: unknown;

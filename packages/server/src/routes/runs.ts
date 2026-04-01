@@ -11,8 +11,8 @@ export const runRoutes = new Hono()
     const allRuns = await db.select().from(runs).orderBy(desc(runs.createdAt)).limit(50);
     const allTasks = await db.select().from(agentTasks);
 
-    const costByRun = new Map<string, number>();
-    const durationByRun = new Map<string, number>();
+    const costByRun = new Map<number, number>();
+    const durationByRun = new Map<number, number>();
 
     for (const t of allTasks) {
       costByRun.set(t.runId, (costByRun.get(t.runId) ?? 0) + (t.costUsd ?? 0));
@@ -37,9 +37,9 @@ export const runRoutes = new Hono()
   })
 
   .get("/:id", async (c) => {
-    const { id } = c.req.param();
+    const id = Number(c.req.param("id"));
     const [run] = await db.select().from(runs).where(eq(runs.id, id));
-    if (!run) throw AppError.notFound("Run", id);
+    if (!run) throw AppError.notFound("Run", String(id));
 
     const tasks = await db.select().from(agentTasks).where(eq(agentTasks.runId, id));
     const events = await db.select().from(runEvents).where(eq(runEvents.runId, id));
@@ -48,7 +48,7 @@ export const runRoutes = new Hono()
   })
 
   .post("/:id/cancel", async (c) => {
-    const { id } = c.req.param();
+    const id = Number(c.req.param("id"));
     const now = new Date().toISOString();
     await db
       .update(runs)

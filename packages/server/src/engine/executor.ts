@@ -1,4 +1,3 @@
-import { nanoid } from "nanoid";
 import { eq } from "drizzle-orm";
 import { join } from "path";
 import { appendFileSync, mkdirSync, existsSync, readFileSync } from "fs";
@@ -37,7 +36,7 @@ const AGENT_CWD = process.cwd();
 
 interface RunEvent {
   type: string;
-  runId: string;
+  runId: number;
   nodeId?: string;
   data?: unknown;
 }
@@ -80,7 +79,7 @@ export class WorkflowExecutor {
 
   /** Continue an existing run with a new message (chat) */
   async executeInRun(
-    runId: string,
+    runId: number,
     workflow: WorkflowDefinition,
     triggerPayload?: unknown,
     triggerNodeId?: string
@@ -97,19 +96,19 @@ export class WorkflowExecutor {
     workflow: WorkflowDefinition,
     triggerPayload?: unknown,
     triggerNodeId?: string
-  ): Promise<string> {
-    const runId = nanoid();
+  ): Promise<number> {
     const now = new Date().toISOString();
 
-    await db.insert(runs).values({
-      id: runId,
-      workflowId: workflow.id,
+    const result = await db.insert(runs).values({
+      workflowId: workflow.id as number,
       status: "running",
       triggerType: "manual",
       triggerPayload: triggerPayload ?? null,
       startedAt: now,
       createdAt: now,
-    });
+    }).returning({ id: runs.id });
+
+    const runId = result[0].id;
 
     this.emit({ type: "run:started", runId });
 
@@ -126,7 +125,7 @@ export class WorkflowExecutor {
   // ── Graph Walker ─────────────────────────────────────────
 
   private async executeGraph(
-    runId: string,
+    runId: number,
     workflow: WorkflowDefinition,
     triggerPayload?: unknown,
     triggerNodeId?: string
@@ -348,7 +347,7 @@ export class WorkflowExecutor {
   // ── Node Execution ───────────────────────────────────────
 
   private async executeNode(
-    runId: string,
+    runId: number,
     nodeId: string,
     nodeMap: Map<string, WorkflowNode>,
     edges: WorkflowEdge[],
@@ -586,7 +585,7 @@ export class WorkflowExecutor {
   // ── Agent Execution ──────────────────────────────────────
 
   private async executeAgent(
-    runId: string,
+    runId: number,
     nodeId: string,
     config: AgentConfig,
     input: unknown,
@@ -594,7 +593,6 @@ export class WorkflowExecutor {
     sessionId?: string,
     cwd?: string
   ): Promise<{ output: string; thinking?: ThinkingBlock[]; sessionId?: string }> {
-    const taskId = nanoid();
     const now = new Date().toISOString();
     const engine = config.engine ?? "claude";
 
@@ -633,8 +631,7 @@ export class WorkflowExecutor {
 
     // Store user message as prompt, full system prompt separately
     const userMessage = typeof input === "string" ? input : (input ? JSON.stringify(input) : null);
-    await db.insert(agentTasks).values({
-      id: taskId,
+    const taskResult = await db.insert(agentTasks).values({
       runId,
       nodeId,
       status: "running",
@@ -644,7 +641,9 @@ export class WorkflowExecutor {
       input: input ?? null,
       startedAt: now,
       createdAt: now,
-    });
+    }).returning({ id: agentTasks.id });
+
+    const taskId = taskResult[0].id;
 
     this.emit({ type: "agent:started", runId, nodeId, data: { taskId, engine } });
 
@@ -859,7 +858,7 @@ export class WorkflowExecutor {
   private async handleOutput(
     config: OutputConfig,
     data: unknown,
-    runId: string,
+    runId: number,
     nodeId: string,
     workflowName?: string,
     nodeLabel?: string

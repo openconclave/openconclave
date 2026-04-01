@@ -10,7 +10,7 @@ export function runMigrations(): void {
   logger.info("Running database migrations");
 
   db.run(sql`CREATE TABLE IF NOT EXISTS workflows (
-    id TEXT PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     description TEXT,
     definition TEXT NOT NULL,
@@ -20,8 +20,8 @@ export function runMigrations(): void {
   )`);
 
   db.run(sql`CREATE TABLE IF NOT EXISTS runs (
-    id TEXT PRIMARY KEY,
-    workflow_id TEXT NOT NULL REFERENCES workflows(id),
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    workflow_id INTEGER NOT NULL REFERENCES workflows(id),
     status TEXT NOT NULL,
     trigger_type TEXT,
     trigger_payload TEXT,
@@ -32,8 +32,8 @@ export function runMigrations(): void {
   )`);
 
   db.run(sql`CREATE TABLE IF NOT EXISTS agent_tasks (
-    id TEXT PRIMARY KEY,
-    run_id TEXT NOT NULL REFERENCES runs(id),
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL REFERENCES runs(id),
     node_id TEXT NOT NULL,
     status TEXT NOT NULL,
     prompt TEXT NOT NULL,
@@ -51,7 +51,7 @@ export function runMigrations(): void {
 
   db.run(sql`CREATE TABLE IF NOT EXISTS run_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    run_id TEXT NOT NULL REFERENCES runs(id),
+    run_id INTEGER NOT NULL REFERENCES runs(id),
     node_id TEXT,
     type TEXT NOT NULL,
     data TEXT,

@@ -6,7 +6,7 @@ interface ChatMessage {
   role: "user" | "assistant" | "agent";
   content: string;
   label?: string;
-  runId?: string;
+  runId?: number;
   status?: "pending" | "done" | "error";
 }
 
@@ -28,7 +28,7 @@ export function ChatPage() {
   const urlRunId = parts[3]; // /:toolName/chat/:runId — set after first message
   const [workflow, setWorkflow] = useState<WorkflowInfo | null>(null);
   const workflowRef = useRef<WorkflowInfo | null>(null);
-  const [chatRunId, setChatRunId] = useState<string | null>(urlRunId || null);
+  const [chatRunId, setChatRunId] = useState<number | null>(urlRunId ? Number(urlRunId) : null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -130,14 +130,14 @@ export function ChatPage() {
     setMessages((prev) => [...prev, { role: "user", content: userMessage }]);
 
     try {
-      let runId: string;
+      let runId: number;
       if (chatRunId) {
         // Continue existing run
         await api.post(`/runs/${chatRunId}/message`, { message: userMessage });
         runId = chatRunId;
       } else {
         // First message — create new run
-        const data = await api.post<{ runId: string }>(`/workflows/${workflow.id}/run`, { payload: userMessage });
+        const data = await api.post<{ runId: number }>(`/workflows/${workflow.id}/run`, { payload: userMessage });
         runId = data.runId;
         setChatRunId(runId);
         window.history.replaceState(null, "", `/${toolName}/chat/${runId}`);

@@ -1,7 +1,7 @@
 import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
 
 export const workflows = sqliteTable("workflows", {
-  id: text("id").primaryKey(),
+  id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull(),
   description: text("description"),
   definition: text("definition", { mode: "json" }).notNull(),
@@ -11,8 +11,8 @@ export const workflows = sqliteTable("workflows", {
 });
 
 export const runs = sqliteTable("runs", {
-  id: text("id").primaryKey(),
-  workflowId: text("workflow_id").references(() => workflows.id).notNull(),
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  workflowId: integer("workflow_id").references(() => workflows.id).notNull(),
   status: text("status").notNull(),
   triggerType: text("trigger_type"),
   triggerPayload: text("trigger_payload", { mode: "json" }),
@@ -23,8 +23,8 @@ export const runs = sqliteTable("runs", {
 });
 
 export const agentTasks = sqliteTable("agent_tasks", {
-  id: text("id").primaryKey(),
-  runId: text("run_id").references(() => runs.id).notNull(),
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  runId: integer("run_id").references(() => runs.id).notNull(),
   nodeId: text("node_id").notNull(),
   status: text("status").notNull(),
   prompt: text("prompt").notNull(),
@@ -42,7 +42,7 @@ export const agentTasks = sqliteTable("agent_tasks", {
 
 export const runEvents = sqliteTable("run_events", {
   id: integer("id").primaryKey({ autoIncrement: true }),
-  runId: text("run_id").references(() => runs.id).notNull(),
+  runId: integer("run_id").references(() => runs.id).notNull(),
   nodeId: text("node_id"),
   type: text("type").notNull(),
   data: text("data", { mode: "json" }),

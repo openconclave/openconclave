@@ -163,9 +163,9 @@ const executor = new WorkflowExecutor((event) => {
 
 // ── Workflow Run Trigger ─────────────────────────────────────
 app.post("/api/workflows/:id/run", async (c) => {
-  const { id } = c.req.param();
+  const id = Number(c.req.param("id"));
   const wf = await db.select().from(workflows).where(eq(workflows.id, id));
-  if (!wf[0]) throw AppError.notFound("Workflow", id);
+  if (!wf[0]) throw AppError.notFound("Workflow", String(id));
 
   const body = await c.req.json().catch(() => ({}));
   const definition = wf[0].definition as Record<string, unknown>;
@@ -183,7 +183,7 @@ app.post("/api/workflows/:id/run", async (c) => {
 
 // ── Chat Message (continue existing run) ─────────────────────
 app.post("/api/runs/:runId/message", async (c) => {
-  const { runId } = c.req.param();
+  const runId = Number(c.req.param("runId"));
   const run = await db.select().from(runs).where(eq(runs.id, runId)).get();
   if (!run) return c.json({ error: { code: "NOT_FOUND", message: "Run not found" } }, 404);
 
@@ -226,7 +226,7 @@ app.get("/api/prompts/pending", (c) => {
 });
 
 app.post("/api/prompts/respond", async (c) => {
-  const body = (await c.req.json()) as { runId: string; nodeId: string; response: string };
+  const body = (await c.req.json()) as { runId: number; nodeId: string; response: string };
   const ok = respondToPrompt(body.runId, body.nodeId, body.response);
   if (!ok) return c.json({ error: "No pending prompt found" }, 404);
   return c.json({ ok: true });
