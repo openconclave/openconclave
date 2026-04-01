@@ -12,7 +12,7 @@ export const TELEGRAM_POLL_TIMEOUT_S = 30;
 export const API_PORT = 4000;
 export const CLIENT_PORT = 5173;
 
-export const NODE_TYPES = ["trigger", "agent", "condition", "transform", "merge", "prompt", "output"] as const;
+export const NODE_TYPES = ["trigger", "agent", "condition", "transform", "merge", "prompt", "output", "file"] as const;
 export const TRIGGER_TYPES = ["manual", "cron", "webhook", "channel", "telegram", "chat"] as const;
 export const AGENT_ENGINES = ["claude", "ollama", "openai"] as const;
 export const CODE_RUNTIMES = ["python", "node", "bash"] as const;

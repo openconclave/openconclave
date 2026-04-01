@@ -1,7 +1,7 @@
 import { nanoid } from "nanoid";
 import { eq } from "drizzle-orm";
 import { join } from "path";
-import { appendFileSync, mkdirSync, existsSync } from "fs";
+import { appendFileSync, mkdirSync, existsSync, readFileSync } from "fs";
 
 import { db } from "../db/client";
 import { runs, agentTasks, runEvents, settings } from "../db/schema";
@@ -548,6 +548,20 @@ export class WorkflowExecutor {
 
           logger.info("Channel-in-the-loop waiting for response", { runId, nodeId });
           output = await registerPrompt(runId, nodeId, content, input);
+          break;
+        }
+
+        case "file": {
+          const fileConfig = node.data.config as { path: string };
+          try {
+            const filePath = fileConfig.path;
+            const content = readFileSync(filePath, "utf8");
+            output = content;
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            output = `Error reading file: ${msg}`;
+            logger.error("File node read failed", { path: fileConfig.path, error: msg });
+          }
           break;
         }
 

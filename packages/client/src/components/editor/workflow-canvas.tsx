@@ -21,6 +21,7 @@ import { TransformNode } from "./nodes/transform-node";
 import { MergeNode } from "./nodes/merge-node";
 import { PromptNode } from "./nodes/prompt-node";
 import { OutputNode } from "./nodes/output-node";
+import { FileNode } from "./nodes/file-node";
 import type { WorkflowNodeData, NodeType } from "@openconclave/shared";
 
 const nodeTypes = {
@@ -31,6 +32,7 @@ const nodeTypes = {
   merge: MergeNode,
   prompt: PromptNode,
   output: OutputNode,
+  file: FileNode,
 };
 
 let nodeId = Date.now();

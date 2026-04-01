@@ -1,4 +1,4 @@
-import { Zap, Cpu, GitFork, Code, Combine, MessageCircleQuestion, Send } from "lucide-react";
+import { Zap, Cpu, GitFork, Code, Combine, MessageCircleQuestion, Send, FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { NodeType } from "@openconclave/shared";
 
@@ -16,6 +16,7 @@ const nodeTypes: {
   { type: "merge", label: "Merge", icon: Combine, color: "bg-info", description: "Combine all inputs" },
   { type: "prompt", label: "Channel Loop", icon: MessageCircleQuestion, color: "bg-warning", description: "Ask via channel" },
   { type: "output", label: "Output", icon: Send, color: "bg-node-output", description: "Send result" },
+  { type: "file", label: "File", icon: FileText, color: "bg-info", description: "Read file as input" },
 ];
 
 function getDefaultConfig(type: NodeType) {
@@ -27,6 +28,7 @@ function getDefaultConfig(type: NodeType) {
     case "merge": return {};
     case "prompt": return { description: "Ask a question if needed" };
     case "output": return { type: "log", config: {} };
+    case "file": return { path: "" };
   }
 }
 

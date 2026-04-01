@@ -64,6 +64,10 @@ export interface OutputConfig {
   config: Record<string, unknown>;
 }
 
+export interface FileConfig {
+  path: string;
+}
+
 // Keep backward compat alias
 export type TransformConfig = CodeConfig;
 
@@ -74,7 +78,8 @@ export type WorkflowNodeConfig =
   | CodeConfig
   | MergeConfig
   | PromptConfig
-  | OutputConfig;
+  | OutputConfig
+  | FileConfig;
 
 // ── Node Data ────────────────────────────────────────────────
 

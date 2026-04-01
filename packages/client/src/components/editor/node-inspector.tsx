@@ -77,6 +77,9 @@ export function NodeInspector() {
         {data.type === "output" && (
           <OutputFields nodeId={selectedNode.id} config={data.config as OutputConfig} />
         )}
+        {data.type === "file" && (
+          <FileFields nodeId={selectedNode.id} config={data.config as { path: string }} />
+        )}
 
         <button
           onClick={() => removeNode(selectedNode.id)}
@@ -480,5 +483,29 @@ function OutputFields({ nodeId, config }: { nodeId: string; config: OutputConfig
         </>
       )}
     </Field>
+  );
+}
+
+// ── File ────────────────────────────────────────────────────
+
+function FileFields({ nodeId, config }: { nodeId: string; config: { path: string } }) {
+  const updateNodeConfig = useWorkflowStore((s) => s.updateNodeConfig);
+  const update = (c: Partial<{ path: string }>) => updateNodeConfig(nodeId, c);
+
+  return (
+    <>
+      <Field label="File Path">
+        <input
+          type="text"
+          value={config.path ?? ""}
+          onChange={(e) => update({ path: e.target.value })}
+          placeholder="/path/to/file.md"
+          className={`${INPUT_CLASS} font-mono`}
+        />
+      </Field>
+      <p className="text-[10px] text-muted-foreground px-1">
+        File contents are read at runtime and passed as input to connected nodes.
+      </p>
+    </>
   );
 }
