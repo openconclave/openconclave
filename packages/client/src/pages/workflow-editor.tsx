@@ -235,7 +235,7 @@ export function WorkflowEditorPage() {
     try {
       const result = await api.post<{ runId: string }>(`/workflows/${existingId}/run`, {});
       setActiveRunId(result.runId);
-      toast(`Workflow run started: ${result.runId.slice(0, 8)}...`, "success");
+      toast(`Workflow run started: #${result.runId}`, "success");
     } catch (err: any) {
       toast(`Failed to start run: ${err.message}`, "error");
     }

@@ -263,7 +263,7 @@ export function DashboardPage() {
                       {wf?.name ?? run.workflowId.slice(0, 8)}
                     </span>
                     <span className="text-[10px] font-mono text-muted-foreground/60">
-                      {run.id.slice(0, 6)}
+                      #{run.id}
                     </span>
                     <span className="text-[10px] text-muted-foreground/60 w-16 text-right">
                       {new Date(run.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}

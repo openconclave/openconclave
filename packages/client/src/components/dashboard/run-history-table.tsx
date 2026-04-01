@@ -45,7 +45,7 @@ export function RunHistoryTable({ runs, onUpdate }: { runs: Run[]; onUpdate?: ()
                 {run.status}
               </span>
               <span className="text-sm font-mono text-muted-foreground">
-                {run.id.slice(0, 8)}
+                #{run.id}
               </span>
             </div>
             <div className="flex items-center gap-2">

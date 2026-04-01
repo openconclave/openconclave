@@ -84,7 +84,7 @@ export function RunsPage() {
                       {workflows.get(run.workflowId) ?? "Unknown workflow"}
                     </span>
                     <span className="text-[10px] font-mono text-muted-foreground/50 shrink-0">
-                      {run.id.slice(0, 8)}
+                      #{run.id}
                     </span>
                   </div>
                   <div className="flex items-center gap-4 text-xs text-muted-foreground shrink-0 ml-4">
