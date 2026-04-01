@@ -491,20 +491,44 @@ function OutputFields({ nodeId, config }: { nodeId: string; config: OutputConfig
 function FileFields({ nodeId, config }: { nodeId: string; config: { path: string } }) {
   const updateNodeConfig = useWorkflowStore((s) => s.updateNodeConfig);
   const update = (c: Partial<{ path: string }>) => updateNodeConfig(nodeId, c);
+  const [dragOver, setDragOver] = useState(false);
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    // Windows Explorer drag gives full path as text
+    const text = e.dataTransfer.getData("text/plain");
+    if (text) {
+      update({ path: text.trim() });
+      return;
+    }
+    // Fallback: file object (only gives filename, not full path)
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      update({ path: file.name });
+    }
+  };
 
   return (
     <>
-      <Field label="File Path">
-        <input
-          type="text"
-          value={config.path ?? ""}
-          onChange={(e) => update({ path: e.target.value })}
-          placeholder="/path/to/file.md"
-          className={`${INPUT_CLASS} font-mono`}
-        />
+      <Field label="File Path (absolute)">
+        <div
+          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={handleDrop}
+          className={`rounded-md border-2 border-dashed transition-colors ${dragOver ? "border-primary bg-primary/5" : "border-transparent"}`}
+        >
+          <input
+            type="text"
+            value={config.path ?? ""}
+            onChange={(e) => update({ path: e.target.value })}
+            placeholder="C:\path\to\file.md — or drag & drop a file here"
+            className={`${INPUT_CLASS} font-mono`}
+          />
+        </div>
       </Field>
       <p className="text-[10px] text-muted-foreground px-1">
-        File contents are read at runtime and passed as input to connected nodes.
+        Absolute file path. Drag a file from Explorer or type the full path. Contents are read at runtime.
       </p>
     </>
   );
