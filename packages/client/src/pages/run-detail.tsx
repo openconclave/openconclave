@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import { Header } from "@/components/layout/header";
 import { api } from "@/lib/api";
@@ -26,7 +26,7 @@ type RunDetail = {
   events: RunEvent[];
 };
 
-const statusIcon: Record<string, React.ReactNode> = {
+const statusIcon: Record<string, ReactNode> = {
   queued: <Clock className="h-4 w-4 text-muted-foreground" />,
   running: <Loader2 className="h-4 w-4 text-warning animate-spin" />,
   success: <CheckCircle className="h-4 w-4 text-success" />,
@@ -50,7 +50,6 @@ function Md({ children }: { children: string }) {
   return (
     <Markdown
       components={{
-        // Tailwind prose-like styling for inline markdown
         p: ({ children }) => <p className="mb-1 last:mb-0">{children}</p>,
         strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
         em: ({ children }) => <em className="italic">{children}</em>,
@@ -84,14 +83,13 @@ interface EventGroup {
   events: RunEvent[];
 }
 
-function groupEventsByNode(events: RunEvent[]): EventGroup[] {
+function groupEventsByNode(events: RunEvent[], nodeLabels: Map<string, string>): EventGroup[] {
   const groups: EventGroup[] = [];
   let current: EventGroup | null = null;
 
   for (const event of events) {
     const nodeId = event.nodeId ?? null;
 
-    // run-level events (run:started, run:completed) get their own group
     if (!nodeId) {
       if (current && current.nodeId === null) {
         current.events.push(event);
@@ -102,11 +100,12 @@ function groupEventsByNode(events: RunEvent[]): EventGroup[] {
       continue;
     }
 
-    // Group consecutive events for the same node
     if (current && current.nodeId === nodeId) {
       current.events.push(event);
     } else {
-      current = { nodeId, label: nodeId, events: [event] };
+      // Bug #11 fix: use friendly label from nodeLabels
+      const label = nodeLabels.get(nodeId) ?? nodeId;
+      current = { nodeId, label, events: [event] };
       groups.push(current);
     }
   }
@@ -114,7 +113,6 @@ function groupEventsByNode(events: RunEvent[]): EventGroup[] {
   return groups;
 }
 
-// Friendly event type labels
 const eventTypeLabels: Record<string, string> = {
   "run:started": "Run started",
   "run:completed": "Run completed",
@@ -144,7 +142,7 @@ const eventTypeColor: Record<string, string> = {
 };
 
 function formatEventData(event: RunEvent): string | null {
-  if (!event.data) return null;
+  if (event.data == null) return null; // Bug #6 fix: nullish check
   const data = event.data as Record<string, unknown>;
 
   switch (event.type) {
@@ -155,14 +153,13 @@ function formatEventData(event: RunEvent): string | null {
     case "agent:output": {
       const chunk = data.chunk as string | undefined;
       if (!chunk) return null;
-      // Clean up thinking prefix for display
       if (chunk.startsWith("[thinking:")) {
         return chunk.slice(0, 150) + (chunk.length > 150 ? "..." : "");
       }
       return chunk.slice(0, 200) + (chunk.length > 200 ? "..." : "");
     }
     case "agent:thinking":
-      return null; // Shown separately in task detail
+      return null;
     case "node:completed": {
       const str = typeof data === "string" ? data : JSON.stringify(data);
       return str.length > 200 ? str.slice(0, 200) + "..." : str;
@@ -178,15 +175,36 @@ function formatEventData(event: RunEvent): string | null {
 
 export function RunDetailPage() {
   const [data, setData] = useState<RunDetail | null>(null);
+  const [loadError, setLoadError] = useState(false); // Bug #5 fix: separate error state
   const [nodeLabels, setNodeLabels] = useState<Map<string, string>>(new Map());
+  const labelsLoadedFor = useRef<string | null>(null); // Bug #3 fix: track which workflow loaded
   const [expandedTasks, setExpandedTasks] = useState<string[]>([]);
   const [expandedEvents, setExpandedEvents] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<number[]>([]);
   const [expandedEventIds, setExpandedEventIds] = useState<number[]>([]);
 
   const path = window.location.pathname;
-  const runId = path.split("/runs/")[1];
+  const runId = path.split("/runs/")[1]?.split("/")[0]; // Bug #4 fix: handle trailing slash
 
+  // Bug #2/#3 fix: separate effect for loading workflow labels
+  useEffect(() => {
+    const workflowId = data?.run.workflowId;
+    if (!workflowId || labelsLoadedFor.current === workflowId) return;
+
+    labelsLoadedFor.current = workflowId;
+    api.get<{ definition: { nodes: Array<{ id: string; data?: { label?: string } }> } }>(`/workflows/${workflowId}`)
+      .then((wf) => {
+        const def = (wf as Record<string, unknown>).definition ?? wf;
+        const labels = new Map<string, string>();
+        for (const n of (def as Record<string, unknown>).nodes as Array<{ id: string; data?: { label?: string } }> ?? []) {
+          labels.set(n.id, n.data?.label ?? n.id);
+        }
+        setNodeLabels(labels);
+      })
+      .catch(() => {});
+  }, [data?.run.workflowId]);
+
+  // Polling effect
   useEffect(() => {
     if (!runId) return;
 
@@ -195,19 +213,12 @@ export function RunDetailPage() {
         .get<RunDetail>(`/runs/${runId}`)
         .then((d) => {
           setData(d);
-          // Fetch workflow to resolve node labels
-          if (d.run.workflowId && nodeLabels.size === 0) {
-            api.get<any>(`/workflows/${d.run.workflowId}`).then((wf) => {
-              const def = wf.definition ?? wf;
-              const labels = new Map<string, string>();
-              for (const n of def.nodes ?? []) {
-                labels.set(n.id, n.data?.label ?? n.id);
-              }
-              setNodeLabels(labels);
-            }).catch(() => {});
-          }
+          setLoadError(false);
         })
-        .catch(() => setData(null));
+        .catch(() => {
+          // Bug #12 fix: don't clear existing data on poll failure
+          if (!data) setLoadError(true);
+        });
     };
 
     load();
@@ -245,17 +256,17 @@ export function RunDetailPage() {
     if (!runId) return;
     try {
       await api.post(`/runs/${runId}/cancel`, {});
-      // Reload to reflect new status
       api.get<RunDetail>(`/runs/${runId}`).then(setData);
     } catch {}
   };
 
+  // Bug #5 fix: show error state instead of infinite loader
   if (!data) {
     return (
       <>
         <Header title="Run Details" />
         <div className="flex flex-1 items-center justify-center text-muted-foreground">
-          Loading...
+          {loadError ? "Failed to load run details" : "Loading..."}
         </div>
       </>
     );
@@ -267,7 +278,7 @@ export function RunDetailPage() {
       ? ((new Date(run.completedAt).getTime() - new Date(run.startedAt).getTime()) / 1000).toFixed(1)
       : null;
   const totalCost = tasks.reduce((sum, t) => sum + (t.costUsd ?? 0), 0);
-  const eventGroups = groupEventsByNode(events);
+  const eventGroups = groupEventsByNode(events, nodeLabels); // Bug #11 fix: pass labels
 
   return (
     <>
@@ -398,7 +409,7 @@ export function RunDetailPage() {
                         <Md>{typeof task.prompt === "string" ? task.prompt : JSON.stringify(task.prompt)}</Md>
                       </div>
                     </div>
-                    {task.systemPrompt && (
+                    {task.systemPrompt != null && (
                       <div>
                         <p className="text-[10px] text-muted-foreground uppercase mb-1">System Prompt</p>
                         <div className="text-sm bg-secondary/50 rounded-md px-3 py-2">
@@ -406,7 +417,7 @@ export function RunDetailPage() {
                         </div>
                       </div>
                     )}
-                    {task.input && (
+                    {task.input != null && (
                       <div>
                         <p className="text-[10px] text-muted-foreground uppercase mb-1">Input</p>
                         <pre className="text-xs bg-secondary/50 rounded-md px-3 py-2 overflow-x-auto font-mono whitespace-pre-wrap">
@@ -414,13 +425,12 @@ export function RunDetailPage() {
                         </pre>
                       </div>
                     )}
-                    {/* Thinking blocks */}
+                    {/* Bug #7/#8 fix: show ALL thinking events, validate shape */}
                     {(() => {
-                      const thinkingEvent = events.find(
+                      const thinkingEvents = events.filter(
                         (e) => e.type === "agent:thinking" && (e.data as Record<string, unknown>)?.taskId === task.id
                       );
-                      if (!thinkingEvent) return null;
-                      const thinkingData = thinkingEvent.data as { thinking: { thinking: string }[] };
+                      if (thinkingEvents.length === 0) return null;
                       return (
                         <div>
                           <p className="text-[10px] text-muted-foreground uppercase mb-1 flex items-center gap-1">
@@ -428,19 +438,24 @@ export function RunDetailPage() {
                             Thinking
                           </p>
                           <div className="space-y-2">
-                            {thinkingData.thinking.map((block, i) => (
-                              <pre
-                                key={i}
-                                className="text-xs bg-node-transform/10 border border-node-transform/20 rounded-md px-3 py-2 overflow-x-auto font-mono whitespace-pre-wrap text-muted-foreground"
-                              >
-                                {block.thinking}
-                              </pre>
-                            ))}
+                            {thinkingEvents.flatMap((te) => {
+                              const blocks = Array.isArray((te.data as Record<string, unknown>)?.thinking)
+                                ? ((te.data as Record<string, unknown>).thinking as Array<{ thinking: string }>)
+                                : [];
+                              return blocks.map((block, i) => (
+                                <pre
+                                  key={`${te.id}-${i}`}
+                                  className="text-xs bg-node-transform/10 border border-node-transform/20 rounded-md px-3 py-2 overflow-x-auto font-mono whitespace-pre-wrap text-muted-foreground"
+                                >
+                                  {block.thinking}
+                                </pre>
+                              ));
+                            })}
                           </div>
                         </div>
                       );
                     })()}
-                    {task.output && (
+                    {task.output != null && (
                       <div>
                         <p className="text-[10px] text-muted-foreground uppercase mb-1">Output</p>
                         <div className="text-sm bg-secondary/50 rounded-md px-3 py-2 overflow-x-auto">
@@ -448,7 +463,7 @@ export function RunDetailPage() {
                         </div>
                       </div>
                     )}
-                    {task.error && (
+                    {task.error != null && (
                       <div>
                         <p className="text-[10px] text-muted-foreground uppercase mb-1">Error</p>
                         <pre className="text-xs bg-destructive/10 text-destructive rounded-md px-3 py-2 overflow-x-auto font-mono whitespace-pre-wrap">
@@ -463,7 +478,7 @@ export function RunDetailPage() {
           </div>
         </div>
 
-        {/* Events Timeline — grouped by node */}
+        {/* Events Timeline */}
         <div className="rounded-lg border border-border bg-card">
           <button
             onClick={() => setExpandedEvents(!expandedEvents)}
@@ -485,8 +500,15 @@ export function RunDetailPage() {
                   ? new Date(group.events[group.events.length - 1].createdAt).toLocaleTimeString()
                   : null;
 
-                // Determine group status from events
-                const hasFailed = group.events.some((e) => e.type.includes("failed"));
+                // Bug #10 fix: check run:completed status, not just event type
+                const hasFailed = group.events.some((e) => {
+                  if (e.type.includes("failed")) return true;
+                  if (e.type === "run:completed") {
+                    const status = (e.data as Record<string, unknown>)?.status;
+                    return status === "failure" || status === "cancelled";
+                  }
+                  return false;
+                });
                 const hasCompleted = group.events.some((e) => e.type.includes("completed"));
                 const groupColor = hasFailed
                   ? "border-l-destructive"
@@ -529,7 +551,7 @@ export function RunDetailPage() {
                                 onClick={() => toggleEvent(event.id)}
                                 className="flex w-full items-start gap-3 pl-10 pr-4 py-2 text-left hover:bg-accent/20 transition-colors"
                               >
-                                {event.data ? (
+                                {event.data != null ? (
                                   isEventExpanded ? (
                                     <ChevronDown className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
                                   ) : (
@@ -555,7 +577,7 @@ export function RunDetailPage() {
                                   {new Date(event.createdAt).toLocaleTimeString()}
                                 </span>
                               </button>
-                              {isEventExpanded && event.data && (
+                              {isEventExpanded && event.data != null && (
                                 <div className="border-t border-border/30 bg-background pl-16 pr-6 py-3">
                                   <pre className="text-xs font-mono whitespace-pre-wrap overflow-x-auto text-muted-foreground">
                                     {typeof event.data === "string"
