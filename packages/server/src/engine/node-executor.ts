@@ -76,10 +76,6 @@ export async function executeNode(
       case "output":
         output = await executeOutput(node, input, runId, nodeId, workflow.name, emit);
         break;
-      case "tool":
-        // Tool nodes are config-only — they provide tools to connected agents
-        output = undefined;
-        break;
     }
 
     nodeOutputs.set(nodeId, output);

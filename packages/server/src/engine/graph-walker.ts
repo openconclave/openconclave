@@ -75,7 +75,7 @@ export async function executeGraph(
       entryNodes = triggerNode ? [triggerNode] : [];
     } else {
       entryNodes = nodes.filter(
-        (n) => getIncomingEdges(n.id, edges).length === 0 && n.data.type !== "tool"
+        (n) => getIncomingEdges(n.id, edges).length === 0
       );
     }
 
@@ -250,9 +250,8 @@ function resolveNextEntries(
         next.push({ nodeId: edge.target, triggeredBy: entry.nodeId });
       }
     }
-  } else if (node.data.type === "agent" && outgoing.filter((e) => nodeMap.get(e.target)?.data.type !== "tool").length >= 2) {
-    // Agent with routing — check for __routeTo in output (exclude tool node edges)
-    const nonToolOutgoing = outgoing.filter((e) => nodeMap.get(e.target)?.data.type !== "tool");
+  } else if (node.data.type === "agent" && outgoing.length >= 2) {
+    // Agent with routing — check for __routeTo in output
     let routeTo: string | null = null;
     try {
       const parsed = typeof output === "string" ? JSON.parse(output) : output;
@@ -269,7 +268,7 @@ function resolveNextEntries(
     if (routeTo) {
       // Route to the chosen edge — match by node ID or label (case-insensitive)
       const routeLower = routeTo.toLowerCase();
-      const targetEdge = nonToolOutgoing.find((e) => {
+      const targetEdge = outgoing.find((e) => {
         if (e.target === routeTo) return true;
         const targetNode = nodeMap.get(e.target);
         return targetNode?.data.label?.toLowerCase() === routeLower;
@@ -283,13 +282,10 @@ function resolveNextEntries(
     } else {
       // Agent with 2+ outputs MUST route — fail if it didn't after retries
       logger.error("Agent failed to route after retries", { nodeId: entry.nodeId });
-      throw new Error(`Agent "${node.data.label}" has ${nonToolOutgoing.length} outputs but did not call openconclave_next to choose one`);
+      throw new Error(`Agent "${node.data.label}" has ${outgoing.length} outputs but did not call openconclave_next to choose one`);
     }
   } else {
     for (const edge of outgoing) {
-      // Skip tool nodes — they are config-only and don't execute
-      const targetNode = nodeMap.get(edge.target);
-      if (targetNode?.data.type === "tool") continue;
       next.push({ nodeId: edge.target, triggeredBy: entry.nodeId });
     }
   }

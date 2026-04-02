@@ -37,6 +37,8 @@ export interface AgentConfig {
   thinking?: boolean;
   maxTurns?: number;
   maxBudgetUsd?: number;
+  /** Tools attached to this agent (dragged onto the agent card) */
+  tools?: ToolConfig[];
 }
 
 /** Agent config with resolved tools from connected tool nodes on the canvas */
@@ -93,8 +95,7 @@ export type WorkflowNodeConfig =
   | MergeConfig
   | PromptConfig
   | OutputConfig
-  | FileConfig
-  | ToolConfig;
+  | FileConfig;
 
 // ── Node Data ────────────────────────────────────────────────
 

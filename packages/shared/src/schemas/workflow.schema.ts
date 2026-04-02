@@ -15,6 +15,12 @@ export const triggerConfigSchema = z.object({
   chatId: z.string().optional(),
 });
 
+const toolConfigSchema = z.object({
+  toolType: z.enum(["builtin", "mcp", "knowledge"]),
+  toolId: z.string(),
+  toolName: z.string(),
+});
+
 export const agentConfigSchema = z.object({
   engine: z.enum(AGENT_ENGINES).optional(),
   systemPrompt: z.string().optional(),
@@ -22,6 +28,7 @@ export const agentConfigSchema = z.object({
   ollamaModel: z.string().optional(),
   maxTurns: z.number().int().positive().optional(),
   maxBudgetUsd: z.number().positive().optional(),
+  tools: z.array(toolConfigSchema).optional(),
 });
 
 export const conditionConfigSchema = z.object({

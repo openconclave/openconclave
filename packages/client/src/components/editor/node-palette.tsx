@@ -35,7 +35,6 @@ function getDefaultConfig(type: NodeType) {
     case "prompt": return { description: "Ask a question if needed" };
     case "output": return { type: "log", config: {} };
     case "file": return { path: "" };
-    case "tool": return { toolType: "builtin", toolId: "", toolName: "" };
   }
 }
 
@@ -140,12 +139,12 @@ export function NodePalette() {
 
   const onToolDragStart = (e: React.DragEvent, item: ToolItem) => {
     const data = JSON.stringify({
-      type: "tool",
-      label: item.toolName,
-      config: { toolType: item.toolType, toolId: item.toolId, toolName: item.toolName },
+      toolType: item.toolType,
+      toolId: item.toolId,
+      toolName: item.toolName,
     });
-    e.dataTransfer.setData("application/openconclave-node", data);
-    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("application/openconclave-tool", data);
+    e.dataTransfer.effectAllowed = "copy";
   };
 
   const knowledgeToolItems: ToolItem[] = knowledgeBases.map((kb) => ({
@@ -187,7 +186,7 @@ export function NodePalette() {
         Tools
       </h3>
       <p className="text-[9px] text-muted-foreground px-1 mb-2 leading-snug">
-        Drag onto canvas and connect to an Agent node.
+        Drag and drop onto an Agent node.
       </p>
 
       <div className="space-y-3">
