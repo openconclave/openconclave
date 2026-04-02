@@ -23,7 +23,7 @@ import { MergeNode } from "./nodes/merge-node";
 import { PromptNode } from "./nodes/prompt-node";
 import { OutputNode } from "./nodes/output-node";
 import { FileNode } from "./nodes/file-node";
-import type { WorkflowNodeData, NodeType } from "@openconclave/shared";
+import type { WorkflowNodeData, NodeType, TriggerConfig } from "@openconclave/shared";
 
 const nodeTypes = {
   trigger: TriggerNode,
@@ -142,13 +142,24 @@ export function WorkflowCanvas() {
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         isValidConnection={(connection) => {
+          const { edges: currentEdges, nodes: currentNodes } = useWorkflowStore.getState();
           // Prevent duplicate edges between same source and target nodes
-          const currentEdges = useWorkflowStore.getState().edges;
           const exists = currentEdges.some(
             (e) => e.source === connection.source && e.target === connection.target
           );
-          // Also prevent self-connections
-          return !exists && connection.source !== connection.target;
+          // Prevent self-connections
+          if (exists || connection.source === connection.target) return false;
+
+          // Block Agent → Chat when Chat → Agent already exists (bidirectional covers it)
+          const targetNode = currentNodes.find((n) => n.id === connection.target);
+          if (targetNode && targetNode.data.type === "trigger" && (targetNode.data.config as TriggerConfig).type === "chat") {
+            const reverseExists = currentEdges.some(
+              (e) => e.source === connection.target && e.target === connection.source
+            );
+            if (reverseExists) return false;
+          }
+
+          return true;
         }}
         onDragOver={onDragOver}
         onDrop={onDrop}

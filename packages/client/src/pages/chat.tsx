@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { Send, Loader2, Bot, User, PlusCircle } from "lucide-react";
+import { MarkdownContent } from "@/components/ui/markdown-content";
 
 interface ChatMessage {
   role: "user" | "assistant" | "agent";
@@ -223,9 +224,9 @@ export function ChatPage() {
               </div>
             )}
             <div
-              className={`max-w-[70%] rounded-lg px-4 py-2.5 text-sm whitespace-pre-wrap ${
+              className={`max-w-[70%] rounded-lg px-4 py-2.5 text-sm ${
                 msg.role === "user"
-                  ? "bg-primary text-primary-foreground"
+                  ? "bg-primary text-primary-foreground whitespace-pre-wrap"
                   : msg.status === "error"
                     ? "bg-destructive/10 text-destructive border border-destructive/20"
                     : msg.role === "agent"
@@ -241,8 +242,10 @@ export function ChatPage() {
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
                   <span>Running...</span>
                 </div>
-              ) : (
+              ) : msg.role === "user" ? (
                 msg.content
+              ) : (
+                <MarkdownContent content={msg.content} />
               )}
             </div>
             {msg.role === "user" && (
