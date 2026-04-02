@@ -88,9 +88,17 @@ export function runMigrations(): void {
     knowledge_base_id INTEGER NOT NULL REFERENCES knowledge_bases(id),
     filename TEXT NOT NULL,
     source_path TEXT,
+    content TEXT,
     content_hash TEXT NOT NULL,
     created_at TEXT NOT NULL
   )`);
+
+  // Migration: add content column to existing documents table
+  try {
+    db.run(sql`ALTER TABLE documents ADD COLUMN content TEXT`);
+  } catch {
+    // Column already exists
+  }
 
   db.run(sql`CREATE TABLE IF NOT EXISTS chunks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

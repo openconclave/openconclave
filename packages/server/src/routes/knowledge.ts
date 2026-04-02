@@ -235,6 +235,35 @@ export const knowledgeRoutes = new Hono()
     return c.json({ data: result });
   })
 
+  // ── Get single document (with content) ─────────────────────
+  .get("/:id/documents/:docId", async (c) => {
+    const id = Number(c.req.param("id"));
+    const docId = Number(c.req.param("docId"));
+
+    const doc = await db
+      .select()
+      .from(documents)
+      .where(eq(documents.id, docId))
+      .get();
+
+    if (!doc || doc.knowledgeBaseId !== id) {
+      throw AppError.notFound("Document", String(docId));
+    }
+
+    const chunkCount = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(chunks)
+      .where(eq(chunks.documentId, docId))
+      .get();
+
+    return c.json({
+      data: {
+        ...doc,
+        chunkCount: chunkCount?.count ?? 0,
+      },
+    });
+  })
+
   // ── Get document chunks ────────────────────────────────────
   .get("/:id/documents/:docId/chunks", async (c) => {
     const id = Number(c.req.param("id"));

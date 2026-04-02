@@ -80,6 +80,7 @@ export async function ingestText(
       knowledgeBaseId,
       filename,
       sourcePath: sourcePath ?? null,
+      content: text,
       contentHash: hash,
       createdAt: now,
     })

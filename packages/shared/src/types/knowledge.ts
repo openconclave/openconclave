@@ -16,6 +16,7 @@ export interface KnowledgeDocument {
   knowledgeBaseId: number;
   filename: string;
   sourcePath?: string;
+  content?: string;
   contentHash: string;
   chunkCount: number;
   createdAt: string;

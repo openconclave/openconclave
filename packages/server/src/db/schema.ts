@@ -71,6 +71,7 @@ export const documents = sqliteTable("documents", {
   knowledgeBaseId: integer("knowledge_base_id").references(() => knowledgeBases.id).notNull(),
   filename: text("filename").notNull(),
   sourcePath: text("source_path"),
+  content: text("content"),
   contentHash: text("content_hash").notNull(),
   createdAt: text("created_at").notNull(),
 });

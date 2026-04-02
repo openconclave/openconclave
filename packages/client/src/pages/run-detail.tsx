@@ -409,22 +409,35 @@ export function RunDetailPage() {
                         <Md>{typeof task.prompt === "string" ? task.prompt : JSON.stringify(task.prompt)}</Md>
                       </div>
                     </div>
-                    {task.systemPrompt != null && (
-                      <div>
-                        <p className="text-[10px] text-muted-foreground uppercase mb-1">System Prompt</p>
-                        <div className="text-sm bg-secondary/50 rounded-md px-3 py-2">
-                          <Md>{task.systemPrompt}</Md>
+                    {task.systemPrompt != null && (() => {
+                      // Hide if systemPrompt is just "Workflow context: <same as prompt>"
+                      const stripped = task.systemPrompt.replace(/^\s*Workflow context:\s*/i, "").trim();
+                      const promptStr = typeof task.prompt === "string" ? task.prompt.trim() : "";
+                      const isJustContext = stripped === promptStr;
+                      if (isJustContext) return null;
+                      return (
+                        <div>
+                          <p className="text-[10px] text-muted-foreground uppercase mb-1">System Prompt</p>
+                          <div className="text-sm bg-secondary/50 rounded-md px-3 py-2">
+                            <Md>{task.systemPrompt}</Md>
+                          </div>
                         </div>
-                      </div>
-                    )}
-                    {task.input != null && (
-                      <div>
-                        <p className="text-[10px] text-muted-foreground uppercase mb-1">Input</p>
-                        <pre className="text-xs bg-secondary/50 rounded-md px-3 py-2 overflow-x-auto font-mono whitespace-pre-wrap">
-                          {typeof task.input === "string" ? task.input : JSON.stringify(task.input, null, 2)}
-                        </pre>
-                      </div>
-                    )}
+                      );
+                    })()}
+                    {task.input != null && (() => {
+                      // Hide if input is identical to prompt
+                      const inputStr = typeof task.input === "string" ? task.input : JSON.stringify(task.input);
+                      const promptStr = typeof task.prompt === "string" ? task.prompt : JSON.stringify(task.prompt);
+                      if (inputStr === promptStr) return null;
+                      return (
+                        <div>
+                          <p className="text-[10px] text-muted-foreground uppercase mb-1">Input</p>
+                          <pre className="text-xs bg-secondary/50 rounded-md px-3 py-2 overflow-x-auto font-mono whitespace-pre-wrap">
+                            {typeof task.input === "string" ? task.input : JSON.stringify(task.input, null, 2)}
+                          </pre>
+                        </div>
+                      );
+                    })()}
                     {/* Bug #7/#8 fix: show ALL thinking events, validate shape */}
                     {(() => {
                       const thinkingEvents = events.filter(
