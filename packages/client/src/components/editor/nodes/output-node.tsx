@@ -18,8 +18,8 @@ export function OutputNode(props: NodeProps) {
   const data = useNodeData(props);
   const config = data.config as OutputConfig;
   const setSelectedNode = useWorkflowStore((s) => s.setSelectedNode);
-  const activeNodeId = useWorkflowStore((s) => s.activeNodeId);
-  const isActive = activeNodeId === props.id;
+  const activeNodeIds = useWorkflowStore((s) => s.activeNodeIds);
+  const isActive = activeNodeIds.has(props.id);
 
   return (
     <div
@@ -28,7 +28,7 @@ export function OutputNode(props: NodeProps) {
         "border-node-output/60",
         "shadow-[0_0_15px_-3px] shadow-node-output/20",
         props.selected && "!border-primary ring-1 ring-primary/30 ring-offset-1 ring-offset-background",
-        isActive && "animate-pulse !border-warning ring-1 ring-warning/30"
+        isActive && "[animation:node-running_1.5s_ease-in-out_infinite] !border-warning"
       )}
       onClick={() => setSelectedNode(props.id)}
     >

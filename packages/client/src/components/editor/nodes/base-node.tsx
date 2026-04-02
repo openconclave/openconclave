@@ -61,8 +61,8 @@ export function BaseNode({
   sourceHandles?: { id: string; label: string; position: number }[];
 }) {
   const setSelectedNode = useWorkflowStore((s) => s.setSelectedNode);
-  const activeNodeId = useWorkflowStore((s) => s.activeNodeId);
-  const isActive = activeNodeId === id;
+  const activeNodeIds = useWorkflowStore((s) => s.activeNodeIds);
+  const isActive = activeNodeIds.has(id);
 
   return (
     <div

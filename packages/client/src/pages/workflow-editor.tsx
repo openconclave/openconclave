@@ -21,8 +21,7 @@ export function WorkflowEditorPage() {
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
-  const setActiveNode = useWorkflowStore((s) => s.setActiveNode);
-  const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
+  const setActiveNodes = useWorkflowStore((s) => s.setActiveNodes);
 
   const path = window.location.pathname;
   const existingId = path.startsWith("/workflows/") ? path.split("/")[2] : null;
@@ -82,10 +81,10 @@ export function WorkflowEditorPage() {
     return () => clearInterval(interval);
   }, [existingId]);
 
-  // Poll for active node when a run is in progress
+  // Poll for active nodes when a run is in progress
   useEffect(() => {
     if (!activeRunId) {
-      setActiveNode(null);
+      setActiveNodes(new Set());
       return;
     }
     const check = () => {
@@ -94,37 +93,17 @@ export function WorkflowEditorPage() {
         .then((d) => {
           if (d.run.status !== "running" && d.run.status !== "queued") {
             setActiveRunId(null);
-            setActiveNode(null);
+            setActiveNodes(new Set());
             return;
           }
-          // Find last node:started that doesn't have a node:completed after it
-          const started = new Set<string>();
-          const completed = new Set<string>();
+          // Find all nodes that are currently running (started but not completed)
+          // Walk events forward; handle loops by tracking per-node start/complete counts
+          const active = new Set<string>();
           for (const e of d.events) {
-            if (e.type === "node:started" && e.nodeId) started.add(e.nodeId);
-            if (e.type === "node:completed" && e.nodeId) completed.add(e.nodeId);
+            if (e.type === "node:started" && e.nodeId) active.add(e.nodeId);
+            if (e.type === "node:completed" && e.nodeId) active.delete(e.nodeId);
           }
-          // The active node is the last started that isn't completed
-          // But nodes can be revisited in loops, so check the last event
-          let current: string | null = null;
-          for (let i = d.events.length - 1; i >= 0; i--) {
-            const e = d.events[i];
-            if (e.type === "node:started" && e.nodeId) {
-              current = e.nodeId;
-              break;
-            }
-          }
-          // If the last started node also has a completed after it, it's done
-          if (current) {
-            const lastStartIdx = d.events.findLastIndex(
-              (e: any) => e.type === "node:started" && e.nodeId === current
-            );
-            const lastCompleteIdx = d.events.findLastIndex(
-              (e: any) => e.type === "node:completed" && e.nodeId === current
-            );
-            if (lastCompleteIdx > lastStartIdx) current = null;
-          }
-          setActiveNode(current);
+          setActiveNodes(active);
         })
         .catch(() => {});
     };

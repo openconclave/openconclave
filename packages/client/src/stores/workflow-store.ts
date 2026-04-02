@@ -40,7 +40,7 @@ interface WorkflowState {
   nodes: Node<WorkflowNodeData>[];
   edges: Edge[];
   selectedNodeId: string | null;
-  activeNodeId: string | null;
+  activeNodeIds: Set<string>;
   workflowName: string;
   workflowDescription: string;
   toolName?: string;
@@ -50,7 +50,7 @@ interface WorkflowState {
   onEdgesChange: OnEdgesChange;
   onConnect: OnConnect;
   setSelectedNode: (id: string | null) => void;
-  setActiveNode: (id: string | null) => void;
+  setActiveNodes: (ids: Set<string>) => void;
   addNode: (node: Node<WorkflowNodeData>) => void;
   updateNodeData: (id: string, data: Partial<WorkflowNodeData>) => void;
   updateNodeConfig: (id: string, config: Partial<WorkflowNodeConfig>) => void;
@@ -72,7 +72,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   nodes: [],
   edges: [],
   selectedNodeId: null,
-  activeNodeId: null,
+  activeNodeIds: new Set<string>(),
   workflowName: "Untitled Workflow",
   workflowDescription: "",
   isDirty: false,
@@ -109,7 +109,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   },
 
   setSelectedNode: (id) => set({ selectedNodeId: id }),
-  setActiveNode: (id) => set({ activeNodeId: id }),
+  setActiveNodes: (ids) => set({ activeNodeIds: ids }),
 
   addNode: (node) => {
     set({ nodes: [...get().nodes, node], isDirty: true });
@@ -162,7 +162,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       toolName,
       isDirty: false,
       selectedNodeId: null,
-      activeNodeId: null,
+      activeNodeIds: new Set<string>(),
     });
   },
 
@@ -171,7 +171,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       nodes: [],
       edges: [],
       selectedNodeId: null,
-      activeNodeId: null,
+      activeNodeIds: new Set<string>(),
       workflowName: "Untitled Workflow",
       workflowDescription: "",
       isDirty: false,
