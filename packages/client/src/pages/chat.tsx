@@ -89,7 +89,20 @@ export function ChatPage() {
           });
         }
 
-        if (data.type === "chat:response") {
+        if (data.type === "chat:response" && data.data?.content) {
+          setMessages((prev) => {
+            // Replace the pending message with the actual response
+            const updated = prev.map((m) =>
+              m.status === "pending" && m.runId === data.runId
+                ? { ...m, content: data.data.content, status: "done" as const }
+                : m
+            );
+            // If no pending message was found, add as new
+            if (!updated.some((m) => m.runId === data.runId && m.status === "done" && m.content === data.data.content)) {
+              updated.push({ role: "assistant", content: data.data.content, runId: data.runId, status: "done" });
+            }
+            return updated;
+          });
           setLoading(false);
         }
 

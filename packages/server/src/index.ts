@@ -150,7 +150,13 @@ app.get("/api/dashboard", async (c) => {
     cancelledCount,
     totalRuns: allRuns.length,
     totalCost,
-    workflows: allWorkflows.map((w) => ({ id: w.id, name: w.name, enabled: w.enabled })),
+    workflows: allWorkflows.map((w) => {
+      const def = w.definition as Record<string, unknown> | null;
+      const nodes = (def?.nodes ?? []) as Array<{ data?: { type?: string; config?: unknown } }>;
+      const triggerNode = nodes.find((n) => n.data?.type === "trigger");
+      const triggerType = (triggerNode?.data?.config as Record<string, unknown> | undefined)?.type as string | undefined;
+      return { id: w.id, name: w.name, enabled: w.enabled, toolName: def?.toolName as string | undefined, triggerType };
+    }),
     recentOutputs: recentOutputEvents,
     schedule,
   });

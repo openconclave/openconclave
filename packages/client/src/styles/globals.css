@@ -54,6 +54,17 @@ body {
   filter: drop-shadow(0 0 6px oklch(0.80 0.22 25 / 0.5));
 }
 
+@keyframes node-running {
+  0%, 100% {
+    box-shadow: 0 0 8px 2px oklch(0.70 0.16 80 / 0.3), 0 0 2px 1px oklch(0.70 0.16 80 / 0.5);
+    border-color: oklch(0.70 0.16 80 / 0.8);
+  }
+  50% {
+    box-shadow: 0 0 20px 6px oklch(0.70 0.16 80 / 0.5), 0 0 4px 2px oklch(0.70 0.16 80 / 0.7);
+    border-color: oklch(0.70 0.16 80);
+  }
+}
+
 .react-flow__edge {
   cursor: pointer;
 }

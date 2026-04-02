@@ -71,7 +71,7 @@ export function BaseNode({
         nodeBorderColors[data.type],
         nodeGlowColors[data.type],
         selected && "!border-primary ring-1 ring-primary/30 ring-offset-1 ring-offset-background",
-        isActive && "animate-pulse !border-warning ring-1 ring-warning/30"
+        isActive && "[animation:node-running_1.5s_ease-in-out_infinite] !border-warning"
       )}
       onClick={() => setSelectedNode(id)}
     >

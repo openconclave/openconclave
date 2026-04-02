@@ -71,7 +71,7 @@ export function WorkflowEditorPage() {
         .get<{ runs: any[] }>("/runs")
         .then((d) => {
           const active = d.runs.find(
-            (r: any) => r.workflowId === existingId && (r.status === "running" || r.status === "queued")
+            (r: any) => String(r.workflowId) === existingId && (r.status === "running" || r.status === "queued")
           );
           setActiveRunId(active?.id ?? null);
         })
@@ -92,7 +92,7 @@ export function WorkflowEditorPage() {
       api
         .get<{ run: any; tasks: any[]; events: any[] }>(`/runs/${activeRunId}`)
         .then((d) => {
-          if (d.run.status !== "running") {
+          if (d.run.status !== "running" && d.run.status !== "queued") {
             setActiveRunId(null);
             setActiveNode(null);
             return;

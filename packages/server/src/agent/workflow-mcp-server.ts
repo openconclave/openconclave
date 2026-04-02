@@ -59,7 +59,7 @@ if (ROUTE_TARGETS.length >= 2) {
   server.tool(
     "openconclave_next",
     [
-      "Choose the next step in the workflow. You MUST call this exactly once.",
+      "Choose the next step in the workflow. You MUST call this exactly once when you are done.",
       "Available routes:",
       routeDescription,
     ].join("\n"),

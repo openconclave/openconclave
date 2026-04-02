@@ -13,6 +13,9 @@ import {
   Zap,
   ArrowUpRight,
   Terminal,
+  Square,
+  Loader2,
+  MessageSquare,
 } from "lucide-react";
 
 interface DashboardData {
@@ -24,7 +27,7 @@ interface DashboardData {
   cancelledCount: number;
   totalCost: number;
   recentRuns: Array<{ id: string; status: string; workflowId: string; createdAt: string }>;
-  workflows: Array<{ id: string; name: string; enabled: boolean }>;
+  workflows: Array<{ id: string; name: string; enabled: boolean; toolName?: string; triggerType?: string }>;
   recentOutputs: Array<{ id: number; runId: string; nodeId: string; data: unknown; createdAt: string }>;
   schedule: Array<{ workflowId: string; cron: string; nextRun: string; enabled: boolean }>;
 }
@@ -40,12 +43,15 @@ const STATUS_DOTS: Record<string, string> = {
 export function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
 
+  const hasActiveRuns = data ? data.activeRuns > 0 : false;
+
   useEffect(() => {
     const load = () => api.get<DashboardData>("/dashboard").then(setData).catch(() => {});
     load();
-    const interval = setInterval(load, 10000);
+    // Poll faster when runs are active so stop buttons and status update promptly
+    const interval = setInterval(load, hasActiveRuns ? 3000 : 10000);
     return () => clearInterval(interval);
-  }, []);
+  }, [hasActiveRuns]);
 
   if (!data) {
     return (
@@ -163,34 +169,75 @@ export function DashboardPage() {
               Quick Launch
             </h3>
             <div className="space-y-1">
-              {data.workflows.map((wf) => (
-                <div
-                  key={wf.id}
-                  className="group flex items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-secondary/50"
-                >
-                  <div className={cn(
-                    "h-1.5 w-1.5 rounded-full shrink-0 transition-colors",
-                    wf.enabled ? "bg-success" : "bg-muted-foreground/40"
-                  )} />
-                  <a
-                    href={`/workflows/${wf.id}`}
-                    className="flex-1 text-sm truncate transition-colors group-hover:text-foreground text-muted-foreground"
+              {data.workflows.map((wf) => {
+                const activeRun = data.recentRuns.find(
+                  (r) => String(r.workflowId) === String(wf.id) && (r.status === "running" || r.status === "queued")
+                );
+                const isChat = wf.triggerType === "chat";
+                const reload = () => api.get<DashboardData>("/dashboard").then(setData).catch(() => {});
+                return (
+                  <div
+                    key={wf.id}
+                    className={cn(
+                      "group flex items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-secondary/50",
+                      activeRun && "bg-warning/5"
+                    )}
                   >
-                    {wf.name}
-                  </a>
-                  {wf.enabled && (
-                    <button
-                      onClick={(e) => {
-                        e.preventDefault();
-                        api.post(`/workflows/${wf.id}/run`, {}).catch(() => {});
-                      }}
-                      className="opacity-0 group-hover:opacity-100 shrink-0 flex h-7 w-7 items-center justify-center rounded-md bg-primary/10 text-primary hover:bg-primary/20 transition-all"
+                    {activeRun ? (
+                      <Loader2 className="h-3 w-3 shrink-0 animate-spin text-warning" />
+                    ) : (
+                      <div className={cn(
+                        "h-1.5 w-1.5 rounded-full shrink-0 transition-colors",
+                        wf.enabled ? "bg-success" : "bg-muted-foreground/40"
+                      )} />
+                    )}
+                    <a
+                      href={activeRun ? `/runs/${activeRun.id}` : `/workflows/${wf.id}`}
+                      className={cn(
+                        "flex-1 text-sm truncate transition-colors group-hover:text-foreground",
+                        activeRun ? "text-warning" : "text-muted-foreground"
+                      )}
                     >
-                      <Play className="h-3 w-3" />
-                    </button>
-                  )}
-                </div>
-              ))}
+                      {wf.name}
+                      {activeRun && (
+                        <span className="text-[10px] text-warning/60 ml-1.5">#{activeRun.id}</span>
+                      )}
+                    </a>
+                    {activeRun ? (
+                      <button
+                        onClick={(e) => {
+                          e.preventDefault();
+                          api.post(`/runs/${activeRun.id}/cancel`, {}).then(reload).catch(() => {});
+                        }}
+                        className="shrink-0 flex h-7 items-center gap-1 rounded-md bg-destructive/20 text-destructive px-2 hover:bg-destructive/30 transition-colors"
+                      >
+                        <Square className="h-3 w-3" />
+                        <span className="text-[11px] font-medium">Stop</span>
+                      </button>
+                    ) : wf.enabled ? (
+                      <button
+                        onClick={(e) => {
+                          e.preventDefault();
+                          if (isChat && wf.toolName) {
+                            window.open(`/${wf.toolName}/chat`, "_blank");
+                          } else {
+                            api.post(`/workflows/${wf.id}/run`, {}).then(reload).catch(() => {});
+                          }
+                        }}
+                        className={cn(
+                          "opacity-0 group-hover:opacity-100 shrink-0 flex h-7 items-center gap-1 rounded-md px-2 transition-all",
+                          isChat
+                            ? "bg-primary/10 text-primary hover:bg-primary/20"
+                            : "bg-success/10 text-success hover:bg-success/20"
+                        )}
+                      >
+                        {isChat ? <MessageSquare className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+                        <span className="text-[11px] font-medium">{isChat ? "Chat" : "Start"}</span>
+                      </button>
+                    ) : null}
+                  </div>
+                );
+              })}
               {data.workflows.length === 0 && (
                 <div className="flex flex-col items-center py-6 text-muted-foreground/50">
                   <GitBranch className="h-8 w-8 mb-2" />

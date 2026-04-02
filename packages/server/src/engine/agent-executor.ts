@@ -75,11 +75,16 @@ export async function executeAgent(
       })
       .join("\n");
     const routeInstruction = [
-      "\n\n## Routing",
-      "You have multiple possible next steps. You MUST call the openconclave_next tool to choose where to route.",
+      "\n\n## ⚠️ CRITICAL: Routing (REQUIRED)",
+      "When you have finished your work, you MUST call the `openconclave_next` tool to exit.",
+      "Do NOT keep working after your task is complete. Do NOT re-read or re-analyze files you already changed.",
+      "If you have completed the task, STOP and call `openconclave_next` immediately.",
+      "",
       "Available routes:",
       routeList,
-      "Call openconclave_next with node_id and content. You MUST call it exactly once.",
+      "",
+      "Call openconclave_next with `node_id` (the route) and `content` (your summary). You MUST call it exactly once.",
+      "Failure to call this tool means the workflow hangs forever.",
     ].join("\n");
     augmentedConfig.systemPrompt = (config.systemPrompt ?? "") + routeInstruction;
   }
@@ -105,6 +110,7 @@ export async function executeAgent(
   const MAX_ROUTE_RETRIES = 3;
   let result: AgentResult;
   let routedTo: string | null = null;
+  let retrySessionId = sessionId; // Track session across retries so the agent can resume
 
   for (let attempt = 0; attempt <= MAX_ROUTE_RETRIES; attempt++) {
     if (engine === "ollama") {
@@ -169,16 +175,24 @@ export async function executeAgent(
 
       result.sessionId = openaiSessionFile;
     } else {
+      const retryInput = attempt === 0
+        ? input
+        : "You completed your task but forgot to call openconclave_next. Call it NOW to route to the next step.";
       result = await agentPool.submit(String(taskId), {
         config: augmentedConfig,
-        input,
+        input: retryInput,
         cwd,
         routeTargets,
-        sessionId,
+        sessionId: retrySessionId,
         onOutput: (chunk) => {
           emit({ type: "agent:output", runId, nodeId, data: { taskId, chunk } });
         },
       });
+    }
+
+    // Capture session for retry resume (all engines)
+    if (result.sessionId) {
+      retrySessionId = result.sessionId;
     }
 
     // If no routing needed, break immediately

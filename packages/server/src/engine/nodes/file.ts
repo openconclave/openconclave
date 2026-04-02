@@ -1,9 +1,9 @@
-import { isAbsolute } from "path";
+import { isAbsolute, join } from "path";
 import { readFileSync } from "fs";
 import type { WorkflowNode } from "@openconclave/shared";
 import { logger } from "../../lib/logger";
 
-export function executeFile(node: WorkflowNode): unknown {
+export function executeFile(node: WorkflowNode, callerCwd?: string): unknown {
   const fileConfig = node.data.config as { path: string };
   const filePath = fileConfig.path;
 
@@ -11,15 +11,15 @@ export function executeFile(node: WorkflowNode): unknown {
     return "Error: no file path configured";
   }
 
-  if (!isAbsolute(filePath)) {
-    logger.warn("File node has relative path — use absolute paths", { path: filePath });
-  }
+  const resolvedPath = isAbsolute(filePath)
+    ? filePath
+    : join(callerCwd ?? process.cwd(), filePath);
 
   try {
-    return readFileSync(filePath, "utf8");
+    return readFileSync(resolvedPath, "utf8");
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    logger.error("File node read failed", { path: filePath, error: msg });
+    logger.error("File node read failed", { path: resolvedPath, error: msg });
     return `Error reading file: ${msg}`;
   }
 }

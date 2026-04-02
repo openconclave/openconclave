@@ -71,7 +71,7 @@ export async function executeNode(
         output = await executePrompt(node, input, workflow, runId, nodeId, triggeredBy, nodeMap, emit);
         break;
       case "file":
-        output = executeFile(node);
+        output = executeFile(node, callerCwd);
         break;
       case "output":
         output = await executeOutput(node, input, runId, nodeId, workflow.name, emit);
