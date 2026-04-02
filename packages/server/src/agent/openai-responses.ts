@@ -1,9 +1,8 @@
 import { readFileSync, existsSync } from "fs";
-import { logger } from "../lib/logger";
-import { createBuiltinTools, TOOL_NAME_MAP } from "./builtin-tools";
-import { McpBridge } from "./mcp-bridge";
 import { openaiLog } from "./openai-debug";
 import { createRoutingToolResponses } from "./openai-routing-tools";
+import { AgentBase } from "./base";
+import type { ResolvedAgentConfig } from "@openconclave/shared";
 import type { OpenAIRunOptions, OpenAIResult } from "./openai-types";
 
 /**
@@ -37,50 +36,17 @@ export async function runResponsesAPI(options: OpenAIRunOptions): Promise<OpenAI
     input.push({ role: "user", content: inputStr });
   }
 
-  // Build tools list + executors
-  const tools: Array<Record<string, unknown>> = [];
-  const toolExecutors = new Map<string, (args: Record<string, unknown>) => Promise<string>>();
+  // Resolve tools via AgentBase
+  const resolvedConfig: ResolvedAgentConfig = {
+    allowedTools: options.allowedTools ?? [],
+    mcpServers: options.mcpServers ?? [],
+    knowledgeBases: options.knowledgeBases ?? [],
+  };
+  const agent = new AgentBase(resolvedConfig, options.cwd);
+  await agent.connectMcpServers();
 
-  if (options.allowedTools?.length) {
-    const builtins = createBuiltinTools(options.cwd);
-    for (const toolName of options.allowedTools) {
-      const mapped = TOOL_NAME_MAP[toolName];
-      if (mapped && builtins[mapped]) {
-        const bt = builtins[mapped].tool;
-        // Responses API uses name/description at top level, not nested under `function`
-        tools.push({
-          type: "function",
-          name: bt.function.name,
-          description: bt.function.description,
-          parameters: bt.function.parameters,
-        });
-        toolExecutors.set(bt.function.name, builtins[mapped].execute);
-      }
-    }
-  }
-
-  // Connect MCP servers
-  let mcpBridge: McpBridge | null = null;
-  if (options.mcpServers?.length) {
-    mcpBridge = new McpBridge();
-    try {
-      await mcpBridge.connect(options.mcpServers);
-      for (const tool of mcpBridge.getTools()) {
-        tools.push({
-          type: "function",
-          name: tool.function.name,
-          description: tool.function.description,
-          parameters: tool.function.parameters,
-        });
-        const mcpToolName = tool.function.name;
-        toolExecutors.set(mcpToolName, async (args) => mcpBridge!.callTool(mcpToolName, args));
-      }
-    } catch (err: unknown) {
-      logger.warn("Failed to connect MCP servers for Responses API", {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
+  const tools: Array<Record<string, unknown>> = [...agent.toResponsesTools()];
+  const toolExecutors = agent.toolExecutors;
 
   // Add routing tool if workflow has ≥2 branches
   if (options.routeTargets && options.routeTargets.length >= 2) {
@@ -213,7 +179,7 @@ export async function runResponsesAPI(options: OpenAIRunOptions): Promise<OpenAI
       }
 
       if (routeTo) {
-        if (mcpBridge) await mcpBridge.disconnect();
+        await agent.disconnect();
         return {
           success: true,
           output: routeContent ?? "",
@@ -233,7 +199,7 @@ export async function runResponsesAPI(options: OpenAIRunOptions): Promise<OpenAI
         onOutput?.(textOutput);
       }
 
-      if (mcpBridge) await mcpBridge.disconnect();
+      await agent.disconnect();
       return {
         success: true,
         output: textOutput || data.output_text || "",

@@ -36,7 +36,7 @@ export function ConfirmDialog() {
       });
 
       // Store reject for cancel
-      (window as Record<string, unknown>).__confirmReject = () => {
+      (window as unknown as Record<string, unknown>).__confirmReject = () => {
         setState((s) => ({ ...s, open: false }));
         resolve(false);
       };
@@ -51,7 +51,7 @@ export function ConfirmDialog() {
   if (!state.open) return null;
 
   const cancel = () => {
-    const reject = (window as Record<string, unknown>).__confirmReject as (() => void) | undefined;
+    const reject = (window as unknown as Record<string, unknown>).__confirmReject as (() => void) | undefined;
     reject?.();
   };
 

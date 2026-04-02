@@ -2,17 +2,17 @@
  * Ollama agent runtime — public entry point.
  *
  * Types:    ollama-types.ts
- * Tools:    ollama-tools.ts
+ * Tools:    base.ts (AgentBase resolves builtin + knowledge + MCP tools)
  * Routing:  ollama-routing.ts
  */
 
 import { spawn } from "bun";
 import { readFileSync, existsSync, appendFileSync } from "fs";
 import { join } from "path";
-import { McpBridge } from "./mcp-bridge";
 import { SESSIONS_DIR } from "../lib/workspace";
-import { createOllamaBuiltinTools } from "./ollama-tools";
+import { AgentBase } from "./base";
 import { createOllamaRoutingTool } from "./ollama-routing";
+import type { ResolvedAgentConfig } from "@openconclave/shared";
 
 export type { OllamaStatus, OllamaRunOptions, ThinkingBlock, OllamaResult } from "./ollama-types";
 import type { OllamaTool, OllamaRunOptions, OllamaResult, OllamaStatus, ThinkingBlock } from "./ollama-types";
@@ -88,19 +88,20 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
     messages.push({ role: "user", content: inputStr });
   }
 
-  // Collect requested built-in tools — pass cwd for file/process isolation
-  const builtinTools = createOllamaBuiltinTools(options.cwd);
-  const requestedTools = options.tools ?? [];
-  const activeTools: OllamaTool[] = [];
-  const toolExecutors = new Map<string, (args: Record<string, unknown>) => Promise<string>>();
+  // Resolve tools via AgentBase (builtin + knowledge + MCP)
+  const resolvedConfig: ResolvedAgentConfig = {
+    allowedTools: options.allowedTools ?? [],
+    mcpServers: options.mcpServers ?? [],
+    knowledgeBases: options.knowledgeBases ?? [],
+  };
+  const agent = new AgentBase(resolvedConfig, options.cwd);
+  await agent.connectMcpServers();
 
-  for (const toolId of requestedTools) {
-    if (toolId === "openconclave_next") continue; // handled below
-    const bt = builtinTools[toolId];
-    if (bt) {
-      activeTools.push(bt.tool);
-      toolExecutors.set(bt.tool.function.name, bt.execute);
-    }
+  const activeTools: OllamaTool[] = agent.toChatTools() as OllamaTool[];
+  const toolExecutors = agent.toolExecutors;
+
+  if (agent.tools.length > 0) {
+    onOutput?.(`[Resolved ${agent.tools.length} tools via AgentBase]\n`);
   }
 
   // Add routing tool with actual route targets
@@ -108,29 +109,6 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
     const routingTool = createOllamaRoutingTool(options.routeTargets);
     activeTools.push(routingTool.tool);
     toolExecutors.set("openconclave_next", routingTool.execute);
-  }
-
-  // Connect MCP servers and discover their tools
-  let mcpBridge: McpBridge | null = null;
-  const mcpServers = options.mcpServers ?? [];
-
-  if (mcpServers.length > 0) {
-    mcpBridge = new McpBridge();
-    try {
-      await mcpBridge.connect(mcpServers);
-      for (const tool of mcpBridge.getTools()) {
-        activeTools.push(tool);
-        const toolName = tool.function.name;
-        toolExecutors.set(toolName, async (args) => mcpBridge!.callTool(toolName, args));
-      }
-      onOutput?.(
-        `[Connected MCP servers: ${mcpServers.join(", ")} — ${mcpBridge.getTools().length} tools available]\n`,
-      );
-    } catch (err: unknown) {
-      onOutput?.(
-        `[Failed to connect MCP servers: ${err instanceof Error ? err.message : String(err)}]\n`,
-      );
-    }
   }
 
   const hasTools = activeTools.length > 0;
@@ -164,7 +142,7 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
 
       if (!res.ok) {
         const errText = await res.text();
-        if (mcpBridge) await mcpBridge.disconnect();
+        await agent.disconnect();
         return {
           success: false,
           output: "",
@@ -235,7 +213,7 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
 
         // If agent routed, return immediately with the route info
         if (routeTo) {
-          if (mcpBridge) await mcpBridge.disconnect();
+          await agent.disconnect();
           return {
             success: true,
             output: routeContent ?? "",
@@ -253,7 +231,7 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
       const output: string = assistantMsg.content ?? "";
       onOutput?.(output);
 
-      if (mcpBridge) await mcpBridge.disconnect();
+      await agent.disconnect();
       return {
         success: true,
         output,
@@ -263,7 +241,7 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
     }
 
     // Exceeded max turns
-    if (mcpBridge) await mcpBridge.disconnect();
+    await agent.disconnect();
     return {
       success: false,
       output: "",
@@ -271,7 +249,7 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
       durationMs: Date.now() - startTime,
     };
   } catch (err: unknown) {
-    if (mcpBridge) await mcpBridge.disconnect();
+    await agent.disconnect();
     return {
       success: false,
       output: "",

@@ -40,8 +40,9 @@ Open http://localhost:5173
 
 ## Features
 
-- **Visual workflow editor** — 7 node types, auto-layout, arrow markers, pill-shaped entry/exit nodes
-- **Dual AI engine** — Claude Code CLI + Ollama in the same workflow. Pick the right model per task.
+- **Visual workflow editor** — 9 node types, auto-layout, arrow markers, pill-shaped entry/exit nodes
+- **Three AI engines** — Claude Code CLI, Ollama, and any OpenAI-compatible provider in the same workflow
+- **RAG / Knowledge Bases** — ingest documents, embed with Ollama, semantic search via built-in agent tool
 - **Channel-in-the-loop** — workflows pause, ask Claude Code a question, wait for your response
 - **Workflows as MCP tools** — every workflow becomes a tool Claude Code can discover and call
 - **Dynamic routing** — agents choose their own path via tool calls
@@ -55,13 +56,15 @@ Open http://localhost:5173
 
 | Node | Purpose |
 |------|---------|
-| **Trigger** | Start a workflow (manual, cron, webhook, channel, telegram) |
-| **Agent** | AI task with tool access (Claude Code or Ollama) |
+| **Trigger** | Start a workflow (manual, cron, webhook, channel, telegram, chat) |
+| **Agent** | AI task with tool access (Claude Code, Ollama, or OpenAI-compatible) |
 | **Condition** | Branch logic with expressions |
 | **Code** | Run Python, Node.js, or Bash scripts |
 | **Merge** | Wait for all parallel inputs, combine into object |
 | **Channel Loop** | Pause workflow, ask Claude Code, resume on response |
 | **Output** | Deliver results (terminal, Telegram, log) |
+| **File** | Read a file from disk as node input |
+| **Knowledge** | Search a knowledge base with semantic similarity (RAG) |
 
 ## Example Workflows
 
@@ -71,12 +74,22 @@ Open http://localhost:5173
 
 **Number Guessing Game** — two Ollama agents (Game Master + Guesser) play against each other in a loop
 
+## RAG / Knowledge Bases
+
+Agents can search your documents using semantic similarity:
+
+1. Pull an embedding model: `ollama pull nomic-embed-text`
+2. Go to `/knowledge` in the UI — create a knowledge base, ingest files
+3. Attach knowledge bases to Agent nodes in the inspector, or use the Knowledge node in workflows
+
+Agents automatically get a `search_knowledge` tool when knowledge bases are available.
+
 ## Documentation
 
 - [Architecture & API](docs/architecture.md) — tech stack, project structure, API endpoints, engine details
 - [What is OpenConclave](WHAT_IS_OPENCONCLAVE.md) — detailed product definition and design philosophy
 - [Security Guidance](security_guidance.md) — threat model, OpenClaw lessons, mitigation checklist
-- [Plugin README](plugin/README.md) — Claude Code plugin structure and usage
+- [RAG Plan](docs/rag-plan.md) — phased RAG implementation roadmap
 
 ## Acknowledgements
 

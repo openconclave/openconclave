@@ -104,7 +104,7 @@ function groupEventsByNode(events: RunEvent[], nodeLabels: Map<string, string>):
       current.events.push(event);
     } else {
       // Bug #11 fix: use friendly label from nodeLabels
-      const label = nodeLabels.get(nodeId) ?? nodeId;
+      const label: string = nodeLabels.get(nodeId) ?? nodeId;
       current = { nodeId, label, events: [event] };
       groups.push(current);
     }
@@ -177,8 +177,8 @@ export function RunDetailPage() {
   const [data, setData] = useState<RunDetail | null>(null);
   const [loadError, setLoadError] = useState(false); // Bug #5 fix: separate error state
   const [nodeLabels, setNodeLabels] = useState<Map<string, string>>(new Map());
-  const labelsLoadedFor = useRef<string | null>(null); // Bug #3 fix: track which workflow loaded
-  const [expandedTasks, setExpandedTasks] = useState<string[]>([]);
+  const labelsLoadedFor = useRef<number | null>(null); // Bug #3 fix: track which workflow loaded
+  const [expandedTasks, setExpandedTasks] = useState<number[]>([]);
   const [expandedEvents, setExpandedEvents] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<number[]>([]);
   const [expandedEventIds, setExpandedEventIds] = useState<number[]>([]);
@@ -232,7 +232,7 @@ export function RunDetailPage() {
     return () => clearInterval(interval);
   }, [runId, data?.run.status]);
 
-  const toggleTask = (id: string) => {
+  const toggleTask = (id: number) => {
     setExpandedTasks((prev) =>
       prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]
     );
@@ -379,7 +379,7 @@ export function RunDetailPage() {
                       <span className="text-[10px] font-medium text-primary/70">{nodeLabels.get(task.nodeId)}</span>
                     )}
                     <div className="text-sm truncate">
-                      <Md>{typeof task.prompt === "string" ? task.prompt.split("\n")[0] : String(task.prompt)}</Md>
+                      <Md>{typeof task.prompt === "string" ? (task.prompt.split("\n")[0] ?? "") : String(task.prompt)}</Md>
                     </div>
                     <p className="text-xs text-muted-foreground mt-0.5">
                       {task.model ?? "sonnet"}
@@ -495,9 +495,11 @@ export function RunDetailPage() {
             <div className="divide-y divide-border">
               {eventGroups.map((group, groupIdx) => {
                 const isGroupExpanded = expandedGroups.includes(groupIdx);
-                const firstTime = new Date(group.events[0].createdAt).toLocaleTimeString();
+                const firstEvent = group.events[0];
+                if (!firstEvent) return null;
+                const firstTime = new Date(firstEvent.createdAt).toLocaleTimeString();
                 const lastTime = group.events.length > 1
-                  ? new Date(group.events[group.events.length - 1].createdAt).toLocaleTimeString()
+                  ? new Date(group.events[group.events.length - 1]!.createdAt).toLocaleTimeString()
                   : null;
 
                 // Bug #10 fix: check run:completed status, not just event type

@@ -8,6 +8,7 @@ import {
   BackgroundVariant,
   ConnectionMode,
   type ReactFlowInstance,
+  type Node,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import dagre from "@dagrejs/dagre";
@@ -22,6 +23,7 @@ import { MergeNode } from "./nodes/merge-node";
 import { PromptNode } from "./nodes/prompt-node";
 import { OutputNode } from "./nodes/output-node";
 import { FileNode } from "./nodes/file-node";
+import { ToolNode } from "./nodes/tool-node";
 import type { WorkflowNodeData, NodeType } from "@openconclave/shared";
 
 const nodeTypes = {
@@ -33,6 +35,7 @@ const nodeTypes = {
   prompt: PromptNode,
   output: OutputNode,
   file: FileNode,
+  tool: ToolNode,
 };
 
 let nodeId = Date.now();
@@ -70,7 +73,7 @@ function autoLayout() {
 
 export function WorkflowCanvas() {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
-  const reactFlowInstance = useRef<ReactFlowInstance | null>(null);
+  const reactFlowInstance = useRef<ReactFlowInstance<Node<WorkflowNodeData>> | null>(null);
 
   const nodes = useWorkflowStore((s) => s.nodes);
   const edges = useWorkflowStore((s) => s.edges);

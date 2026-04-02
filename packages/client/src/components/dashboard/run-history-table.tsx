@@ -12,7 +12,7 @@ const statusColors: Record<string, string> = {
 };
 
 export function RunHistoryTable({ runs, onUpdate }: { runs: Run[]; onUpdate?: () => void }) {
-  const handleCancel = async (e: React.MouseEvent, runId: string) => {
+  const handleCancel = async (e: React.MouseEvent, runId: number) => {
     e.preventDefault();
     e.stopPropagation();
     await api.post(`/runs/${runId}/cancel`, {});

@@ -1,0 +1,138 @@
+/**
+ * AgentBase — unified tool resolution for all agent engines.
+ *
+ * Connected tool nodes on the canvas resolve to ResolvedAgentConfig.
+ * This class converts those config fields into concrete tool definitions
+ * and executors that any engine (Claude, Ollama, OpenAI) can consume.
+ */
+
+import type { ResolvedAgentConfig } from "@openconclave/shared";
+import { createBuiltinTools, TOOL_NAME_MAP, type BuiltinTool, type ToolDef } from "./builtin-tools";
+import { McpBridge } from "./mcp-bridge";
+import { logger } from "../lib/logger";
+
+// ── Resolved tool (engine-agnostic) ─────────────────────────
+
+export interface ResolvedTool {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+  execute: (args: Record<string, unknown>) => Promise<string>;
+}
+
+// ── AgentBase ────────────────────────────────────────────────
+
+export class AgentBase {
+  readonly tools: ResolvedTool[] = [];
+  readonly toolExecutors = new Map<string, (args: Record<string, unknown>) => Promise<string>>();
+  private mcpBridge: McpBridge | null = null;
+
+  constructor(
+    protected readonly config: ResolvedAgentConfig,
+    protected readonly cwd?: string,
+  ) {
+    this.resolveBuiltinTools();
+    this.resolveKnowledgeTools();
+  }
+
+  // ── Builtin tools from connected tool nodes ─────────────────
+
+  private resolveBuiltinTools(): void {
+    const builtins = createBuiltinTools(this.cwd);
+
+    for (const toolName of this.config.allowedTools) {
+      // Map Claude Code names (Bash→bash, Read→read_file) or use direct name
+      const mapped = TOOL_NAME_MAP[toolName] ?? toolName;
+      const bt = builtins[mapped];
+      if (bt) {
+        this.addBuiltin(bt);
+      }
+    }
+  }
+
+  // ── Knowledge tools (when KB tool nodes are connected) ──────
+
+  private resolveKnowledgeTools(): void {
+    if (this.config.knowledgeBases.length === 0) return;
+
+    const builtins = createBuiltinTools(this.cwd);
+    const knowledgeToolNames = ["search_knowledge", "knowledge_fetch", "knowledge_add"];
+
+    for (const name of knowledgeToolNames) {
+      const bt = builtins[name];
+      if (bt) {
+        this.addBuiltin(bt);
+      }
+    }
+  }
+
+  // ── MCP server tools (from connected MCP tool nodes) ────────
+
+  async connectMcpServers(): Promise<void> {
+    if (this.config.mcpServers.length === 0) return;
+
+    this.mcpBridge = new McpBridge();
+    try {
+      await this.mcpBridge.connect(this.config.mcpServers);
+      for (const tool of this.mcpBridge.getTools()) {
+        const name = tool.function.name;
+        this.tools.push({
+          name,
+          description: tool.function.description,
+          parameters: tool.function.parameters as Record<string, unknown>,
+          execute: async (args) => this.mcpBridge!.callTool(name, args),
+        });
+        this.toolExecutors.set(name, async (args) => this.mcpBridge!.callTool(name, args));
+      }
+    } catch (err: unknown) {
+      logger.warn("Failed to connect MCP servers", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  async disconnect(): Promise<void> {
+    if (this.mcpBridge) {
+      await this.mcpBridge.disconnect();
+      this.mcpBridge = null;
+    }
+  }
+
+  // ── Helpers ─────────────────────────────────────────────────
+
+  private addBuiltin(bt: BuiltinTool): void {
+    const name = bt.tool.function.name;
+    // Avoid duplicates
+    if (this.toolExecutors.has(name)) return;
+    this.tools.push({
+      name,
+      description: bt.tool.function.description,
+      parameters: bt.tool.function.parameters,
+      execute: bt.execute,
+    });
+    this.toolExecutors.set(name, bt.execute);
+  }
+
+  /** Get tools in OpenAI Chat Completions format (nested under `function`) */
+  toChatTools(): Array<{ type: "function"; function: { name: string; description: string; parameters: Record<string, unknown> } }> {
+    return this.tools.map((t) => ({
+      type: "function" as const,
+      function: { name: t.name, description: t.description, parameters: t.parameters },
+    }));
+  }
+
+  /** Get tools in OpenAI Responses API format (top-level name/description) */
+  toResponsesTools(): Array<{ type: "function"; name: string; description: string; parameters: Record<string, unknown> }> {
+    return this.tools.map((t) => ({
+      type: "function" as const,
+      name: t.name,
+      description: t.description,
+      parameters: t.parameters,
+    }));
+  }
+
+  /** Get tool IDs for Ollama (used to filter from OllamaBuiltinTools) */
+  getToolIds(): string[] {
+    return this.tools.map((t) => t.name);
+  }
+}

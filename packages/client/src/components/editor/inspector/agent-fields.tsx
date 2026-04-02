@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import { useWorkflowStore } from "@/stores/workflow-store";
 import type { AgentConfig } from "@openconclave/shared";
-import { ToolPicker } from "../tool-picker";
 import { Field, INPUT_CLASS } from "./shared";
 
 interface ProviderInfo {
@@ -53,9 +52,9 @@ export function AgentFields({ nodeId, config }: AgentFieldsProps) {
       fetch("/api/providers")
         .then((r) => r.json())
         .then((data: { providers: ProviderInfo[] }) => {
-          setProviders(data.providers);
-          if (!config.providerId && data.providers.length > 0) {
-            update({ providerId: data.providers[0].id });
+          setProviders(data.providers ?? []);
+          if (!config.providerId && data.providers?.length > 0) {
+            update({ providerId: data.providers[0]!.id });
           }
         })
         .catch(() => setProviders([]));
@@ -250,14 +249,7 @@ export function AgentFields({ nodeId, config }: AgentFieldsProps) {
         </>
       )}
 
-      <div className="border-t border-border pt-3 mt-3">
-        <ToolPicker
-          selectedTools={config.allowedTools ?? []}
-          selectedMcpServers={config.mcpServers ?? []}
-          onToolsChange={(tools) => update({ allowedTools: tools })}
-          onMcpServersChange={(servers) => update({ mcpServers: servers })}
-        />
-      </div>
     </>
   );
 }
+

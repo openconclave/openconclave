@@ -2,7 +2,9 @@ import { Header, NewButton } from "@/components/layout/header";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import type { WorkflowDefinition, WorkflowListResponse } from "@openconclave/shared";
+import type { WorkflowDefinition } from "@openconclave/shared";
+
+type WorkflowRow = { id: string; name: string; description?: string; enabled: boolean; definition: WorkflowDefinition };
 import { GitBranch, Play, Clock, Trash2, Square, Loader2, Power, MessageSquare } from "lucide-react";
 import { confirm } from "@/components/ui/confirm";
 import { toast } from "@/components/ui/toast";
@@ -17,16 +19,16 @@ export function WorkflowsPage() {
 
   const load = () => {
     api
-      .get<WorkflowListResponse>("/workflows")
+      .get<{ workflows: WorkflowRow[] }>("/workflows")
       .then((d) =>
         setWorkflows(
-          d.workflows.map((w: any) => ({
+          d.workflows.map((w) => ({
             ...w.definition,
             id: w.id,
             name: w.name,
             description: w.description,
             enabled: w.enabled,
-          })) as WorkflowDefinition[]
+          }))
         )
       )
       .catch(() => setWorkflows([]));
@@ -93,8 +95,8 @@ export function WorkflowsPage() {
   const handleStart = (e: React.MouseEvent, wf: WorkflowDefinition) => {
     e.preventDefault();
     e.stopPropagation();
-    const triggerNode = wf.nodes?.find((n: any) => (n.data?.type ?? n.type) === "trigger");
-    const triggerConfig = (triggerNode?.data?.config ?? triggerNode?.config) as Record<string, unknown> | undefined;
+    const triggerNode = wf.nodes?.find((n) => n.data?.type === "trigger");
+    const triggerConfig = triggerNode?.data?.config as Record<string, unknown> | undefined;
     if (triggerConfig?.type === "chat") {
       const toolName = wf.toolName;
       if (toolName) {
@@ -106,7 +108,7 @@ export function WorkflowsPage() {
     }
     api.post(`/workflows/${wf.id}/run`, {})
       .then(() => { loadRuns(); toast(`Started ${wf.name}`, "success"); })
-      .catch((err: any) => toast(`Failed: ${err.message}`, "error"));
+      .catch((err: Error) => toast(`Failed: ${err.message}`, "error"));
   };
 
   return (
@@ -134,7 +136,7 @@ export function WorkflowsPage() {
             {workflows.map((wf) => {
               const sched = schedule.get(wf.id);
               const activeRun = activeRuns.get(String(wf.id));
-              const triggerNode = wf.nodes?.find((n: any) => (n.data?.type ?? n.type) === "trigger");
+              const triggerNode = wf.nodes?.find((n) => n.data?.type === "trigger");
               const isChat = (triggerNode?.data?.config as Record<string, unknown> | undefined)?.type === "chat";
               return (
                 <a

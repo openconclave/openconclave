@@ -2,7 +2,7 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { writeFileSync, unlinkSync, mkdirSync, readFileSync, existsSync } from "fs";
 import { join, resolve } from "path";
-import type { AgentConfig } from "@openconclave/shared";
+import type { ResolvedAgentConfig } from "@openconclave/shared";
 import { TMP_DIR } from "../lib/workspace";
 
 // Agent working directory = where the server process was started
@@ -31,7 +31,7 @@ export interface RouteTarget {
 }
 
 export type AgentRunOptions = {
-  config: AgentConfig;
+  config: ResolvedAgentConfig;
   routeTargets?: RouteTarget[];
   sessionId?: string;
   input?: unknown;
@@ -91,23 +91,30 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
     }
   }
 
-  // Add OpenConclave workflow MCP server for routing
+  // Add OpenConclave workflow MCP server for routing and knowledge tools
   const routeTargets = options.routeTargets;
+  const knowledgeBaseIds = config.knowledgeBases?.map(Number).filter((n) => !isNaN(n)) ?? [];
   let stateFile: string | null = null;
+  const needsWorkflowMcp = (routeTargets && routeTargets.length >= 2) || knowledgeBaseIds.length > 0;
 
-  if (routeTargets && routeTargets.length >= 2) {
+  if (needsWorkflowMcp) {
     const tmpDir = TMP_DIR;
     mkdirSync(tmpDir, { recursive: true });
     stateFile = join(tmpDir, `state-${Date.now()}.json`);
 
     const workflowMcpPath = resolve(import.meta.dir, "workflow-mcp-server.ts");
+    const mcpEnv: Record<string, string> = {
+      OC_STATE_FILE: stateFile,
+      OC_ROUTE_TARGETS: JSON.stringify(routeTargets ?? []),
+    };
+    if (knowledgeBaseIds.length > 0) {
+      mcpEnv.OC_KNOWLEDGE_BASE_IDS = JSON.stringify(knowledgeBaseIds);
+      mcpEnv.OC_API_URL = process.env.OC_API_URL ?? "http://localhost:4000";
+    }
     mcpServers["openconclave-workflow"] = {
       command: "bun",
       args: ["run", workflowMcpPath],
-      env: {
-        OC_STATE_FILE: stateFile,
-        OC_ROUTE_TARGETS: JSON.stringify(routeTargets ?? []),
-      },
+      env: mcpEnv,
     };
   }
 

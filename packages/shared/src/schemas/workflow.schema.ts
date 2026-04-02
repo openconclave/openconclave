@@ -22,8 +22,6 @@ export const agentConfigSchema = z.object({
   ollamaModel: z.string().optional(),
   maxTurns: z.number().int().positive().optional(),
   maxBudgetUsd: z.number().positive().optional(),
-  allowedTools: z.array(z.string()).optional(),
-  mcpServers: z.array(z.string()).optional(),
 });
 
 export const conditionConfigSchema = z.object({

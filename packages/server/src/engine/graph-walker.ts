@@ -10,6 +10,18 @@ import type { WorkflowDefinition, WorkflowNode, WorkflowEdge } from "@openconcla
 
 import type { QueueEntry, RunEvent } from "./types";
 
+// Persistent session store for chat workflows — survives across runs
+// Key: "workflowId:nodeId" → session ID (Claude SDK session or JSONL file path)
+const persistentSessions = new Map<string, string>();
+
+export function getPersistentSession(workflowId: string, nodeId: string): string | undefined {
+  return persistentSessions.get(`${workflowId}:${nodeId}`);
+}
+
+export function setPersistentSession(workflowId: string, nodeId: string, sessionId: string): void {
+  persistentSessions.set(`${workflowId}:${nodeId}`, sessionId);
+}
+
 // ── Graph Walker ────────────────────────────────────────────
 
 export async function executeGraph(
@@ -24,6 +36,24 @@ export async function executeGraph(
   const nodeOutputs = new Map<string, unknown>();
   // Session IDs per agent — Claude: SDK session ID, non-Claude: JSONL file path
   const agentSessions = new Map<string, string>();
+
+  // For chat workflows, restore persistent sessions from previous runs
+  const isChatWorkflow = nodes.some((n) => {
+    const cfg = n.data.config as Record<string, unknown>;
+    return n.data.type === "trigger" && cfg.type === "chat";
+  });
+  const workflowId = String(workflow.id);
+  if (isChatWorkflow) {
+    for (const node of nodes) {
+      if (node.data.type === "agent") {
+        const agentCfg = node.data.config as Record<string, unknown>;
+        // Only Claude agents need SDK session resume — Ollama/OpenAI use JSONL files
+        if ((agentCfg.engine ?? "claude") !== "claude") continue;
+        const existing = getPersistentSession(workflowId, node.id);
+        if (existing) agentSessions.set(node.id, existing);
+      }
+    }
+  }
   // Extract internal fields from trigger payload
   let callerCwd: string | undefined;
   let cleanPayload = triggerPayload;
@@ -45,7 +75,7 @@ export async function executeGraph(
       entryNodes = triggerNode ? [triggerNode] : [];
     } else {
       entryNodes = nodes.filter(
-        (n) => getIncomingEdges(n.id, edges).length === 0
+        (n) => getIncomingEdges(n.id, edges).length === 0 && n.data.type !== "tool"
       );
     }
 
@@ -155,6 +185,19 @@ export async function executeGraph(
       }
     }
 
+    // Persist Claude agent sessions for chat workflows
+    if (isChatWorkflow) {
+      for (const [nodeId, sessionId] of agentSessions) {
+        const node = nodeMap.get(nodeId);
+        if (node?.data.type === "agent") {
+          const agentCfg = node.data.config as Record<string, unknown>;
+          if ((agentCfg.engine ?? "claude") === "claude") {
+            setPersistentSession(workflowId, nodeId, sessionId);
+          }
+        }
+      }
+    }
+
     // Success
     const now = new Date().toISOString();
     await db
@@ -207,8 +250,9 @@ function resolveNextEntries(
         next.push({ nodeId: edge.target, triggeredBy: entry.nodeId });
       }
     }
-  } else if (node.data.type === "agent" && outgoing.length >= 2) {
-    // Agent with routing — check for __routeTo in output
+  } else if (node.data.type === "agent" && outgoing.filter((e) => nodeMap.get(e.target)?.data.type !== "tool").length >= 2) {
+    // Agent with routing — check for __routeTo in output (exclude tool node edges)
+    const nonToolOutgoing = outgoing.filter((e) => nodeMap.get(e.target)?.data.type !== "tool");
     let routeTo: string | null = null;
     try {
       const parsed = typeof output === "string" ? JSON.parse(output) : output;
@@ -225,7 +269,7 @@ function resolveNextEntries(
     if (routeTo) {
       // Route to the chosen edge — match by node ID or label (case-insensitive)
       const routeLower = routeTo.toLowerCase();
-      const targetEdge = outgoing.find((e) => {
+      const targetEdge = nonToolOutgoing.find((e) => {
         if (e.target === routeTo) return true;
         const targetNode = nodeMap.get(e.target);
         return targetNode?.data.label?.toLowerCase() === routeLower;
@@ -239,10 +283,13 @@ function resolveNextEntries(
     } else {
       // Agent with 2+ outputs MUST route — fail if it didn't after retries
       logger.error("Agent failed to route after retries", { nodeId: entry.nodeId });
-      throw new Error(`Agent "${node.data.label}" has ${outgoing.length} outputs but did not call openconclave_next to choose one`);
+      throw new Error(`Agent "${node.data.label}" has ${nonToolOutgoing.length} outputs but did not call openconclave_next to choose one`);
     }
   } else {
     for (const edge of outgoing) {
+      // Skip tool nodes — they are config-only and don't execute
+      const targetNode = nodeMap.get(edge.target);
+      if (targetNode?.data.type === "tool") continue;
       next.push({ nodeId: edge.target, triggeredBy: entry.nodeId });
     }
   }

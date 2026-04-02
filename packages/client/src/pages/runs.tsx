@@ -42,7 +42,7 @@ export function RunsPage() {
     api.get<{ runs: RunWithMeta[] }>("/runs").then((d) => setRuns(d.runs)).catch(() => {});
   };
 
-  const handleCancel = async (e: React.MouseEvent, runId: string) => {
+  const handleCancel = async (e: React.MouseEvent, runId: number) => {
     e.preventDefault();
     e.stopPropagation();
     await api.post(`/runs/${runId}/cancel`, {});
@@ -81,7 +81,7 @@ export function RunsPage() {
                       {run.status}
                     </span>
                     <span className="text-sm truncate">
-                      {workflows.get(run.workflowId) ?? "Unknown workflow"}
+                      {workflows.get(String(run.workflowId)) ?? "Unknown workflow"}
                     </span>
                     <span className="text-[10px] font-mono text-muted-foreground/50 shrink-0">
                       #{run.id}

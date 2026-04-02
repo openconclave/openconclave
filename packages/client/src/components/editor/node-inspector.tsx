@@ -8,6 +8,7 @@ import type {
   CodeConfig,
   PromptConfig,
   OutputConfig,
+  ToolConfig,
 } from "@openconclave/shared";
 import { Field, INPUT_CLASS } from "./inspector/shared";
 import { TriggerFields } from "./inspector/trigger-fields";
@@ -16,6 +17,7 @@ import { ConditionFields } from "./inspector/condition-fields";
 import { CodeFields } from "./inspector/code-fields";
 import { OutputFields, PromptFields } from "./inspector/output-fields";
 import { FileFields } from "./inspector/file-fields";
+import { ToolFields } from "./inspector/tool-fields";
 
 export function NodeInspector() {
   const nodes = useWorkflowStore((s) => s.nodes);
@@ -81,6 +83,9 @@ export function NodeInspector() {
         )}
         {data.type === "file" && (
           <FileFields nodeId={selectedNode.id} config={data.config as { path: string }} />
+        )}
+        {data.type === "tool" && (
+          <ToolFields config={data.config as ToolConfig} />
         )}
 
         <button

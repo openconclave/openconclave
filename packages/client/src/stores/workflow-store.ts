@@ -13,7 +13,6 @@ import {
 import type {
   WorkflowNodeData,
   WorkflowNodeConfig,
-  NodeType,
 } from "@openconclave/shared";
 
 // ── Edge Colors (by source handle, matching handle dot colors) ─

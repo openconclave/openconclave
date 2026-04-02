@@ -4,12 +4,14 @@ import {
   GitBranch,
   Play,
   Settings,
+  Brain,
 } from "lucide-react";
 
 const navItems = [
   { label: "Dashboard", icon: LayoutDashboard, href: "/" },
   { label: "Workflows", icon: GitBranch, href: "/workflows" },
   { label: "Runs", icon: Play, href: "/runs" },
+  { label: "Knowledge", icon: Brain, href: "/knowledge" },
   { label: "Settings", icon: Settings, href: "/settings" },
 ];
 

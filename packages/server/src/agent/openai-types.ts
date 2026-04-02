@@ -32,6 +32,7 @@ export interface OpenAIRunOptions {
   tools?: OpenAITool[];
   allowedTools?: string[];
   mcpServers?: string[];
+  knowledgeBases?: string[];
   cwd?: string;
   routeTargets?: Array<{ nodeId: string; label: string; type: string }>;
   sessionFile?: string;

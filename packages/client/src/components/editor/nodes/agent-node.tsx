@@ -17,16 +17,6 @@ export function AgentNode(props: NodeProps) {
       {config.systemPrompt && (
         <p className="truncate text-[10px]">{config.systemPrompt}</p>
       )}
-      {(config.allowedTools?.length ?? 0) > 0 && (
-        <div className="flex flex-wrap gap-1 mt-1">
-          {config.allowedTools?.slice(0, 3).map((t) => (
-            <span key={t} className="text-[9px] bg-secondary/60 rounded px-1 py-0.5">{t}</span>
-          ))}
-          {(config.allowedTools?.length ?? 0) > 3 && (
-            <span className="text-[9px] opacity-50">+{(config.allowedTools?.length ?? 0) - 3}</span>
-          )}
-        </div>
-      )}
     </BaseNode>
   );
 }
