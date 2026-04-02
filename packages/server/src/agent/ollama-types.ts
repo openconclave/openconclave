@@ -24,7 +24,8 @@ export type OllamaRunOptions = {
   prompt: string;
   systemPrompt?: string;
   input?: unknown;
-  tools?: string[];
+  allowedTools?: string[];
+  knowledgeBases?: string[];
   mcpServers?: string[];
   routeTargets?: Array<{ nodeId: string; label: string; type: string }>;
   cwd?: string;

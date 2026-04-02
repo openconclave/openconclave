@@ -13,7 +13,7 @@ import {
 import type {
   WorkflowNodeData,
   WorkflowNodeConfig,
-  NodeType,
+  TriggerConfig,
 } from "@openconclave/shared";
 
 // ── Edge Colors (by source handle, matching handle dot colors) ─
@@ -26,12 +26,19 @@ const HANDLE_STROKE: Record<string, string> = {
 };
 const DEFAULT_STROKE = "oklch(0.65 0.18 200)";
 
-export function edgeStyle(sourceHandle?: string | null) {
+export function edgeStyle(sourceHandle?: string | null, bidirectional = false) {
   const stroke = HANDLE_STROKE[sourceHandle ?? "bottom"] ?? DEFAULT_STROKE;
   return {
     style: { stroke, strokeWidth: 2 },
     markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16, color: stroke },
+    ...(bidirectional && {
+      markerStart: { type: MarkerType.ArrowClosed, width: 16, height: 16, color: stroke },
+    }),
   };
+}
+
+function isChatTrigger(node: Node<WorkflowNodeData>): boolean {
+  return node.data.type === "trigger" && (node.data.config as TriggerConfig).type === "chat";
 }
 
 // ── Store Types ──────────────────────────────────────────────
@@ -92,7 +99,9 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   },
 
   onConnect: (connection) => {
-    const { style, markerEnd } = edgeStyle(connection.sourceHandle);
+    const sourceNode = get().nodes.find((n) => n.id === connection.source);
+    const bidirectional = sourceNode ? isChatTrigger(sourceNode) : false;
+    const { style, markerEnd, markerStart } = edgeStyle(connection.sourceHandle, bidirectional);
     set({
       edges: addEdge(
         {
@@ -101,6 +110,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
           animated: false,
           style,
           markerEnd,
+          ...(markerStart && { markerStart }),
         },
         get().edges
       ),
@@ -154,9 +164,17 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   },
 
   loadWorkflow: (nodes, edges, name, description, toolName) => {
+    // Re-apply bidirectional markers for edges from chat triggers
+    const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+    const styledEdges = edges.map((e) => {
+      const sourceNode = nodeMap.get(e.source);
+      const bidirectional = sourceNode ? isChatTrigger(sourceNode) : false;
+      const { style, markerEnd, markerStart } = edgeStyle(e.sourceHandle, bidirectional);
+      return { ...e, style, markerEnd, ...(markerStart && { markerStart }) };
+    });
     set({
       nodes,
-      edges,
+      edges: styledEdges,
       workflowName: name,
       workflowDescription: description,
       toolName,

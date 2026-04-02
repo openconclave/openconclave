@@ -12,6 +12,7 @@ import { respondToPrompt, getPendingPrompts } from "./engine/prompt-registry";
 import { workflowRoutes } from "./routes/workflows";
 import { runRoutes } from "./routes/runs";
 import { agentRoutes } from "./routes/agents";
+import { knowledgeRoutes } from "./routes/knowledge";
 import { wsHandler } from "./ws/handler";
 import { createMcpServer } from "./mcp/server";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
@@ -166,6 +167,7 @@ app.get("/api/dashboard", async (c) => {
 app.route("/api/workflows", workflowRoutes);
 app.route("/api/runs", runRoutes);
 app.route("/api/agents", agentRoutes);
+app.route("/api/knowledge", knowledgeRoutes);
 
 // ── Executor ─────────────────────────────────────────────────
 let server: ReturnType<typeof Bun.serve>;

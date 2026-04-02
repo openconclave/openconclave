@@ -1,6 +1,6 @@
 import { join } from "path";
 import { mkdirSync, existsSync, appendFileSync } from "fs";
-import type { WorkflowNode, WorkflowEdge, AgentConfig } from "@openconclave/shared";
+import type { WorkflowNode, WorkflowEdge, AgentConfig, ResolvedAgentConfig } from "@openconclave/shared";
 import { getOutgoingEdges } from "../graph";
 import { executeAgent } from "../agent-executor";
 import { SESSIONS_DIR } from "../../lib/workspace";
@@ -19,6 +19,22 @@ export async function executeAgentNode(
   emit: (event: RunEvent) => void,
   callerCwd?: string
 ): Promise<unknown> {
+  // Read tools directly from agent config
+  const agentConfig = node.data.config as AgentConfig;
+  const connectedTools: string[] = [];
+  const connectedMcpServers: string[] = [];
+  const connectedKnowledgeBases: string[] = [];
+
+  for (const tool of agentConfig.tools ?? []) {
+    if (tool.toolType === "builtin") {
+      connectedTools.push(tool.toolId);
+    } else if (tool.toolType === "mcp") {
+      connectedMcpServers.push(tool.toolId);
+    } else if (tool.toolType === "knowledge") {
+      connectedKnowledgeBases.push(tool.toolId);
+    }
+  }
+
   const outEdges = getOutgoingEdges(nodeId, edges);
   const routeTargets = outEdges.length >= 2
     ? outEdges.map((e) => {
@@ -47,18 +63,25 @@ export async function executeAgentNode(
   }
 
   // Build system prompt: agent's instructions + workflow context
-  const agentConfig = node.data.config as AgentConfig;
+  // Tools are read directly from agentConfig.tools[]
+  const mergedConfig: ResolvedAgentConfig = {
+    ...agentConfig,
+    allowedTools: connectedTools,
+    mcpServers: connectedMcpServers,
+    knowledgeBases: connectedKnowledgeBases,
+  };
+
   const systemParts: string[] = [];
-  if (agentConfig.systemPrompt) systemParts.push(agentConfig.systemPrompt);
+  if (mergedConfig.systemPrompt) systemParts.push(mergedConfig.systemPrompt);
   if (workflowContext) systemParts.push(`\nWorkflow context: ${workflowContext}`);
   const fullSystemPrompt = systemParts.join("\n\n");
 
   const chatConfig = {
-    ...agentConfig,
+    ...mergedConfig,
     systemPrompt: fullSystemPrompt,
   };
 
-  const engine = agentConfig.engine ?? "claude";
+  const engine = mergedConfig.engine ?? "claude";
   let output: unknown;
 
   if (engine === "claude") {

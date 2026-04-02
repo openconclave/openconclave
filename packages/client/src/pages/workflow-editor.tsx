@@ -48,7 +48,14 @@ export function WorkflowEditorPage() {
           })),
           (def.edges ?? []).map((e: any) => {
             const { style, markerEnd } = edgeStyle(e.sourceHandle);
-            return { ...e, type: "default", animated: false, style, markerEnd };
+            return {
+              ...e,
+              type: "default",
+              animated: false,
+              style,
+              markerEnd,
+              targetHandle: e.targetHandle ?? "top",
+            };
           }),
           def.name ?? wf.name ?? "Untitled Workflow",
           def.description ?? wf.description ?? "",

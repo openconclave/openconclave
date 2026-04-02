@@ -10,13 +10,13 @@ import type { AgentResult, ThinkingBlock } from "../agent/runtime";
 import { logger } from "../lib/logger";
 import { SESSIONS_DIR } from "../lib/workspace";
 import { AppError, ErrorCode } from "@openconclave/shared";
-import type { AgentConfig } from "@openconclave/shared";
+import type { ResolvedAgentConfig } from "@openconclave/shared";
 
 import type { RouteTarget, RunEvent } from "./types";
 
 // ── Ollama tool mapping ─────────────────────────────────────
 
-function mapOllamaTools(config: AgentConfig): string[] {
+export function mapOllamaTools(config: ResolvedAgentConfig): string[] {
   const tools: string[] = [];
   const toolMap: Record<string, string> = {
     Bash: "bash",
@@ -36,6 +36,11 @@ function mapOllamaTools(config: AgentConfig): string[] {
     tools.push("send_telegram");
   }
 
+  // Add knowledge tools when agent has knowledge bases attached
+  if (config.knowledgeBases && config.knowledgeBases.length > 0) {
+    tools.push("search_knowledge", "knowledge_fetch", "knowledge_add");
+  }
+
   return tools;
 }
 
@@ -44,7 +49,7 @@ function mapOllamaTools(config: AgentConfig): string[] {
 export async function executeAgent(
   runId: number,
   nodeId: string,
-  config: AgentConfig,
+  config: ResolvedAgentConfig,
   input: unknown,
   emit: (event: RunEvent) => void,
   routeTargets?: RouteTarget[],
@@ -114,13 +119,6 @@ export async function executeAgent(
 
   for (let attempt = 0; attempt <= MAX_ROUTE_RETRIES; attempt++) {
     if (engine === "ollama") {
-      const ollamaTools = mapOllamaTools(augmentedConfig);
-
-      // Add openconclave_next tool for routing
-      if (routeTargets && routeTargets.length >= 2) {
-        ollamaTools.push("openconclave_next");
-      }
-
       // Session file for Ollama — always create path, reuse on subsequent turns
       const tmpDir = SESSIONS_DIR;
       const ollamaSessionFile = sessionId ?? join(tmpDir, `${runId}-${nodeId}.jsonl`);
@@ -130,7 +128,8 @@ export async function executeAgent(
         prompt: attempt === 0 ? (augmentedConfig.systemPrompt ?? "") : `Previous attempt failed: you must call openconclave_next to choose a route. Try again.`,
         systemPrompt: augmentedConfig.systemPrompt,
         input,
-        tools: ollamaTools.length > 0 ? ollamaTools : undefined,
+        allowedTools: config.allowedTools,
+        knowledgeBases: config.knowledgeBases,
         routeTargets,
         mcpServers: config.mcpServers,
         cwd,
@@ -164,6 +163,7 @@ export async function executeAgent(
         input,
         allowedTools: config.allowedTools,
         mcpServers: config.mcpServers,
+        knowledgeBases: config.knowledgeBases,
         cwd,
         routeTargets,
         sessionFile: openaiSessionFile,

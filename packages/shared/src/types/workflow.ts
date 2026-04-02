@@ -37,8 +37,15 @@ export interface AgentConfig {
   thinking?: boolean;
   maxTurns?: number;
   maxBudgetUsd?: number;
-  allowedTools?: string[];
-  mcpServers?: string[];
+  /** Tools attached to this agent (dragged onto the agent card) */
+  tools?: ToolConfig[];
+}
+
+/** Agent config with resolved tools from connected tool nodes on the canvas */
+export interface ResolvedAgentConfig extends AgentConfig {
+  allowedTools: string[];
+  mcpServers: string[];
+  knowledgeBases: string[];
 }
 
 export interface ConditionConfig {
@@ -68,6 +75,15 @@ export interface FileConfig {
   path: string;
 }
 
+export interface ToolConfig {
+  /** "builtin" for Claude Code tools, "mcp" for MCP servers, "knowledge" for KBs */
+  toolType: "builtin" | "mcp" | "knowledge";
+  /** The tool identifier (e.g. "Bash", "playwright", or KB ID as string) */
+  toolId: string;
+  /** Display name */
+  toolName: string;
+}
+
 // Keep backward compat alias
 export type TransformConfig = CodeConfig;
 
@@ -84,6 +100,7 @@ export type WorkflowNodeConfig =
 // ── Node Data ────────────────────────────────────────────────
 
 export interface WorkflowNodeData {
+  [key: string]: unknown;
   label: string;
   type: NodeType;
   config: WorkflowNodeConfig;

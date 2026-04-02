@@ -104,7 +104,7 @@ function groupEventsByNode(events: RunEvent[], nodeLabels: Map<string, string>):
       current.events.push(event);
     } else {
       // Bug #11 fix: use friendly label from nodeLabels
-      const label = nodeLabels.get(nodeId) ?? nodeId;
+      const label: string = nodeLabels.get(nodeId) ?? nodeId;
       current = { nodeId, label, events: [event] };
       groups.push(current);
     }
@@ -177,8 +177,8 @@ export function RunDetailPage() {
   const [data, setData] = useState<RunDetail | null>(null);
   const [loadError, setLoadError] = useState(false); // Bug #5 fix: separate error state
   const [nodeLabels, setNodeLabels] = useState<Map<string, string>>(new Map());
-  const labelsLoadedFor = useRef<string | null>(null); // Bug #3 fix: track which workflow loaded
-  const [expandedTasks, setExpandedTasks] = useState<string[]>([]);
+  const labelsLoadedFor = useRef<number | null>(null); // Bug #3 fix: track which workflow loaded
+  const [expandedTasks, setExpandedTasks] = useState<number[]>([]);
   const [expandedEvents, setExpandedEvents] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<number[]>([]);
   const [expandedEventIds, setExpandedEventIds] = useState<number[]>([]);
@@ -232,7 +232,7 @@ export function RunDetailPage() {
     return () => clearInterval(interval);
   }, [runId, data?.run.status]);
 
-  const toggleTask = (id: string) => {
+  const toggleTask = (id: number) => {
     setExpandedTasks((prev) =>
       prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]
     );
@@ -379,7 +379,7 @@ export function RunDetailPage() {
                       <span className="text-[10px] font-medium text-primary/70">{nodeLabels.get(task.nodeId)}</span>
                     )}
                     <div className="text-sm truncate">
-                      <Md>{typeof task.prompt === "string" ? task.prompt.split("\n")[0] : String(task.prompt)}</Md>
+                      <Md>{typeof task.prompt === "string" ? (task.prompt.split("\n")[0] ?? "") : String(task.prompt)}</Md>
                     </div>
                     <p className="text-xs text-muted-foreground mt-0.5">
                       {task.model ?? "sonnet"}
@@ -409,22 +409,35 @@ export function RunDetailPage() {
                         <Md>{typeof task.prompt === "string" ? task.prompt : JSON.stringify(task.prompt)}</Md>
                       </div>
                     </div>
-                    {task.systemPrompt != null && (
-                      <div>
-                        <p className="text-[10px] text-muted-foreground uppercase mb-1">System Prompt</p>
-                        <div className="text-sm bg-secondary/50 rounded-md px-3 py-2">
-                          <Md>{task.systemPrompt}</Md>
+                    {task.systemPrompt != null && (() => {
+                      // Hide if systemPrompt is just "Workflow context: <same as prompt>"
+                      const stripped = task.systemPrompt.replace(/^\s*Workflow context:\s*/i, "").trim();
+                      const promptStr = typeof task.prompt === "string" ? task.prompt.trim() : "";
+                      const isJustContext = stripped === promptStr;
+                      if (isJustContext) return null;
+                      return (
+                        <div>
+                          <p className="text-[10px] text-muted-foreground uppercase mb-1">System Prompt</p>
+                          <div className="text-sm bg-secondary/50 rounded-md px-3 py-2">
+                            <Md>{task.systemPrompt}</Md>
+                          </div>
                         </div>
-                      </div>
-                    )}
-                    {task.input != null && (
-                      <div>
-                        <p className="text-[10px] text-muted-foreground uppercase mb-1">Input</p>
-                        <pre className="text-xs bg-secondary/50 rounded-md px-3 py-2 overflow-x-auto font-mono whitespace-pre-wrap">
-                          {typeof task.input === "string" ? task.input : JSON.stringify(task.input, null, 2)}
-                        </pre>
-                      </div>
-                    )}
+                      );
+                    })()}
+                    {task.input != null && (() => {
+                      // Hide if input is identical to prompt
+                      const inputStr = typeof task.input === "string" ? task.input : JSON.stringify(task.input);
+                      const promptStr = typeof task.prompt === "string" ? task.prompt : JSON.stringify(task.prompt);
+                      if (inputStr === promptStr) return null;
+                      return (
+                        <div>
+                          <p className="text-[10px] text-muted-foreground uppercase mb-1">Input</p>
+                          <pre className="text-xs bg-secondary/50 rounded-md px-3 py-2 overflow-x-auto font-mono whitespace-pre-wrap">
+                            {typeof task.input === "string" ? task.input : JSON.stringify(task.input, null, 2)}
+                          </pre>
+                        </div>
+                      );
+                    })()}
                     {/* Bug #7/#8 fix: show ALL thinking events, validate shape */}
                     {(() => {
                       const thinkingEvents = events.filter(
@@ -495,9 +508,11 @@ export function RunDetailPage() {
             <div className="divide-y divide-border">
               {eventGroups.map((group, groupIdx) => {
                 const isGroupExpanded = expandedGroups.includes(groupIdx);
-                const firstTime = new Date(group.events[0].createdAt).toLocaleTimeString();
+                const firstEvent = group.events[0];
+                if (!firstEvent) return null;
+                const firstTime = new Date(firstEvent.createdAt).toLocaleTimeString();
                 const lastTime = group.events.length > 1
-                  ? new Date(group.events[group.events.length - 1].createdAt).toLocaleTimeString()
+                  ? new Date(group.events[group.events.length - 1]!.createdAt).toLocaleTimeString()
                   : null;
 
                 // Bug #10 fix: check run:completed status, not just event type

@@ -310,8 +310,8 @@ export function SettingsPage() {
                         </button>
                       </div>
                     </div>
-                    {testResult[p.id] && (
-                      <p className={`text-xs mt-2 ${testResult[p.id].includes("failed") ? "text-destructive" : "text-success"}`}>
+                    {testResult[p.id] != null && (
+                      <p className={`text-xs mt-2 ${testResult[p.id]!.includes("failed") ? "text-destructive" : "text-success"}`}>
                         {testResult[p.id]}
                       </p>
                     )}

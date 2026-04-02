@@ -9,12 +9,14 @@ export type {
   TaskStatus,
   TriggerConfig,
   AgentConfig,
+  ResolvedAgentConfig,
   ConditionConfig,
   CodeConfig,
   TransformConfig,
   MergeConfig,
   PromptConfig,
   OutputConfig,
+  ToolConfig,
   WorkflowNodeConfig,
   WorkflowNodeData,
   WorkflowNode,
@@ -23,6 +25,13 @@ export type {
 } from "./types/workflow";
 
 export type { AgentTask, Run, RunEvent } from "./types/agent";
+
+export type {
+  KnowledgeBase,
+  KnowledgeDocument,
+  KnowledgeChunk,
+  KnowledgeSearchResult,
+} from "./types/knowledge";
 
 export type {
   CreateWorkflowRequest,

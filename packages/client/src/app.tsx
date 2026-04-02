@@ -8,6 +8,7 @@ import { RunsPage } from "@/pages/runs";
 import { RunDetailPage } from "@/pages/run-detail";
 import { SettingsPage } from "@/pages/settings";
 import { ChatPage } from "@/pages/chat";
+import { KnowledgePage } from "@/pages/knowledge";
 
 function getPage() {
   const path = window.location.pathname;
@@ -17,6 +18,7 @@ function getPage() {
   if (path === "/runs") return <RunsPage />;
   if (path.startsWith("/runs/")) return <RunDetailPage />;
   if (path === "/settings") return <SettingsPage />;
+  if (path === "/knowledge") return <KnowledgePage />;
   // /:toolName/chat or /:toolName/chat/:sessionId
   if (path.split("/")[2] === "chat") return <ChatPage />;
   return <DashboardPage />;

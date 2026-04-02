@@ -44,8 +44,6 @@ describe("agentConfigSchema", () => {
       ollamaModel: "qwen3.5:9b",
       maxTurns: 5,
       maxBudgetUsd: 0.5,
-      allowedTools: ["Bash", "Read"],
-      mcpServers: ["playwright"],
     });
     expect(result.success).toBe(true);
   });

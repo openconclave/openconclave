@@ -55,6 +55,37 @@ export const settings = sqliteTable("settings", {
   updatedAt: text("updated_at").notNull(),
 });
 
+export const knowledgeBases = sqliteTable("knowledge_bases", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  name: text("name").notNull(),
+  description: text("description"),
+  embeddingModel: text("embedding_model").notNull().default("nomic-embed-text"),
+  chunkSize: integer("chunk_size").notNull().default(512),
+  chunkOverlap: integer("chunk_overlap").notNull().default(50),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export const documents = sqliteTable("documents", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  knowledgeBaseId: integer("knowledge_base_id").references(() => knowledgeBases.id).notNull(),
+  filename: text("filename").notNull(),
+  sourcePath: text("source_path"),
+  content: text("content"),
+  contentHash: text("content_hash").notNull(),
+  createdAt: text("created_at").notNull(),
+});
+
+export const chunks = sqliteTable("chunks", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  documentId: integer("document_id").references(() => documents.id).notNull(),
+  knowledgeBaseId: integer("knowledge_base_id").references(() => knowledgeBases.id).notNull(),
+  content: text("content").notNull(),
+  metadata: text("metadata", { mode: "json" }),
+  embedding: text("embedding").notNull(),
+  chunkIndex: integer("chunk_index").notNull(),
+});
+
 export const mcpServers = sqliteTable("mcp_servers", {
   name: text("name").primaryKey(),
   type: text("type").notNull(),

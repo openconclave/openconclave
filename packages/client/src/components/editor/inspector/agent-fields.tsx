@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import { useWorkflowStore } from "@/stores/workflow-store";
-import type { AgentConfig } from "@openconclave/shared";
-import { ToolPicker } from "../tool-picker";
+import type { AgentConfig, ToolConfig } from "@openconclave/shared";
+import { Terminal, Server, BookOpen, X } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { Field, INPUT_CLASS } from "./shared";
 
 interface ProviderInfo {
@@ -53,9 +54,9 @@ export function AgentFields({ nodeId, config }: AgentFieldsProps) {
       fetch("/api/providers")
         .then((r) => r.json())
         .then((data: { providers: ProviderInfo[] }) => {
-          setProviders(data.providers);
-          if (!config.providerId && data.providers.length > 0) {
-            update({ providerId: data.providers[0].id });
+          setProviders(data.providers ?? []);
+          if (!config.providerId && data.providers?.length > 0) {
+            update({ providerId: data.providers[0]!.id });
           }
         })
         .catch(() => setProviders([]));
@@ -250,14 +251,46 @@ export function AgentFields({ nodeId, config }: AgentFieldsProps) {
         </>
       )}
 
-      <div className="border-t border-border pt-3 mt-3">
-        <ToolPicker
-          selectedTools={config.allowedTools ?? []}
-          selectedMcpServers={config.mcpServers ?? []}
-          onToolsChange={(tools) => update({ allowedTools: tools })}
-          onMcpServersChange={(servers) => update({ mcpServers: servers })}
-        />
+      {/* Tools */}
+      <div className="border-t border-border/40 pt-3 mt-3">
+        <p className="text-xs font-medium mb-2">Tools</p>
+        {(config.tools ?? []).length === 0 ? (
+          <p className="text-[10px] text-muted-foreground">
+            Drag tools from the palette onto this agent node.
+          </p>
+        ) : (
+          <div className="flex flex-wrap gap-1.5">
+            {(config.tools ?? []).map((tool: ToolConfig, i: number) => {
+              const Icon = tool.toolType === "knowledge" ? BookOpen
+                : tool.toolType === "mcp" ? Server : Terminal;
+              const color = tool.toolType === "knowledge" ? "bg-node-knowledge" : "bg-node-tool";
+              return (
+                <span
+                  key={`${tool.toolType}-${tool.toolId}`}
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded-full pl-1.5 pr-1 py-0.5 text-[10px] font-medium text-white",
+                    color
+                  )}
+                >
+                  <Icon className="h-3 w-3" />
+                  {tool.toolName}
+                  <button
+                    onClick={() => {
+                      const existing = config.tools ?? [];
+                      update({ tools: existing.filter((_, idx) => idx !== i) });
+                    }}
+                    className="ml-0.5 rounded-full hover:bg-white/20 p-0.5"
+                  >
+                    <X className="h-2.5 w-2.5" />
+                  </button>
+                </span>
+              );
+            })}
+          </div>
+        )}
       </div>
+
     </>
   );
 }
+

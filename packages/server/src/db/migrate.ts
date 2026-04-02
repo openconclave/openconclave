@@ -72,6 +72,44 @@ export function runMigrations(): void {
     updated_at TEXT NOT NULL
   )`);
 
+  db.run(sql`CREATE TABLE IF NOT EXISTS knowledge_bases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT,
+    embedding_model TEXT NOT NULL DEFAULT 'nomic-embed-text',
+    chunk_size INTEGER NOT NULL DEFAULT 512,
+    chunk_overlap INTEGER NOT NULL DEFAULT 50,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`);
+
+  db.run(sql`CREATE TABLE IF NOT EXISTS documents (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    knowledge_base_id INTEGER NOT NULL REFERENCES knowledge_bases(id),
+    filename TEXT NOT NULL,
+    source_path TEXT,
+    content TEXT,
+    content_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  )`);
+
+  // Migration: add content column to existing documents table
+  try {
+    db.run(sql`ALTER TABLE documents ADD COLUMN content TEXT`);
+  } catch {
+    // Column already exists
+  }
+
+  db.run(sql`CREATE TABLE IF NOT EXISTS chunks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_id INTEGER NOT NULL REFERENCES documents(id),
+    knowledge_base_id INTEGER NOT NULL REFERENCES knowledge_bases(id),
+    content TEXT NOT NULL,
+    metadata TEXT,
+    embedding TEXT NOT NULL,
+    chunk_index INTEGER NOT NULL
+  )`);
+
   // Indexes for common queries
   db.run(sql`CREATE INDEX IF NOT EXISTS idx_runs_workflow_id ON runs(workflow_id)`);
   db.run(sql`CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status)`);
@@ -80,6 +118,9 @@ export function runMigrations(): void {
   db.run(sql`CREATE INDEX IF NOT EXISTS idx_agent_tasks_status ON agent_tasks(status)`);
   db.run(sql`CREATE INDEX IF NOT EXISTS idx_run_events_run_id ON run_events(run_id)`);
   db.run(sql`CREATE INDEX IF NOT EXISTS idx_run_events_type ON run_events(type)`);
+  db.run(sql`CREATE INDEX IF NOT EXISTS idx_documents_kb_id ON documents(knowledge_base_id)`);
+  db.run(sql`CREATE INDEX IF NOT EXISTS idx_chunks_doc_id ON chunks(document_id)`);
+  db.run(sql`CREATE INDEX IF NOT EXISTS idx_chunks_kb_id ON chunks(knowledge_base_id)`);
 
   logger.info("Database migrations complete");
 }

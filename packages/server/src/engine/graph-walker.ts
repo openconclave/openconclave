@@ -10,6 +10,18 @@ import type { WorkflowDefinition, WorkflowNode, WorkflowEdge } from "@openconcla
 
 import type { QueueEntry, RunEvent } from "./types";
 
+// Persistent session store for chat workflows — survives across runs
+// Key: "workflowId:nodeId" → session ID (Claude SDK session or JSONL file path)
+const persistentSessions = new Map<string, string>();
+
+export function getPersistentSession(workflowId: string, nodeId: string): string | undefined {
+  return persistentSessions.get(`${workflowId}:${nodeId}`);
+}
+
+export function setPersistentSession(workflowId: string, nodeId: string, sessionId: string): void {
+  persistentSessions.set(`${workflowId}:${nodeId}`, sessionId);
+}
+
 // ── Graph Walker ────────────────────────────────────────────
 
 export async function executeGraph(
@@ -24,6 +36,24 @@ export async function executeGraph(
   const nodeOutputs = new Map<string, unknown>();
   // Session IDs per agent — Claude: SDK session ID, non-Claude: JSONL file path
   const agentSessions = new Map<string, string>();
+
+  // For chat workflows, restore persistent sessions from previous runs
+  const isChatWorkflow = nodes.some((n) => {
+    const cfg = n.data.config as Record<string, unknown>;
+    return n.data.type === "trigger" && cfg.type === "chat";
+  });
+  const workflowId = String(workflow.id);
+  if (isChatWorkflow) {
+    for (const node of nodes) {
+      if (node.data.type === "agent") {
+        const agentCfg = node.data.config as Record<string, unknown>;
+        // Only Claude agents need SDK session resume — Ollama/OpenAI use JSONL files
+        if ((agentCfg.engine ?? "claude") !== "claude") continue;
+        const existing = getPersistentSession(workflowId, node.id);
+        if (existing) agentSessions.set(node.id, existing);
+      }
+    }
+  }
   // Extract internal fields from trigger payload
   let callerCwd: string | undefined;
   let cleanPayload = triggerPayload;
@@ -152,6 +182,19 @@ export async function executeGraph(
       // Flatten next entries back into the queue
       for (const next of results) {
         queue.push(...next);
+      }
+    }
+
+    // Persist Claude agent sessions for chat workflows
+    if (isChatWorkflow) {
+      for (const [nodeId, sessionId] of agentSessions) {
+        const node = nodeMap.get(nodeId);
+        if (node?.data.type === "agent") {
+          const agentCfg = node.data.config as Record<string, unknown>;
+          if ((agentCfg.engine ?? "claude") === "claude") {
+            setPersistentSession(workflowId, nodeId, sessionId);
+          }
+        }
       }
     }
 

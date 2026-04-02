@@ -120,7 +120,7 @@ export function BaseNode({
           id={h.id}
           type="source"
           position={Position.Bottom}
-          className={handleClass}
+          className={cn(handleBase, handleColors[0])}
           style={{ left: `${h.position}%` }}
         >
           <span className="absolute top-4 left-1/2 -translate-x-1/2 text-[10px] text-muted-foreground/60 whitespace-nowrap font-medium">
