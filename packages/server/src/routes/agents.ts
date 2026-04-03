@@ -13,6 +13,7 @@ import { executeAgent } from "../engine/agent-executor";
 import { invokeWithTools } from "../agent/llm-call";
 import { logger } from "../lib/logger";
 import { TMP_DIR } from "../lib/workspace";
+import { broadcastRunEvent } from "../ws/broadcast";
 import type { RunEvent } from "../engine/types";
 
 const toolDefSchema = z.object({
@@ -60,6 +61,7 @@ export const agentRoutes = new Hono()
     }
 
     const emit = (event: RunEvent): void => {
+      broadcastRunEvent(event);
       const now = new Date().toISOString();
       db.insert(runEvents)
         .values({ runId: event.runId, nodeId: event.nodeId, type: event.type, data: event.data ?? null, createdAt: now })

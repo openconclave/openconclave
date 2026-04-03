@@ -14,6 +14,7 @@ import { runRoutes } from "./routes/runs";
 import { agentRoutes } from "./routes/agents";
 import { knowledgeRoutes } from "./routes/knowledge";
 import { wsHandler } from "./ws/handler";
+import { setServer, broadcastRunEvent } from "./ws/broadcast";
 import { createMcpServer } from "./mcp/server";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { WorkflowExecutor } from "./engine/executor";
@@ -173,10 +174,7 @@ app.route("/api/knowledge", knowledgeRoutes);
 let server: ReturnType<typeof Bun.serve>;
 
 const executor = new WorkflowExecutor((event) => {
-  if (server) {
-    server.publish(`run:${event.runId}`, JSON.stringify(event));
-    server.publish("dashboard", JSON.stringify(event));
-  }
+  broadcastRunEvent(event);
 });
 
 // ── Workflow Run Trigger ─────────────────────────────────────
@@ -313,6 +311,7 @@ server = Bun.serve({
   },
   websocket: wsHandler,
 });
+setServer(server);
 
 // ── Scheduler ────────────────────────────────────────────────
 const scheduler = new CronScheduler(executor);

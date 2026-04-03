@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { Header } from "@/components/layout/header";
 import { NodePalette } from "@/components/editor/node-palette";
 import { WorkflowCanvas } from "@/components/editor/workflow-canvas";
 import { NodeInspector } from "@/components/editor/node-inspector";
 import { useWorkflowStore, edgeStyle } from "@/stores/workflow-store";
 import { api } from "@/lib/api";
+import { wsClient } from "@/lib/ws";
 import { Save, Play, Square, MessageSquare } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
@@ -88,36 +89,62 @@ export function WorkflowEditorPage() {
     return () => clearInterval(interval);
   }, [existingId]);
 
-  // Poll for active nodes when a run is in progress
+  // Track active nodes when a run is in progress (poll + WebSocket)
+  const activeRef = useRef(new Set<string>());
+
+  const refreshActiveNodes = useCallback(() => {
+    if (!activeRunId) return;
+    api
+      .get<{ run: any; tasks: any[]; events: any[] }>(`/runs/${activeRunId}`)
+      .then((d) => {
+        if (d.run.status !== "running" && d.run.status !== "queued") {
+          setActiveRunId(null);
+          setActiveNodes(new Set());
+          activeRef.current = new Set();
+          return;
+        }
+        const active = new Set<string>();
+        for (const e of d.events) {
+          if ((e.type === "node:started" || e.type === "agent:started") && e.nodeId) active.add(e.nodeId);
+          if ((e.type === "node:completed" || e.type === "agent:completed") && e.nodeId) active.delete(e.nodeId);
+        }
+        activeRef.current = active;
+        setActiveNodes(active);
+      })
+      .catch(() => {});
+  }, [activeRunId]);
+
   useEffect(() => {
     if (!activeRunId) {
       setActiveNodes(new Set());
+      activeRef.current = new Set();
       return;
     }
-    const check = () => {
-      api
-        .get<{ run: any; tasks: any[]; events: any[] }>(`/runs/${activeRunId}`)
-        .then((d) => {
-          if (d.run.status !== "running" && d.run.status !== "queued") {
-            setActiveRunId(null);
-            setActiveNodes(new Set());
-            return;
-          }
-          // Find all nodes that are currently running (started but not completed)
-          // Walk events forward; handle loops by tracking per-node start/complete counts
-          const active = new Set<string>();
-          for (const e of d.events) {
-            if (e.type === "node:started" && e.nodeId) active.add(e.nodeId);
-            if (e.type === "node:completed" && e.nodeId) active.delete(e.nodeId);
-          }
-          setActiveNodes(active);
-        })
-        .catch(() => {});
+
+    // Subscribe to run events for real-time node highlighting
+    wsClient.subscribe([`run:${activeRunId}`]);
+    const off = wsClient.on("*", (data: any) => {
+      if (!data?.nodeId || String(data.runId) !== String(activeRunId)) return;
+      const active = new Set(activeRef.current);
+      if (data.type === "node:started" || data.type === "agent:started") {
+        active.add(data.nodeId);
+      } else if (data.type === "node:completed" || data.type === "agent:completed") {
+        active.delete(data.nodeId);
+      } else {
+        return;
+      }
+      activeRef.current = active;
+      setActiveNodes(active);
+    });
+
+    // Poll as fallback (less frequent since WebSocket handles real-time)
+    refreshActiveNodes();
+    const interval = setInterval(refreshActiveNodes, 3000);
+    return () => {
+      clearInterval(interval);
+      off();
     };
-    check();
-    const interval = setInterval(check, 2000);
-    return () => clearInterval(interval);
-  }, [activeRunId]);
+  }, [activeRunId, refreshActiveNodes]);
 
   const handleSave = async () => {
     // Check for duplicate labels and auto-fix
