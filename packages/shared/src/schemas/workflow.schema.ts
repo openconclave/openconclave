@@ -28,6 +28,7 @@ export const agentConfigSchema = z.object({
   ollamaModel: z.string().optional(),
   maxTurns: z.number().int().positive().optional(),
   maxBudgetUsd: z.number().positive().optional(),
+  debugResponse: z.string().optional(),
   tools: z.array(toolConfigSchema).optional(),
 });
 

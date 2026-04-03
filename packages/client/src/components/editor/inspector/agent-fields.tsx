@@ -97,22 +97,27 @@ export function AgentFields({ nodeId, config }: AgentFieldsProps) {
           <option value="claude">Claude Code</option>
           <option value="ollama">Ollama (local)</option>
           <option value="openai">OpenAI-compatible</option>
+          <option value="debug">Debug (Static Text)</option>
         </select>
       </Field>
 
-      <Field label="Instructions (System Prompt)">
-        <textarea
-          value={config.systemPrompt ?? ""}
-          onChange={(e) => update({ systemPrompt: e.target.value })}
-          placeholder="Agent's role and behavior. Input comes from the previous node automatically."
-          rows={4}
-          className={`${INPUT_CLASS} resize-none`}
-        />
-      </Field>
-      <p className="text-[10px] text-muted-foreground px-1">
-        The agent receives input from the previous node as a user message. Instructions define the
-        agent's role and behavior.
-      </p>
+      {engine !== "debug" && (
+        <>
+          <Field label="Instructions (System Prompt)">
+            <textarea
+              value={config.systemPrompt ?? ""}
+              onChange={(e) => update({ systemPrompt: e.target.value })}
+              placeholder="Agent's role and behavior. Input comes from the previous node automatically."
+              rows={4}
+              className={`${INPUT_CLASS} resize-none`}
+            />
+          </Field>
+          <p className="text-[10px] text-muted-foreground px-1">
+            The agent receives input from the previous node as a user message. Instructions define the
+            agent's role and behavior.
+          </p>
+        </>
+      )}
 
       {engine === "claude" && (
         <>
@@ -247,6 +252,23 @@ export function AgentFields({ nodeId, config }: AgentFieldsProps) {
             {selectedProvider?.apiType === "responses"
               ? "Using OpenAI Responses API (with reasoning)"
               : "Using Chat Completions API"}
+          </p>
+        </>
+      )}
+
+      {engine === "debug" && (
+        <>
+          <Field label="Response Text">
+            <textarea
+              value={config.debugResponse ?? ""}
+              onChange={(e) => update({ debugResponse: e.target.value })}
+              placeholder="Static text this agent will return (no LLM call)"
+              rows={4}
+              className={`${INPUT_CLASS} resize-none`}
+            />
+          </Field>
+          <p className="text-[10px] text-muted-foreground px-1">
+            Returns this text as output without making any LLM calls. Useful for testing workflows.
           </p>
         </>
       )}

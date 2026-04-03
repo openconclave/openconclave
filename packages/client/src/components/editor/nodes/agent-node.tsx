@@ -23,7 +23,8 @@ export function AgentNode(props: NodeProps) {
   const data = useNodeData(props);
   const config = data.config as AgentConfig;
   const engine = config.engine ?? "claude";
-  const model = engine === "ollama" ? config.ollamaModel ?? "ollama"
+  const model = engine === "debug" ? "static"
+    : engine === "ollama" ? config.ollamaModel ?? "ollama"
     : engine === "openai" ? config.openaiModel ?? "openai"
     : config.model ?? "sonnet";
 
