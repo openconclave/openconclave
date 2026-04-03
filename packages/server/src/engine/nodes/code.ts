@@ -1,11 +1,18 @@
 import { AppError, ErrorCode } from "@openconclave/shared";
 import type { CodeConfig } from "@openconclave/shared";
 
+export interface CodeNodeContext {
+  workflowId: number;
+  runId: number;
+  nodeId: string;
+}
+
 const AGENT_CWD = process.cwd();
 
-export async function executeCode(config: CodeConfig, input: unknown): Promise<unknown> {
+export async function executeCode(config: CodeConfig, input: unknown, context?: CodeNodeContext): Promise<unknown> {
   const { runtime, code } = config;
-  const inputStr = typeof input === "string" ? input : (JSON.stringify(input) ?? "");
+  const payload = context ? { input, context } : input;
+  const inputStr = typeof payload === "string" ? payload : (JSON.stringify(payload) ?? "");
 
   const cmdMap: Record<string, string[]> = {
     python: ["python3", "-c", code],
@@ -23,7 +30,18 @@ export async function executeCode(config: CodeConfig, input: unknown): Promise<u
     stdin: new Blob([inputStr]),
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env, INPUT: inputStr },
+    env: {
+      ...process.env,
+      INPUT: inputStr,
+      PYTHONIOENCODING: "utf-8",
+      PYTHONUTF8: "1",
+      ...(context ? {
+        OC_API_URL: `http://localhost:${process.env.PORT ?? 4000}`,
+        OC_WORKFLOW_ID: String(context.workflowId),
+        OC_RUN_ID: String(context.runId),
+        OC_NODE_ID: context.nodeId,
+      } : {}),
+    },
   });
 
   const stdout = await new Response(proc.stdout).text();

@@ -66,7 +66,8 @@ export async function executeAgent(
     throw new AppError(ErrorCode.AGENT_NO_MODEL, "No OpenAI model selected");
   }
 
-  const modelName = engine === "ollama" ? config.ollamaModel!
+  const modelName = engine === "debug" ? "debug"
+    : engine === "ollama" ? config.ollamaModel!
     : engine === "openai" ? config.openaiModel!
     : (config.model ?? "sonnet");
 
@@ -118,7 +119,15 @@ export async function executeAgent(
   let retrySessionId = sessionId; // Track session across retries so the agent can resume
 
   for (let attempt = 0; attempt <= MAX_ROUTE_RETRIES; attempt++) {
-    if (engine === "ollama") {
+    if (engine === "debug") {
+      const debugOutput = config.debugResponse ?? "(no debug response configured)";
+      result = {
+        success: true,
+        output: debugOutput,
+        durationMs: 0,
+      };
+      break;
+    } else if (engine === "ollama") {
       // Session file for Ollama — always create path, reuse on subsequent turns
       const tmpDir = SESSIONS_DIR;
       const ollamaSessionFile = sessionId ?? join(tmpDir, `${runId}-${nodeId}.jsonl`);

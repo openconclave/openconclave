@@ -37,6 +37,8 @@ export interface AgentConfig {
   thinking?: boolean;
   maxTurns?: number;
   maxBudgetUsd?: number;
+  /** Static response text for debug engine */
+  debugResponse?: string;
   /** Tools attached to this agent (dragged onto the agent card) */
   tools?: ToolConfig[];
 }

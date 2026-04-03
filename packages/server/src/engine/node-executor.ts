@@ -62,7 +62,11 @@ export async function executeNode(
         output = executeCondition(node, input);
         break;
       case "transform":
-        output = await executeCode(node.data.config as CodeConfig, input);
+        output = await executeCode(node.data.config as CodeConfig, input, {
+          workflowId: workflow.id!,
+          runId,
+          nodeId,
+        });
         break;
       case "merge":
         output = executeMerge(nodeId, edges, nodeMap, nodeOutputs);
