@@ -49,6 +49,7 @@ Open http://localhost:5173
 - **Cron scheduling** — run workflows on a schedule with preset patterns
 - **Telegram integration** — trigger workflows from mobile, send results to chats
 - **Ollama MCP bridge** — local models use Playwright, web fetch, and other MCP tools
+- **Agent invoke API** — code nodes call agents by ID via HTTP, with structured tool definitions and enum validation
 - **Run observability** — markdown-rendered tasks, events grouped by node, cost tracking, thinking traces
 - **Crash recovery** — interrupted runs detected and marked on server restart
 
@@ -73,6 +74,8 @@ Open http://localhost:5173
 **UI Dev Team** — planner picks a task, developer implements, reviewer checks, tester validates with Playwright, committer pushes — each agent can ask Claude Code questions via channel loop
 
 **Number Guessing Game** — two Ollama agents (Game Master + Guesser) play against each other in a loop
+
+**[Mafia Game](examples/mafia-game/)** — 9 AI agents playing social deduction. Code nodes orchestrate agents sequentially via `/api/agents/invoke`, with dynamic tool definitions (enums for valid targets), information isolation per role, and a game loop via condition nodes. Works with Claude, Ollama, and OpenAI agents.
 
 ## RAG / Knowledge Bases
 
