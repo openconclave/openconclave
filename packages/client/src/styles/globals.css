@@ -1,32 +1,34 @@
 @import "tailwindcss";
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap");
 
 @theme {
-  --color-background: oklch(0.13 0.01 260);
-  --color-foreground: oklch(0.95 0.01 260);
-  --color-card: oklch(0.16 0.01 260);
-  --color-card-foreground: oklch(0.95 0.01 260);
-  --color-popover: oklch(0.16 0.01 260);
-  --color-popover-foreground: oklch(0.95 0.01 260);
-  --color-primary: oklch(0.65 0.18 260);
-  --color-primary-foreground: oklch(0.98 0.01 260);
-  --color-secondary: oklch(0.22 0.01 260);
-  --color-secondary-foreground: oklch(0.90 0.01 260);
-  --color-muted: oklch(0.20 0.01 260);
-  --color-muted-foreground: oklch(0.60 0.01 260);
-  --color-accent: oklch(0.22 0.02 260);
-  --color-accent-foreground: oklch(0.90 0.01 260);
+  /* Landing-page palette: warm dark brown + gold/cardinal accents */
+  --color-background: oklch(0.13 0.01 60);
+  --color-foreground: oklch(0.92 0.01 80);
+  --color-card: oklch(0.16 0.01 60);
+  --color-card-foreground: oklch(0.92 0.01 80);
+  --color-popover: oklch(0.16 0.01 60);
+  --color-popover-foreground: oklch(0.92 0.01 80);
+  --color-primary: oklch(0.68 0.12 70);
+  --color-primary-foreground: oklch(0.98 0.01 80);
+  --color-secondary: oklch(0.20 0.01 60);
+  --color-secondary-foreground: oklch(0.90 0.01 80);
+  --color-muted: oklch(0.20 0.01 60);
+  --color-muted-foreground: oklch(0.58 0.02 60);
+  --color-accent: oklch(0.22 0.02 60);
+  --color-accent-foreground: oklch(0.90 0.01 80);
   --color-destructive: oklch(0.55 0.20 25);
-  --color-destructive-foreground: oklch(0.98 0.01 260);
-  --color-border: oklch(0.25 0.01 260);
-  --color-input: oklch(0.22 0.01 260);
-  --color-ring: oklch(0.65 0.18 260);
+  --color-destructive-foreground: oklch(0.98 0.01 80);
+  --color-border: oklch(0.24 0.01 60);
+  --color-input: oklch(0.22 0.01 60);
+  --color-ring: oklch(0.68 0.12 70);
 
   --color-success: oklch(0.65 0.18 145);
   --color-warning: oklch(0.70 0.16 80);
   --color-info: oklch(0.65 0.15 230);
 
   --color-node-trigger: oklch(0.65 0.18 145);
-  --color-node-agent: oklch(0.65 0.18 260);
+  --color-node-agent: oklch(0.68 0.12 70);
   --color-node-condition: oklch(0.70 0.16 80);
   --color-node-transform: oklch(0.65 0.15 300);
   --color-node-output: oklch(0.60 0.15 20);
@@ -36,6 +38,9 @@
   --radius-lg: 0.75rem;
   --radius-md: 0.5rem;
   --radius-sm: 0.25rem;
+
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: "JetBrains Mono", "Courier New", monospace;
 }
 
 body {
@@ -50,20 +55,20 @@ body {
 }
 
 .react-flow__edge.selected .react-flow__edge-path {
-  stroke: oklch(0.80 0.22 25) !important;
+  stroke: oklch(0.72 0.14 70) !important;
   stroke-width: 4 !important;
   stroke-dasharray: none !important;
-  filter: drop-shadow(0 0 6px oklch(0.80 0.22 25 / 0.5));
+  filter: drop-shadow(0 0 6px oklch(0.72 0.14 70 / 0.5));
 }
 
 @keyframes node-running {
   0%, 100% {
-    box-shadow: 0 0 8px 2px oklch(0.70 0.16 80 / 0.3), 0 0 2px 1px oklch(0.70 0.16 80 / 0.5);
-    border-color: oklch(0.70 0.16 80 / 0.8);
+    box-shadow: 0 0 8px 2px oklch(0.68 0.12 70 / 0.3), 0 0 2px 1px oklch(0.68 0.12 70 / 0.5);
+    border-color: oklch(0.68 0.12 70 / 0.8);
   }
   50% {
-    box-shadow: 0 0 20px 6px oklch(0.70 0.16 80 / 0.5), 0 0 4px 2px oklch(0.70 0.16 80 / 0.7);
-    border-color: oklch(0.70 0.16 80);
+    box-shadow: 0 0 20px 6px oklch(0.68 0.12 70 / 0.5), 0 0 4px 2px oklch(0.68 0.12 70 / 0.7);
+    border-color: oklch(0.68 0.12 70);
   }
 }
 
