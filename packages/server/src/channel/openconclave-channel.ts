@@ -1,46 +1,42 @@
 #!/usr/bin/env bun
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
-import {
-  ListToolsRequestSchema,
-  CallToolRequestSchema,
-} from "@modelcontextprotocol/sdk/types.js";
+import { z } from "zod";
 
 const OC_URL = process.env.OPENCONCLAVE_URL ?? "http://localhost:4000";
 const OC_WS_URL = process.env.OPENCONCLAVE_WS_URL ?? "ws://localhost:4000";
 
-// ── MCP Server with channel capability ───────────────────────
+// ── MCP Server ──────────────────────────────────────────────
 
-const mcp = new Server(
+const mcp = new McpServer(
   { name: "openconclave", version: "0.1.0" },
   {
     capabilities: {
       experimental: { "claude/channel": {} },
-      tools: {},
     },
     instructions: [
       'Events from OpenConclave arrive as <channel source="openconclave" event_type="..." ...>.',
       "",
       "Event types:",
       "- channel:output — a workflow produced output for you. Read and present to user.",
-      "- prompt:question — a workflow is asking YOU a question and waiting for your response. You MUST respond using oc_respond with the run_id and node_id from the event attributes. The workflow is paused until you respond.",
+      "- prompt:question — a workflow is asking YOU a question and waiting for your response.",
       "",
-      "Tools:",
-      "- oc_list_workflows: see all workflows",
-      "- oc_trigger_workflow: start a workflow run with optional payload",
-      "- oc_get_run: get run details",
-      "- oc_list_runs: list recent runs",
-      "- oc_respond: respond to a pending prompt question (REQUIRED when you receive prompt:question events)",
-      "- oc_pending_prompts: list all prompts waiting for response",
+      "Core tools:",
+      "- oc_list_workflows, oc_trigger_workflow, oc_get_run, oc_list_runs",
+      "- oc_respond: respond to a pending prompt (REQUIRED when prompt:question events arrive)",
+      "- oc_pending_prompts: list prompts waiting for response",
       "",
-      "IMPORTANT: When you receive a prompt:question event, respond immediately using oc_respond. The workflow is blocked until you do.",
+      "Workflow tools: Each enabled workflow with a toolName appears as its own tool.",
+      "Call it directly to trigger the workflow — no need to use oc_trigger_workflow.",
+      "",
+      "IMPORTANT: When you receive a prompt:question event, respond immediately using oc_respond.",
     ].join("\n"),
   }
 );
 
-// ── Tools: let Claude interact with OpenConclave ─────────────
+// ── API helper ──────────────────────────────────────────────
 
 async function ocApi(path: string, method = "GET", body?: unknown) {
   const res = await fetch(`${OC_URL}/api${path}`, {
@@ -51,152 +47,162 @@ async function ocApi(path: string, method = "GET", body?: unknown) {
   return res.json();
 }
 
-mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: [
-    {
-      name: "oc_list_workflows",
-      description: "List all workflows in OpenConclave",
-      inputSchema: { type: "object", properties: {} },
-    },
-    {
-      name: "oc_trigger_workflow",
-      description: "Trigger a workflow run in OpenConclave. Always pass your current working directory as cwd so agents run in the correct project.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          workflow_id: { type: "string", description: "The workflow ID to trigger" },
-          payload: {
-            type: "object",
-            description: "Optional payload data to pass to the workflow",
-            additionalProperties: true,
-          },
-          cwd: { type: "string", description: "Your current working directory — agents will run here" },
-        },
-        required: ["workflow_id", "cwd"],
-      },
-    },
-    {
-      name: "oc_get_run",
-      description: "Get details of a specific workflow run including tasks and events",
-      inputSchema: {
-        type: "object",
-        properties: {
-          run_id: { type: "string", description: "The run ID" },
-        },
-        required: ["run_id"],
-      },
-    },
-    {
-      name: "oc_list_runs",
-      description: "List recent workflow runs",
-      inputSchema: {
-        type: "object",
-        properties: {
-          limit: { type: "number", description: "Max results (default 10)" },
-        },
-      },
-    },
-    {
-      name: "oc_respond",
-      description: "Respond to a pending prompt question from a workflow. When a workflow has a Prompt node, it pauses and asks a question via the channel. Use this tool to send your response back so the workflow can continue.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          run_id: { type: "string", description: "The run ID" },
-          node_id: { type: "string", description: "The prompt node ID" },
-          response: { type: "string", description: "Your response to the question" },
-        },
-        required: ["run_id", "node_id", "response"],
-      },
-    },
-    {
-      name: "oc_pending_prompts",
-      description: "List all pending prompt questions waiting for responses",
-      inputSchema: { type: "object", properties: {} },
-    },
-  ],
-}));
+// ── Core tools ──────────────────────────────────────────────
 
-mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
-  const { name, arguments: args } = req.params;
-
-  switch (name) {
-    case "oc_list_workflows": {
-      const data = await ocApi("/workflows");
-      const summary = (data.workflows ?? []).map((w: any) => ({
-        id: w.id,
-        name: w.name,
-        enabled: w.enabled,
-      }));
-      return { content: [{ type: "text", text: JSON.stringify(summary, null, 2) }] };
-    }
-
-    case "oc_trigger_workflow": {
-      const { workflow_id, payload, cwd } = args as { workflow_id: string; payload?: unknown; cwd?: string };
-      // Inject caller's cwd so agents run in the user's project directory
-      const enrichedPayload = { ...(payload as Record<string, unknown> ?? {}), ...(cwd ? { _callerCwd: cwd } : {}) };
-      const data = await ocApi(`/workflows/${workflow_id}/run`, "POST", { payload: enrichedPayload });
-      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
-    }
-
-    case "oc_get_run": {
-      const { run_id } = args as { run_id: string };
-      const data = await ocApi(`/runs/${run_id}`);
-      const run = data.run;
-      const tasks = (data.tasks ?? []).map((t: any) => ({
-        id: t.id,
-        nodeId: t.nodeId,
-        status: t.status,
-        model: t.model,
-        prompt: t.prompt?.slice(0, 100),
-        output: t.output?.slice(0, 300),
-        costUsd: t.costUsd,
-      }));
-      return {
-        content: [{ type: "text", text: JSON.stringify({ run, tasks }, null, 2) }],
-      };
-    }
-
-    case "oc_list_runs": {
-      const { limit } = (args ?? {}) as { limit?: number };
-      const data = await ocApi(`/runs?limit=${limit ?? 10}`);
-      const summary = (data.runs ?? []).map((r: any) => ({
-        id: r.id,
-        status: r.status,
-        workflowId: r.workflowId,
-        createdAt: r.createdAt,
-      }));
-      return { content: [{ type: "text", text: JSON.stringify(summary, null, 2) }] };
-    }
-
-    case "oc_respond": {
-      const { run_id, node_id, response } = args as { run_id: string; node_id: string; response: string };
-      const data = await ocApi("/prompts/respond", "POST", { runId: run_id, nodeId: node_id, response });
-      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
-    }
-
-    case "oc_pending_prompts": {
-      const data = await ocApi("/prompts/pending");
-      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
-    }
-
-    default:
-      throw new Error(`Unknown tool: ${name}`);
+mcp.tool(
+  "oc_list_workflows",
+  "List all workflows in OpenConclave",
+  {},
+  async () => {
+    const data = await ocApi("/workflows") as { workflows: unknown[] };
+    const summary = (data.workflows as Record<string, unknown>[]).map((w) => ({
+      id: w.id,
+      name: w.name,
+      enabled: w.enabled,
+    }));
+    return { content: [{ type: "text", text: JSON.stringify(summary, null, 2) }] };
   }
-});
+);
 
-// ── Connect to Claude Code ───────────────────────────────────
+mcp.tool(
+  "oc_trigger_workflow",
+  "Trigger a workflow run. Always pass your current working directory as cwd so agents run in the correct project.",
+  {
+    workflow_id: z.string().describe("The workflow ID to trigger"),
+    payload: z.record(z.unknown()).optional().describe("Optional payload data"),
+    cwd: z.string().describe("Your current working directory — agents will run here"),
+  },
+  async ({ workflow_id, payload, cwd }) => {
+    const enrichedPayload = { ...(payload ?? {}), ...(cwd ? { _callerCwd: cwd } : {}) };
+    const data = await ocApi(`/workflows/${workflow_id}/run`, "POST", { payload: enrichedPayload });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
 
-await mcp.connect(new StdioServerTransport());
+mcp.tool(
+  "oc_get_run",
+  "Get details of a specific workflow run including tasks and events",
+  { run_id: z.string().describe("The run ID") },
+  async ({ run_id }) => {
+    const data = await ocApi(`/runs/${run_id}`) as { run: unknown; tasks: Record<string, unknown>[] };
+    const tasks = data.tasks.map((t) => ({
+      id: t.id,
+      nodeId: t.nodeId,
+      status: t.status,
+      model: t.model,
+      prompt: typeof t.prompt === "string" ? t.prompt.slice(0, 100) : t.prompt,
+      output: typeof t.output === "string" ? t.output.slice(0, 300) : t.output,
+      costUsd: t.costUsd,
+    }));
+    return { content: [{ type: "text", text: JSON.stringify({ run: data.run, tasks }, null, 2) }] };
+  }
+);
 
-// ── WebSocket: subscribe to OpenConclave events ──────────────
+mcp.tool(
+  "oc_list_runs",
+  "List recent workflow runs",
+  { limit: z.number().optional().describe("Max results (default 10)") },
+  async ({ limit }) => {
+    const data = await ocApi(`/runs?limit=${limit ?? 10}`) as { runs: Record<string, unknown>[] };
+    const summary = data.runs.map((r) => ({
+      id: r.id,
+      status: r.status,
+      workflowId: r.workflowId,
+      createdAt: r.createdAt,
+    }));
+    return { content: [{ type: "text", text: JSON.stringify(summary, null, 2) }] };
+  }
+);
+
+mcp.tool(
+  "oc_respond",
+  "Respond to a pending prompt question from a workflow. Use this to send your response so the workflow can continue.",
+  {
+    run_id: z.string().describe("The run ID"),
+    node_id: z.string().describe("The prompt node ID"),
+    response: z.string().describe("Your response to the question"),
+  },
+  async ({ run_id, node_id, response }) => {
+    const data = await ocApi("/prompts/respond", "POST", { runId: run_id, nodeId: node_id, response });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+mcp.tool(
+  "oc_pending_prompts",
+  "List all pending prompt questions waiting for responses",
+  {},
+  async () => {
+    const data = await ocApi("/prompts/pending");
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+// ── Dynamic workflow tools ──────────────────────────────────
+
+const registeredWorkflowTools = new Set<string>();
+
+async function syncWorkflowTools() {
+  try {
+    const data = await ocApi("/workflows") as { workflows: Array<Record<string, unknown>> };
+    const seen = new Set<string>();
+
+    for (const wf of data.workflows) {
+      if (!wf.enabled) continue;
+      const def = (wf.definition ?? {}) as Record<string, unknown>;
+      const toolName = (def.toolName ?? wf.toolName) as string | undefined;
+      if (!toolName) continue;
+
+      seen.add(toolName);
+      if (!registeredWorkflowTools.has(toolName)) {
+        const description = ((def.description ?? wf.description ?? `Run workflow: ${wf.name}`) as string);
+        const workflowId = String(wf.id);
+
+        mcp.tool(
+          toolName,
+          `${description}. Always pass your current working directory as cwd so agents run in the correct project.`,
+          {
+            input: z.string().optional().describe("Input data to pass to the workflow trigger"),
+            cwd: z.string().describe("Your current working directory — agents will run here"),
+          },
+          async ({ input, cwd }) => {
+            const payload = { ...(input ? { input } : {}), ...(cwd ? { _callerCwd: cwd } : {}) };
+            const result = await ocApi(`/workflows/${workflowId}/run`, "POST", { payload });
+            return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+          }
+        );
+        registeredWorkflowTools.add(toolName);
+      }
+    }
+
+    // Notify client if tools changed
+    if (seen.size !== registeredWorkflowTools.size ||
+        [...seen].some((t) => !registeredWorkflowTools.has(t))) {
+      try {
+        await mcp.server.sendNotification({ method: "notifications/tools/list_changed" });
+      } catch { /* client may not support */ }
+    }
+  } catch (err) {
+    console.error("[channel] syncWorkflowTools error:", err);
+  }
+}
+
+// Sync before connecting so tools are available on first ListTools call
+await syncWorkflowTools();
+console.error(`[channel] synced ${registeredWorkflowTools.size} workflow tools`);
+
+// ── Connect ─────────────────────────────────────────────────
+
+const transport = new StdioServerTransport();
+await mcp.connect(transport);
+
+// ── WebSocket: subscribe to OpenConclave events ─────────────
 
 function connectWebSocket() {
   try {
     const ws = new WebSocket(OC_WS_URL);
 
     ws.onopen = () => {
-      // Subscribe to all dashboard events
       ws.send(JSON.stringify({ type: "subscribe", topics: ["dashboard"] }));
     };
 
@@ -205,10 +211,7 @@ function connectWebSocket() {
         const data = JSON.parse(event.data.toString());
         const eventType = data.type as string;
 
-        // Forward output events and prompt questions
-        if (
-          eventType === "channel:output" || eventType === "prompt:question"
-        ) {
+        if (eventType === "channel:output" || eventType === "prompt:question") {
           const meta: Record<string, string> = {
             event_type: eventType,
             run_id: data.runId ?? "",
@@ -242,7 +245,7 @@ function connectWebSocket() {
             ? fullContent.slice(0, MAX_INLINE) + `\n\n--- truncated (${fullContent.length} chars) ---\nFull output: ${filePath}`
             : fullContent;
 
-          await mcp.notification({
+          await mcp.server.notification({
             method: "notifications/claude/channel",
             params: { content, meta },
           });
@@ -252,14 +255,8 @@ function connectWebSocket() {
       }
     };
 
-    ws.onclose = () => {
-      // Reconnect after 5 seconds
-      setTimeout(connectWebSocket, 5000);
-    };
-
-    ws.onerror = () => {
-      // Will trigger onclose
-    };
+    ws.onclose = () => setTimeout(connectWebSocket, 5000);
+    ws.onerror = () => {};
   } catch {
     setTimeout(connectWebSocket, 5000);
   }

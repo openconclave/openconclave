@@ -282,6 +282,7 @@ function KbDetailPanel({ kb, onDelete, onEdit, onRefresh }: KbDetailPanelProps) 
   const [loadingDocs, setLoadingDocs] = useState(false);
   const [ingestPath, setIngestPath] = useState("");
   const [ingesting, setIngesting] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searching, setSearching] = useState(false);
   const [searchResults, setSearchResults] = useState<KnowledgeSearchResult[] | null>(null);
@@ -309,6 +310,22 @@ function KbDetailPanel({ kb, onDelete, onEdit, onRefresh }: KbDetailPanelProps) 
       await api.post(`/knowledge/${kb.id}/ingest`, { filePath: ingestPath.trim() });
       toast("File ingested successfully", "success");
       setIngestPath("");
+      loadDocuments();
+      onRefresh();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      toast(`Ingest failed: ${message}`, "error");
+    } finally {
+      setIngesting(false);
+    }
+  };
+
+  const handleFileIngest = async (file: File) => {
+    setIngesting(true);
+    try {
+      const text = await file.text();
+      await api.post(`/knowledge/${kb.id}/ingest`, { text, filename: file.name });
+      toast(`"${file.name}" ingested successfully`, "success");
       loadDocuments();
       onRefresh();
     } catch (err: unknown) {
@@ -365,20 +382,49 @@ function KbDetailPanel({ kb, onDelete, onEdit, onRefresh }: KbDetailPanelProps) 
       </div>
 
       {/* Ingest */}
-      <div>
+      <div
+        onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragging(false);
+          const file = e.dataTransfer.files[0];
+          if (file) handleFileIngest(file);
+        }}
+      >
         <p className="text-xs text-muted-foreground uppercase tracking-wider mb-2">Ingest File</p>
-        <div className="flex items-center gap-2">
+        <div className={cn(
+          "flex items-center gap-2 rounded-lg border-2 border-dashed p-2 transition-colors",
+          dragging ? "border-primary bg-primary/5" : "border-transparent"
+        )}>
           <input
             type="text"
             value={ingestPath}
             onChange={(e) => setIngestPath(e.target.value)}
-            placeholder="C:\path\to\file.txt"
+            placeholder={dragging ? "Drop file here..." : "C:\\path\\to\\file.txt  or drag & drop"}
             className={`${INPUT} font-mono flex-1`}
             onKeyDown={(e) => e.key === "Enter" && handleIngest()}
           />
+          <input
+            type="file"
+            id={`file-upload-${kb.id}`}
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) handleFileIngest(file);
+              e.target.value = "";
+            }}
+          />
+          <label
+            htmlFor={`file-upload-${kb.id}`}
+            className={`${BTN} bg-accent text-muted-foreground hover:text-foreground hover:bg-accent/80 cursor-pointer shrink-0`}
+          >
+            <FileText className="h-4 w-4" />
+            Browse
+          </label>
           <button
             onClick={handleIngest}
-            disabled={ingesting}
+            disabled={ingesting || !ingestPath.trim()}
             className={`${BTN} bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-50 shrink-0`}
           >
             <Upload className="h-4 w-4" />
