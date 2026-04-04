@@ -13,6 +13,7 @@ import {
   Search,
   Pencil,
   FileText,
+  Eye,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -249,21 +250,194 @@ function EditKbDialog({
 
 // ─── Search Results Panel ─────────────────────────────────────────────────────
 
-function SearchResultsPanel({ results }: { results: KnowledgeSearchResult[] }) {
+function SearchResultCard({ result, kbId }: { result: KnowledgeSearchResult; kbId: number }) {
+  const [expanded, setExpanded] = useState(false);
+  const [fullContent, setFullContent] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const toggle = async () => {
+    if (expanded) {
+      setExpanded(false);
+      return;
+    }
+    if (fullContent === null) {
+      setLoading(true);
+      try {
+        const data = await api.get<{ data: { content: string } }>(`/knowledge/${kbId}/documents/${result.documentId}`);
+        setFullContent(data.data?.content ?? "");
+      } catch {
+        toast("Failed to load document", "error");
+      } finally {
+        setLoading(false);
+      }
+    }
+    setExpanded(true);
+  };
+
+  return (
+    <div className="rounded-md border border-border bg-background text-xs overflow-hidden">
+      <div className="p-3 space-y-1">
+        <div className="flex items-center justify-between text-muted-foreground">
+          <span className="font-medium truncate">{result.documentName}</span>
+          <div className="flex items-center gap-2 shrink-0 ml-2">
+            <button
+              onClick={toggle}
+              className="text-muted-foreground/50 hover:text-foreground p-0.5 transition-colors"
+              title="View full document"
+            >
+              <Eye className="h-3.5 w-3.5" />
+            </button>
+            <span className="font-mono">score: {result.score.toFixed(3)}</span>
+          </div>
+        </div>
+        <p className="text-foreground/80 line-clamp-3 whitespace-pre-wrap">{result.content}</p>
+      </div>
+      {expanded && (
+        <div className="border-t border-border px-3 py-2 max-h-64 overflow-y-auto">
+          {loading ? (
+            <p className="text-xs text-muted-foreground">Loading...</p>
+          ) : (
+            <pre className="text-xs text-foreground/80 whitespace-pre-wrap font-mono">{fullContent}</pre>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SearchResultsPanel({ results, kbId }: { results: KnowledgeSearchResult[]; kbId: number }) {
   if (results.length === 0) {
     return <p className="text-xs text-muted-foreground py-2">No results found.</p>;
   }
   return (
     <div className="space-y-2 mt-2">
       {results.map((r, i) => (
-        <div key={i} className="rounded-md border border-border bg-background p-3 text-xs space-y-1">
-          <div className="flex items-center justify-between text-muted-foreground">
-            <span className="font-medium truncate">{r.documentName}</span>
-            <span className="shrink-0 ml-2 font-mono">score: {r.score.toFixed(3)}</span>
-          </div>
-          <p className="text-foreground/80 line-clamp-3 whitespace-pre-wrap">{r.content}</p>
-        </div>
+        <SearchResultCard key={i} result={r} kbId={kbId} />
       ))}
+    </div>
+  );
+}
+
+// ─── Document List (paginated) ───────────────────────────────────────────────
+
+const PAGE_SIZE = 20;
+
+function DocumentRow({
+  doc,
+  kbId,
+  onDelete,
+}: {
+  doc: KnowledgeDocument;
+  kbId: number;
+  onDelete: (doc: KnowledgeDocument) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [content, setContent] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const toggle = async () => {
+    if (expanded) {
+      setExpanded(false);
+      return;
+    }
+    if (content === null) {
+      setLoading(true);
+      try {
+        const data = await api.get<{ data: { content: string } }>(`/knowledge/${kbId}/documents/${doc.id}`);
+        setContent(data.data?.content ?? "");
+      } catch {
+        toast("Failed to load document", "error");
+      } finally {
+        setLoading(false);
+      }
+    }
+    setExpanded(true);
+  };
+
+  return (
+    <div className="rounded-md border border-border bg-background overflow-hidden">
+      <div className="flex items-center gap-2 px-3 py-2">
+        <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <span className="flex-1 text-xs truncate">{doc.filename}</span>
+        <button
+          onClick={toggle}
+          className="text-muted-foreground/50 hover:text-foreground p-1 transition-colors"
+          title="View document"
+        >
+          <Eye className="h-3.5 w-3.5" />
+        </button>
+        <span className="text-[10px] text-muted-foreground shrink-0">
+          {doc.chunkCount} chunks
+        </span>
+        <button
+          onClick={() => onDelete(doc)}
+          className="text-muted-foreground/50 hover:text-destructive p-1 transition-colors"
+          title="Remove document"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      {expanded && (
+        <div className="border-t border-border px-3 py-2 max-h-64 overflow-y-auto">
+          {loading ? (
+            <p className="text-xs text-muted-foreground">Loading...</p>
+          ) : (
+            <pre className="text-xs text-foreground/80 whitespace-pre-wrap font-mono">{content}</pre>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DocumentList({
+  documents,
+  loading,
+  onDelete,
+  kbId,
+}: {
+  documents: KnowledgeDocument[];
+  loading: boolean;
+  onDelete: (doc: KnowledgeDocument) => void;
+  kbId: number;
+}) {
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+
+  const visible = documents.slice(0, visibleCount);
+  const remaining = documents.length - visibleCount;
+
+  return (
+    <div>
+      <p className="text-xs text-muted-foreground uppercase tracking-wider mb-2">
+        Documents ({documents.length})
+      </p>
+      {loading ? (
+        <p className="text-xs text-muted-foreground">Loading...</p>
+      ) : documents.length === 0 ? (
+        <p className="text-xs text-muted-foreground">No documents ingested yet.</p>
+      ) : (
+        <div className="space-y-1">
+          {visible.map((doc) => (
+            <DocumentRow key={doc.id} doc={doc} kbId={kbId} onDelete={onDelete} />
+          ))}
+          {remaining > 0 && (
+            <button
+              onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
+              className={`${BTN} w-full justify-center text-muted-foreground hover:text-foreground hover:bg-accent/50 border border-border mt-1`}
+            >
+              Show more ({remaining} remaining)
+            </button>
+          )}
+          {visibleCount > PAGE_SIZE && (
+            <button
+              onClick={() => setVisibleCount(PAGE_SIZE)}
+              className={`${BTN} w-full justify-center text-muted-foreground hover:text-foreground text-[10px]`}
+            >
+              Collapse
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -434,38 +608,12 @@ function KbDetailPanel({ kb, onDelete, onEdit, onRefresh }: KbDetailPanelProps) 
       </div>
 
       {/* Documents */}
-      <div>
-        <p className="text-xs text-muted-foreground uppercase tracking-wider mb-2">
-          Documents ({documents.length})
-        </p>
-        {loadingDocs ? (
-          <p className="text-xs text-muted-foreground">Loading...</p>
-        ) : documents.length === 0 ? (
-          <p className="text-xs text-muted-foreground">No documents ingested yet.</p>
-        ) : (
-          <div className="space-y-1">
-            {documents.map((doc) => (
-              <div
-                key={doc.id}
-                className="flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2"
-              >
-                <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                <span className="flex-1 text-xs truncate">{doc.filename}</span>
-                <span className="text-[10px] text-muted-foreground shrink-0">
-                  {doc.chunkCount} chunks
-                </span>
-                <button
-                  onClick={() => handleDeleteDocument(doc)}
-                  className="text-muted-foreground/50 hover:text-destructive p-1 transition-colors"
-                  title="Remove document"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      <DocumentList
+        documents={documents}
+        loading={loadingDocs}
+        onDelete={handleDeleteDocument}
+        kbId={kb.id}
+      />
 
       {/* Search */}
       <div>
@@ -488,7 +636,7 @@ function KbDetailPanel({ kb, onDelete, onEdit, onRefresh }: KbDetailPanelProps) 
             {searching ? "Searching..." : "Search"}
           </button>
         </div>
-        {searchResults !== null && <SearchResultsPanel results={searchResults} />}
+        {searchResults !== null && <SearchResultsPanel results={searchResults} kbId={kb.id} />}
       </div>
 
       {/* Actions */}

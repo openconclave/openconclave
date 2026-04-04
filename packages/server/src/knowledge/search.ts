@@ -86,6 +86,7 @@ export async function searchKnowledgeBase(
       content: chunk.content,
       score,
       metadata: (chunk.metadata ?? {}) as Record<string, unknown>,
+      documentId: chunk.documentId,
       documentName: docNameMap.get(chunk.documentId) ?? "unknown",
       chunkIndex: chunk.chunkIndex,
     });
