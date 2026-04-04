@@ -280,9 +280,10 @@ function resolveNextEntries(
         throw new Error(`Agent "${node.data.label}" routed to unknown target "${routeTo}"`);
       }
     } else {
-      // Agent with 2+ outputs MUST route — fail if it didn't after retries
-      logger.error("Agent failed to route after retries", { nodeId: entry.nodeId });
-      throw new Error(`Agent "${node.data.label}" has ${outgoing.length} outputs but did not call openconclave_next to choose one`);
+      // No routing metadata — fan out to all targets (parallel execution)
+      for (const edge of outgoing) {
+        next.push({ nodeId: edge.target, triggeredBy: entry.nodeId });
+      }
     }
   } else {
     for (const edge of outgoing) {

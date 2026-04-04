@@ -36,7 +36,10 @@ export async function executeAgentNode(
   }
 
   const outEdges = getOutgoingEdges(nodeId, edges);
-  const routeTargets = outEdges.length >= 2
+  // Only enable routing when agent explicitly has routing: true in config.
+  // Otherwise, 2+ outgoing edges means parallel fan-out (not pick-one routing).
+  const isRouter = (agentConfig as Record<string, unknown>).routing === true;
+  const routeTargets = isRouter && outEdges.length >= 2
     ? outEdges.map((e) => {
         const target = nodeMap.get(e.target);
         const targetConfig = target?.data.config as Record<string, unknown> | undefined;

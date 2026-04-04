@@ -1,11 +1,12 @@
-import { isAbsolute, join } from "path";
-import { readFileSync } from "fs";
+import { isAbsolute, join, dirname } from "path";
+import { readFileSync, writeFileSync, mkdirSync } from "fs";
 import type { WorkflowNode } from "@openconclave/shared";
 import { logger } from "../../lib/logger";
 
-export function executeFile(node: WorkflowNode, callerCwd?: string): unknown {
-  const fileConfig = node.data.config as { path: string };
+export function executeFile(node: WorkflowNode, input: unknown, callerCwd?: string): unknown {
+  const fileConfig = node.data.config as { path: string; mode?: "read" | "write" };
   const filePath = fileConfig.path;
+  const mode = fileConfig.mode ?? "read";
 
   if (!filePath) {
     return "Error: no file path configured";
@@ -14,6 +15,20 @@ export function executeFile(node: WorkflowNode, callerCwd?: string): unknown {
   const resolvedPath = isAbsolute(filePath)
     ? filePath
     : join(callerCwd ?? process.cwd(), filePath);
+
+  if (mode === "write") {
+    try {
+      mkdirSync(dirname(resolvedPath), { recursive: true });
+      const content = typeof input === "string" ? input : JSON.stringify(input, null, 2);
+      writeFileSync(resolvedPath, content, "utf8");
+      logger.info("File node wrote output", { path: resolvedPath, bytes: content.length });
+      return `File saved to ${resolvedPath}`;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error("File node write failed", { path: resolvedPath, error: msg });
+      return `Error writing file: ${msg}`;
+    }
+  }
 
   try {
     return readFileSync(resolvedPath, "utf8");

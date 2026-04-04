@@ -32,7 +32,7 @@ export function RunsPage() {
       .get<{ workflows: Array<{ id: string; name: string }> }>("/workflows")
       .then((d) => {
         const map = new Map<string, string>();
-        for (const w of d.workflows) map.set(w.id, w.name);
+        for (const w of d.workflows) map.set(String(w.id), w.name);
         setWorkflows(map);
       })
       .catch(() => {});

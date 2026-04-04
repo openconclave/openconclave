@@ -32,7 +32,8 @@ echo "  >> Bun $(bun --version) found"
 if [ -d "$INSTALL_DIR/.git" ]; then
   echo "  >> Updating existing installation..."
   cd "$INSTALL_DIR"
-  git pull --quiet
+  git fetch --quiet origin
+  git reset --hard origin/master --quiet
 else
   if [ -d "$INSTALL_DIR" ]; then
     echo "  >> Removing old installation..."
