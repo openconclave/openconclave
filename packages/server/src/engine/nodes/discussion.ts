@@ -162,8 +162,11 @@ export async function executeDiscussion(
         emit,
       );
 
-      // Accumulate last non-empty summary
-      if (modResult.summary) moderatorSummary = modResult.summary;
+      // Accumulate last non-empty summary and append to transcript so participants can see it
+      if (modResult.summary) {
+        moderatorSummary = modResult.summary;
+        transcript += `[Moderator] ${modResult.summary}\n`;
+      }
 
       emit({
         type: "discussion:moderator",
