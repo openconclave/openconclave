@@ -1,0 +1,1 @@
+ claude --dangerously-load-development-channels plugin:openconclave-channel@openconclave-marketplace --resume d465fb51-c578-40d7-9ff1-96bb836aeb8c --effort high
