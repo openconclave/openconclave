@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
-import { Send, Loader2, Bot, User, PlusCircle } from "lucide-react";
+import { Send, Loader2, Bot, User, PlusCircle, Users } from "lucide-react";
 import { MarkdownContent } from "@/components/ui/markdown-content";
 
 interface ChatMessage {
-  role: "user" | "assistant" | "agent";
+  role: "user" | "assistant" | "agent" | "moderator";
   content: string;
   label?: string;
   runId?: number;
@@ -87,6 +87,46 @@ export function ChatPage() {
               return updated;
             }
             return [...prev, agentMsg];
+          });
+        }
+
+        // Show discussion agent speeches
+        if (data.type === "discussion:speech" && data.data?.message) {
+          setMessages((prev) => {
+            const agentMsg: ChatMessage = {
+              role: "agent",
+              content: data.data.message,
+              label: `${data.data.agentName} (Round ${data.data.round})`,
+              runId: data.runId,
+              status: "done",
+            };
+            const pendingIdx = prev.findIndex((m) => m.status === "pending");
+            if (pendingIdx >= 0) {
+              const updated = [...prev];
+              updated.splice(pendingIdx, 0, agentMsg);
+              return updated;
+            }
+            return [...prev, agentMsg];
+          });
+        }
+
+        // Show moderator reasoning
+        if (data.type === "discussion:moderator" && data.data?.summary) {
+          setMessages((prev) => {
+            const modMsg: ChatMessage = {
+              role: "moderator",
+              content: data.data.summary,
+              label: `Moderator${data.data.action === "end_discussion" ? " — Ending discussion" : ""}`,
+              runId: data.runId,
+              status: "done",
+            };
+            const pendingIdx = prev.findIndex((m) => m.status === "pending");
+            if (pendingIdx >= 0) {
+              const updated = [...prev];
+              updated.splice(pendingIdx, 0, modMsg);
+              return updated;
+            }
+            return [...prev, modMsg];
           });
         }
 
@@ -218,6 +258,11 @@ export function ChatPage() {
 
         {messages.map((msg, i) => (
           <div key={i} className={`flex gap-3 ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+            {msg.role === "moderator" && (
+              <div className="flex-shrink-0 w-7 h-7 rounded-full bg-node-discussion/20 flex items-center justify-center">
+                <Users className="h-4 w-4 text-node-discussion" />
+              </div>
+            )}
             {(msg.role === "assistant" || msg.role === "agent") && (
               <div className="flex-shrink-0 w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center">
                 <Bot className="h-4 w-4 text-primary" />
@@ -229,9 +274,11 @@ export function ChatPage() {
                   ? "bg-primary text-primary-foreground whitespace-pre-wrap"
                   : msg.status === "error"
                     ? "bg-destructive/10 text-destructive border border-destructive/20"
-                    : msg.role === "agent"
-                      ? "bg-card/60 border border-border/50"
-                      : "bg-card border border-border"
+                    : msg.role === "moderator"
+                      ? "bg-node-discussion/5 border border-node-discussion/30 italic"
+                      : msg.role === "agent"
+                        ? "bg-card/60 border border-border/50"
+                        : "bg-card border border-border"
               }`}
             >
               {msg.label && (

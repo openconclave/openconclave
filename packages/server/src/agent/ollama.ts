@@ -124,7 +124,7 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
   }
 
   // Add routing tool with actual route targets
-  if (options.routeTargets && options.routeTargets.length >= 2) {
+  if (options.routeTargets && options.routeTargets.length >= 1) {
     const routingTool = createOllamaRoutingTool(options.routeTargets);
     activeTools.push(routingTool.tool);
     toolExecutors.set("openconclave_next", routingTool.execute);

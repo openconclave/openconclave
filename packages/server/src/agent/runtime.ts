@@ -95,7 +95,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
   const routeTargets = options.routeTargets;
   const knowledgeBaseIds = config.knowledgeBases?.map(Number).filter((n) => !isNaN(n)) ?? [];
   let stateFile: string | null = null;
-  const needsWorkflowMcp = (routeTargets && routeTargets.length >= 2) || knowledgeBaseIds.length > 0;
+  const needsWorkflowMcp = (routeTargets && routeTargets.length >= 1) || knowledgeBaseIds.length > 0;
 
   if (needsWorkflowMcp) {
     const tmpDir = TMP_DIR;

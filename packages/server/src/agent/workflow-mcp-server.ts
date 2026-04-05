@@ -49,7 +49,7 @@ const server = new McpServer({
 
 // ── Routing Tool ─────────────────────────────────────────────
 
-if (ROUTE_TARGETS.length >= 2) {
+if (ROUTE_TARGETS.length >= 1) {
   const validIds = ROUTE_TARGETS.map((t) => t.nodeId);
   const routeDescription = ROUTE_TARGETS
     .map((t) => {

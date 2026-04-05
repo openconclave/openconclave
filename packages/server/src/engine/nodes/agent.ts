@@ -1,7 +1,7 @@
 import { join } from "path";
 import { mkdirSync, existsSync, appendFileSync } from "fs";
 import type { WorkflowNode, WorkflowEdge, AgentConfig, ResolvedAgentConfig } from "@openconclave/shared";
-import { getOutgoingEdges } from "../graph";
+// getOutgoingEdges no longer needed here — agent-executor resolves its own topology
 import { executeAgent } from "../agent-executor";
 import { SESSIONS_DIR } from "../../lib/workspace";
 import type { RunEvent } from "../types";
@@ -35,23 +35,7 @@ export async function executeAgentNode(
     }
   }
 
-  const outEdges = getOutgoingEdges(nodeId, edges);
-  // Only enable routing when agent explicitly has routing: true in config.
-  // Otherwise, 2+ outgoing edges means parallel fan-out (not pick-one routing).
-  const isRouter = (agentConfig as Record<string, unknown>).routing === true;
-  const routeTargets = isRouter && outEdges.length >= 2
-    ? outEdges.map((e) => {
-        const target = nodeMap.get(e.target);
-        const targetConfig = target?.data.config as Record<string, unknown> | undefined;
-        const description = targetConfig?.description as string | undefined;
-        return {
-          nodeId: e.target,
-          label: target?.data.label ?? e.target,
-          type: target?.data.type ?? "unknown",
-          description,
-        };
-      })
-    : undefined;
+  // Route targets are now self-resolved by executeAgent from edges/nodeMap
 
   // Clean input — strip routing metadata
   let userMessage: string | null = null;
@@ -89,7 +73,7 @@ export async function executeAgentNode(
 
   if (engine === "claude") {
     const existingSessionId = agentSessions.get(nodeId);
-    const agentResult = await executeAgent(runId, nodeId, chatConfig, userMessage ?? input, emit, routeTargets, existingSessionId, callerCwd);
+    const agentResult = await executeAgent(runId, nodeId, chatConfig, userMessage ?? input, emit, undefined, existingSessionId, callerCwd, edges, nodeMap);
     output = agentResult.output;
     if (agentResult.sessionId) {
       agentSessions.set(nodeId, agentResult.sessionId);
@@ -106,7 +90,7 @@ export async function executeAgentNode(
     const userContent = userMessage ?? workflowContext ?? "Start";
     appendFileSync(sessionFile, JSON.stringify({ role: "user", content: userContent }) + "\n");
 
-    const agentResult = await executeAgent(runId, nodeId, chatConfig, userMessage ?? input, emit, routeTargets, sessionFile, callerCwd);
+    const agentResult = await executeAgent(runId, nodeId, chatConfig, userMessage ?? input, emit, undefined, sessionFile, callerCwd, edges, nodeMap);
     output = agentResult.output;
 
     let cleanOutput = typeof output === "string" ? output : JSON.stringify(output);

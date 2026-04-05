@@ -10,7 +10,8 @@ import type { AgentResult, ThinkingBlock } from "../agent/runtime";
 import { logger } from "../lib/logger";
 import { SESSIONS_DIR } from "../lib/workspace";
 import { AppError, ErrorCode } from "@openconclave/shared";
-import type { ResolvedAgentConfig } from "@openconclave/shared";
+import type { ResolvedAgentConfig, WorkflowNode, WorkflowEdge } from "@openconclave/shared";
+import { getOutgoingEdges } from "./graph";
 
 import type { RouteTarget, RunEvent } from "./types";
 
@@ -54,10 +55,32 @@ export async function executeAgent(
   emit: (event: RunEvent) => void,
   routeTargets?: RouteTarget[],
   sessionId?: string,
-  cwd?: string
+  cwd?: string,
+  edges?: WorkflowEdge[],
+  nodeMap?: Map<string, WorkflowNode>,
 ): Promise<{ output: string; thinking?: ThinkingBlock[]; sessionId?: string }> {
   const now = new Date().toISOString();
   const engine = config.engine ?? "claude";
+
+  // Self-resolve route targets from graph topology if not explicitly provided.
+  // Any agent with 2+ outgoing edges gets routing tools automatically.
+  if (!routeTargets && edges && nodeMap) {
+    const outEdges = getOutgoingEdges(nodeId, edges)
+      .filter((e) => e.targetHandle !== "participants"); // exclude discussion participant edges
+    if (outEdges.length >= 1) {
+      routeTargets = outEdges.map((e) => {
+        const target = nodeMap.get(e.target);
+        const targetConfig = target?.data.config as Record<string, unknown> | undefined;
+        const description = targetConfig?.description as string | undefined;
+        return {
+          nodeId: e.target,
+          label: target?.data.label ?? e.target,
+          type: target?.data.type ?? "unknown",
+          description,
+        };
+      });
+    }
+  }
 
   if (engine === "ollama" && !config.ollamaModel) {
     throw new AppError(ErrorCode.AGENT_NO_MODEL, "No Ollama model selected");
@@ -73,7 +96,7 @@ export async function executeAgent(
 
   // Build routing-aware config
   const augmentedConfig = { ...config };
-  if (routeTargets && routeTargets.length >= 2) {
+  if (routeTargets && routeTargets.length >= 1) {
     const routeList = routeTargets
       .map((r) => {
         const desc = r.description ? ` — ${r.description}` : "";
@@ -120,10 +143,18 @@ export async function executeAgent(
 
   for (let attempt = 0; attempt <= MAX_ROUTE_RETRIES; attempt++) {
     if (engine === "debug") {
-      const debugOutput = config.debugResponse ?? "(no debug response configured)";
+      const debugInfo = {
+        debugResponse: config.debugResponse ?? "(no debug response configured)",
+        receivedInput: input,
+        systemPrompt: augmentedConfig.systemPrompt,
+        allowedTools: config.allowedTools,
+        mcpServers: config.mcpServers,
+        knowledgeBases: config.knowledgeBases,
+        routeTargets: routeTargets ?? [],
+      };
       result = {
         success: true,
-        output: debugOutput,
+        output: JSON.stringify(debugInfo, null, 2),
         durationMs: 0,
       };
       break;

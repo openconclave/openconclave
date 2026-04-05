@@ -112,12 +112,21 @@ export async function executeDiscussion(
     const participant = participants[currentParticipantIndex];
     const agentConfig = participant.data.config as AgentConfig;
 
-    // V1: participant agents get no external tools — tools complicate the transcript model
+    // Resolve tools from agent config — respect what the workflow setup configured
+    const connectedTools: string[] = [];
+    const connectedMcpServers: string[] = [];
+    const connectedKnowledgeBases: string[] = [];
+    for (const tool of agentConfig.tools ?? []) {
+      if (tool.toolType === "builtin") connectedTools.push(tool.toolId);
+      else if (tool.toolType === "mcp") connectedMcpServers.push(tool.toolId);
+      else if (tool.toolType === "knowledge") connectedKnowledgeBases.push(tool.toolId);
+    }
+
     const resolvedConfig: ResolvedAgentConfig = {
       ...agentConfig,
-      allowedTools: [],
-      mcpServers: [],
-      knowledgeBases: [],
+      allowedTools: connectedTools,
+      mcpServers: connectedMcpServers,
+      knowledgeBases: connectedKnowledgeBases,
     };
 
     // Render the prompt template for this turn
@@ -130,7 +139,8 @@ export async function executeDiscussion(
     const prompt = renderTemplate(config.prompt, promptContext);
 
     // Invoke participant — ephemeral, no session reuse inside a discussion
-    const agentResult = await executeAgent(runId, participant.id, resolvedConfig, prompt, emit);
+    // Pass edges and nodeMap so the agent can self-resolve its graph topology (route targets, etc.)
+    const agentResult = await executeAgent(runId, participant.id, resolvedConfig, prompt, emit, undefined, undefined, undefined, edges, nodeMap);
 
     const message = agentResult.output;
     const speech: SpeechRecord = {
