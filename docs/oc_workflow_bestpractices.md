@@ -789,6 +789,75 @@ if os.path.exists(marker):
 **Problem:** Asking agents to "Preserve the CONTEXT:{...} JSON line" in their output doesn't work. Agents are LLMs — they summarize, rewrite, and lose structured data. After 3-4 agents in a chain, the CONTEXT line is gone.
 **Fix:** Use a marker file (see Pitfall 8) or the OC API to share structured context between nodes. Never rely on agents to pass through data they didn't produce.
 
+### Pitfall 13: Agents Exceeding Their Role
+
+**Problem (from run #93):** Planners write actual code files instead of just planning. Testers fix implementation bugs instead of reporting failures. This wastes tokens on the wrong agent, bypasses the review loop (tester fixes go unreviewed), and undermines the pipeline's quality guarantees.
+
+**Root cause:** LLMs are eager to help. If an agent CAN write files (has the Write tool) and sees code that needs writing, it will write code — even if its role is "planner." Prompt instructions alone are not enough; you must also restrict tools.
+
+**Fix — three layers of defense:**
+
+**Layer 1: Remove tools that enable scope creep.**
+
+| Role | Should have | Should NOT have |
+|------|------------|-----------------|
+| Explorer | Bash, Read, Glob, Grep | Write, Edit |
+| Practices / Security | Bash, Read, Glob, Grep, WebSearch | Write, Edit |
+| Planner | Bash, Read, Glob, Grep | **Write, Edit** (was the bug — planners had Write) |
+| Developer | Bash, Read, Write, Edit, Glob, Grep | — (needs everything) |
+| Reviewer | Bash, Read, Glob, Grep, WebSearch | Write, Edit |
+| Tester | Bash, Read, Write, Edit, Glob, Grep | — (needs Write/Edit for test files only) |
+
+The Planner having the `Write` tool was the primary cause of run #93's plan file getting written to disk.
+
+**Layer 2: Explicit "CRITICAL ROLE BOUNDARY" block in system prompt.**
+
+Place this at the top of the prompt, before the role description. LLMs weight early instructions more heavily.
+
+```
+CRITICAL ROLE BOUNDARY:
+- Do NOT write, create, or modify any source code files.
+- Your ONLY output is [plan text / review findings / etc.] in your response.
+```
+
+For testers, the boundary is narrower — they CAN write test files but must NOT touch implementation:
+
+```
+CRITICAL ROLE BOUNDARY:
+- You may ONLY create or modify test files (*.test.ts, *.test.tsx).
+- Do NOT modify implementation source files. NEVER fix bugs in non-test code.
+- If tests reveal implementation bugs, DESCRIBE the bug and end with VERDICT:ALL_TESTS_FAIL.
+- The developer will fix implementation bugs — not you.
+```
+
+**Layer 3: Condition routing enforces the boundary.**
+
+Even if a tester accidentally tries to fix code, the condition node checks the VERDICT string:
+- `VERDICT:ALL_TESTS_PASS` → true → proceed (merge)
+- Anything else → false → routes back to **developer** (not tester)
+
+This creates a feedback loop: tester reports bugs → developer fixes → reviewer approves → tester re-tests. No agent can bypass this loop by doing another agent's job.
+
+**Additional runtime-specific guidance for testers:**
+
+```
+- Import from "bun:test" not "vitest" — this project uses Bun's test runner
+- Do NOT use vi.hoisted() or vi.waitFor() — these are Vitest-only APIs
+- Run `bun test <your-test-file>` to verify (not vitest CLI)
+```
+
+This was discovered in run #93 where the tester used `vi.hoisted()` (Vitest-only) causing all tests to fail when run under Bun.
+
+### Pitfall 14: Discussion Node — Private Information Leaks
+
+**Problem:** The discussion prompt template (`config.prompt`) is shared across ALL participants. Template variables like `{{input}}` render identically for every agent. In games with hidden roles (Mafia, Werewolf), passing the full game state as input exposes all players' secret roles to every participant.
+**Fix:** Put private per-agent info in each agent's `systemPrompt` (which is private to that agent), NOT in the discussion prompt template. For fixed-role games, set system prompts at design time. For random roles, use the setup node to update agent configs via the `PUT /api/workflows/:id` API before the discussion starts — but note the graph-walker loads node configs once at run start, so the update must happen in a node that executes BEFORE the discussion node.
+
+### Pitfall 15: Dead Participants in Discussion Loops
+
+**Problem:** When a discussion node is inside a loop (e.g., Mafia day phases), participants who "died" in previous rounds are still in the participant list. The first speaker each round is `participants[0]` — if they're dead, they still get called before the moderator can intervene.
+**Fix:** The code moderator should track living/dead state from the input and only `call_specific` living agents. For the unavoidable first speaker, add to the prompt template: `If you have been eliminated, respond only: "..."` — the moderator then skips them and calls the first living player. Set `maxRounds` high enough to absorb these wasted rounds (e.g., 20 for a 9-player game).
+
 ---
 
 ## 14. Workflow Patterns
@@ -886,6 +955,79 @@ Edges connecting participants MUST have `targetHandle: "participants"`. Without 
 
 **Moderator summaries appear as `[Moderator] ...` in the transcript**, so participants can see moderator feedback in subsequent rounds.
 
+**Discussion output format:**
+```json
+{
+  "responses": [{"agentName": "...", "agentId": "...", "round": 1, "message": "..."}],
+  "transcript": "[Round 1] Agent: message\n[Moderator] summary\n...",
+  "moderatorSummary": "last non-empty summary",
+  "rounds": 6,
+  "exitReason": "end_discussion",
+  "input": "<original input to the discussion node>"
+}
+```
+
+The `input` field carries through the original data-flow input — downstream nodes can extract state from `output.input`. This is critical for loops where game/workflow state must flow through the discussion without modification.
+
+### Pattern 8: Hybrid Discussion + Transform (Game Loop)
+
+```
+Trigger → Setup (transform)
+               ↓
+    Discussion (public phase) ← ─ ─ ─ ─ ─ ─ ─ ┐
+               ↓                                 |
+    Transform (private actions via API) ─────── Condition (loop/end)
+                                                  ↓ (end)
+                                                Output
+```
+
+**Used by:** Mafia Game v2 (workflow #16, run #92).
+
+For games with both public and private phases:
+- **Public phases** (day discussion) → Discussion node. All agents as participants, code moderator controls who speaks. Transcript is shared.
+- **Private phases** (voting, night actions) → Transform node calling agents via `/api/agents/invoke` with per-agent tools and private context.
+
+This hybrid is necessary because:
+1. Discussion nodes don't support per-agent tools (participants get `allowedTools: []`)
+2. Discussion prompt templates can't inject per-agent private info (template is shared)
+3. Structured responses (votes, kill targets) need tool schemas with `enum` constraints
+
+**Code moderator pattern for selective speakers:**
+```python
+import json, sys
+
+data = json.load(sys.stdin)
+responses = data["responses"]
+state = data["input"]  # game state carried through
+
+living = [p for p in state["players"] if p["alive"]]
+living_set = set(p["name"] for p in living)
+
+# Track who has spoken (only living)
+spoken = {r["agentName"] for r in responses if r["agentName"] in living_set}
+
+# Skip dead speakers
+last = responses[-1]["agentName"] if responses else None
+if last and last not in living_set:
+    remaining = [p["name"] for p in living if p["name"] not in spoken]
+    if remaining:
+        print(json.dumps({"action": "call_specific", "nextAgent": remaining[0]}))
+    else:
+        print(json.dumps({"action": "end_discussion"}))
+    sys.exit(0)
+
+remaining = [p["name"] for p in living if p["name"] not in spoken]
+if remaining:
+    print(json.dumps({"action": "call_specific", "nextAgent": remaining[0]}))
+else:
+    print(json.dumps({"action": "end_discussion", "summary": "Time to vote."}))
+```
+
+**Key design decisions from Mafia v2:**
+- Fixed role assignments (Godfather, Mafia, Detective, Doctor, Townspeople) with private system prompts per agent
+- `daySummary` field in game state pre-computed by Night Phase for the discussion prompt template: `{{input.daySummary}}`
+- Discussion output's `input` field carries game state through to the Day Vote transform
+
 ---
 
 ## 15. API Reference
@@ -979,3 +1121,24 @@ The Dev Pipeline (workflow #14) implementing the Discussion Node feature:
 | Blocking bugs found | 1 (package.json corruption) |
 | Non-blocking issues | 1 (test mock leakage) |
 | Build status after fix | Client builds, server types check |
+
+---
+
+## Appendix: Run #92 Statistics
+
+Mafia Game v2 (workflow #16) — first game using discussion node:
+
+| Metric | Value |
+|---|---|
+| Total nodes | 17 (8 game logic + 9 agents) |
+| Total edges | 17 (8 flow + 9 participant) |
+| Game days played | 4 |
+| Winner | Mafia (Rowan, Godfather — last standing) |
+| Discussion rounds per day | 9 (one per living player, minus dead skips) |
+| Agent invocations | ~60 (9 discussion + 9 votes + ~5 night actions × 4 days) |
+| Agent model | claude/haiku |
+| Eliminated day 1 | Soren (Mafia, voted), Kael (Doctor, night killed) |
+| Eliminated day 2 | Mira (Detective, voted), Nico (Townsperson, night killed) |
+| Eliminated day 3 | Elara (Mafia, voted), Talia (Townsperson, night killed) |
+| Eliminated day 4 | Orion (Townsperson, voted — game over, mafia >= town) |
+| Key play | Town caught 2/3 Mafia but lost Detective on day 2 vote |
