@@ -23,6 +23,7 @@ import { MergeNode } from "./nodes/merge-node";
 import { PromptNode } from "./nodes/prompt-node";
 import { OutputNode } from "./nodes/output-node";
 import { FileNode } from "./nodes/file-node";
+import { DiscussionNode } from "./nodes/discussion-node";
 import type { WorkflowNodeData, NodeType, TriggerConfig } from "@openconclave/shared";
 
 const nodeTypes = {
@@ -34,6 +35,7 @@ const nodeTypes = {
   prompt: PromptNode,
   output: OutputNode,
   file: FileNode,
+  discussion: DiscussionNode,
 };
 
 let nodeId = Date.now();
@@ -47,7 +49,13 @@ function autoLayout() {
   g.setGraph({ rankdir: "TB", nodesep: 60, ranksep: 100 });
 
   for (const node of nodes) {
-    g.setNode(node.id, { width: 220, height: 100 });
+    // Discussion nodes are 260×200px; all others are 220×100px.
+    // Dagre returns node center — subtract half-dimensions to get top-left.
+    const isDiscussion = node.data.type === "discussion";
+    g.setNode(node.id, {
+      width: isDiscussion ? 260 : 220,
+      height: isDiscussion ? 200 : 100,
+    });
   }
   for (const edge of edges) {
     g.setEdge(edge.source, edge.target);
@@ -57,11 +65,14 @@ function autoLayout() {
 
   const layoutedNodes = nodes.map((node) => {
     const pos = g.node(node.id);
+    const isDiscussion = node.data.type === "discussion";
+    const halfW = isDiscussion ? 130 : 110;
+    const halfH = isDiscussion ? 100 : 50;
     return {
       ...node,
       position: {
-        x: Math.round((pos.x - 110) / 20) * 20,
-        y: Math.round((pos.y - 50) / 20) * 20,
+        x: Math.round((pos.x - halfW) / 20) * 20,
+        y: Math.round((pos.y - halfH) / 20) * 20,
       },
     };
   });

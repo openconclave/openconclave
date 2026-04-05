@@ -10,6 +10,7 @@ import { executeMerge } from "./nodes/merge";
 import { executePrompt } from "./nodes/prompt";
 import { executeFile } from "./nodes/file";
 import { executeOutput } from "./nodes/output";
+import { executeDiscussion } from "./nodes/discussion";
 
 export async function executeNode(
   runId: number,
@@ -32,18 +33,25 @@ export async function executeNode(
   let input: unknown;
   const incomingEdges = getIncomingEdges(nodeId, edges);
 
+  // Discussion nodes: participant edges are not data-flow. Exclude them so input resolution
+  // doesn't accidentally fold participant agent outputs (or undefined) into the discussion input.
+  const dataIncomingEdges =
+    node.data.type === "discussion"
+      ? incomingEdges.filter((e) => e.targetHandle !== "participants")
+      : incomingEdges;
+
   if (triggeredBy) {
     input = nodeOutputs.get(triggeredBy);
-  } else if (incomingEdges.length > 1) {
+  } else if (dataIncomingEdges.length > 1) {
     const inputs: unknown[] = [];
-    for (const e of incomingEdges) {
+    for (const e of dataIncomingEdges) {
       if (nodeOutputs.has(e.source)) {
         inputs.push(nodeOutputs.get(e.source));
       }
     }
     input = inputs.length === 1 ? inputs[0] : inputs;
-  } else if (incomingEdges.length === 1) {
-    input = nodeOutputs.get(incomingEdges[0].source);
+  } else if (dataIncomingEdges.length === 1) {
+    input = nodeOutputs.get(dataIncomingEdges[0].source);
   }
 
   emit({ type: "node:started", runId, nodeId });
@@ -80,6 +88,25 @@ export async function executeNode(
       case "output":
         output = await executeOutput(node, input, runId, nodeId, workflow.name, emit);
         break;
+      case "discussion":
+        output = await executeDiscussion(
+          runId,
+          nodeId,
+          node,
+          nodeMap,
+          edges,
+          nodeOutputs,
+          agentSessions,
+          workflowContext,
+          input,
+          emit,
+          callerCwd,
+        );
+        break;
+      default: {
+        const _exhaustive: never = node.data.type;
+        throw new Error(`Unknown node type: ${_exhaustive}`);
+      }
     }
 
     nodeOutputs.set(nodeId, output);

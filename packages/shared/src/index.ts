@@ -22,6 +22,8 @@ export type {
   WorkflowNode,
   WorkflowEdge,
   WorkflowDefinition,
+  DiscussionConfig,
+  DiscussionModeratorConfig,
 } from "./types/workflow";
 
 export type { AgentTask, Run, RunEvent } from "./types/agent";
@@ -50,6 +52,7 @@ export {
   codeConfigSchema,
   transformConfigSchema,
   outputConfigSchema,
+  discussionConfigSchema,
   workflowNodeSchema,
   workflowEdgeSchema,
   createWorkflowSchema,

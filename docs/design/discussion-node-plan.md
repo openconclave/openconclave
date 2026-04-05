@@ -1,37 +1,61 @@
-# Discussion Node — Implementation Plan
+# Discussion Node — Client Implementation Plan
 
-Based on codebase exploration of server engine, client UI, and shared types.
+Based on: Explorer analysis (verified against live code), Best Practices Research, Security Review.
 
-## Overview
+## Deviations from Original Design
 
-Add a new `discussion` node type — a "round table" where connected agents speak sequentially, each seeing the full transcript. A moderator (code or agent) controls speaker order and exit conditions.
+| # | Original | This Plan | Reason |
+|---|----------|-----------|--------|
+| VETO-1 | `filter?: string` in config/schema/inspector | **Removed entirely** | Server-side `evaluateExpression()` uses `new Function()` — analogous to CVE-2026-25049 |
+| BUG-1 | `g.setNode(node.id, { width: 260, height })` for all | **Conditional width/height per node type** | Plan applied 260px to every node, breaking all other nodes |
+| BUG-2 | autoLayout position offset hardcoded to `pos.x - 110` | **Per-node halfW/halfH offsets** | Dagre returns node center; subtracting wrong half-dimensions mispositions discussion nodes by 20/50px |
+| BUG-3 | `onDragLeave: () => setDragOver(false)` | **`[&>*]:pointer-events-none` when dragOver** | Child elements fire spurious dragleave, causing visible flicker in moderator slot |
+| SEC | `onDrop` casts `JSON.parse(raw)` with no validation | **Full type guard before `updateNodeConfig`** | Synthetic DragEvents from DevTools/XSS can inject arbitrary code into moderator config |
+| UX | Moderator configurable only via DnD | **Inspector-first with DnD as shortcut** | DnD is mouse-only; keyboard/touch users cannot configure moderator |
+| UX | All moderator fields visible at once | **Type-select collapses irrelevant sections** | Inspector is 288px; showing all code + agent fields simultaneously is cramped |
+| UX | `maxRounds` uncapped input | **`min=1 max=100` with onChange clamp** | Uncapped input creates user-confusing DoS-scale loops |
+| SEC | Tool JSON schema textarea with no error handling | **`try/catch` + inline error state** | Uncaught JSON.parse exception crashes the inspector panel |
 
 ---
 
-## Phase 1: Shared Types & Constants
+## File Change Order (dependency chain)
 
-**Goal:** Make the type system aware of the new node type.
+```
+1. shared/src/constants.ts          — NODE_TYPES extended (unblocks everything)
+2. shared/src/types/workflow.ts     — DiscussionConfig interfaces + union
+3. shared/src/schemas/workflow.schema.ts — discussionConfigSchema
+4. shared/src/index.ts              — exports
+5. client/styles/globals.css        — CSS variable
+6. client/.../nodes/base-node.tsx   — color maps
+7. client/.../nodes/discussion-node.tsx  [NEW]
+8. client/.../workflow-canvas.tsx   — registration + autoLayout fix
+9. client/.../node-palette.tsx      — palette entry + default config
+10. client/.../inspector/discussion-fields.tsx  [NEW]
+11. client/.../node-inspector.tsx   — discussion block
+```
 
-### 1.1 Add to NODE_TYPES constant
+---
 
-**File:** `packages/shared/src/constants.ts` (line 15)
+## Phase 1 — Shared Package
+
+### 1.1 `packages/shared/src/constants.ts` — line 15
 
 ```diff
 - export const NODE_TYPES = ["trigger", "agent", "condition", "transform", "merge", "prompt", "output", "file"] as const;
 + export const NODE_TYPES = ["trigger", "agent", "condition", "transform", "merge", "prompt", "output", "file", "discussion"] as const;
 ```
 
-This auto-updates the `NodeType` union in `packages/shared/src/types/workflow.ts:10` since it derives from `NODE_TYPES`.
+`NodeType` union in `types/workflow.ts:10` derives from this via `(typeof NODE_TYPES)[number]` — no other type change needed.
 
-### 1.2 Add DiscussionConfig interface
+---
 
-**File:** `packages/shared/src/types/workflow.ts` (after FileConfig, ~line 78)
+### 1.2 `packages/shared/src/types/workflow.ts` — insert after `FileConfig` (line 78), before `ToolConfig`
 
 ```typescript
 export interface DiscussionModeratorConfig {
-  /** "code" = deterministic script, "agent" = LLM-driven */
+  /** "code" = deterministic script, "agent" = LLM-driven moderator */
   type: "code" | "agent";
-  /** Embedded node data (stored inline, not as a separate canvas node) */
+  /** Embedded node data — stored inline, NOT as a separate canvas node */
   node: {
     label: string;
     type: "transform" | "agent";
@@ -42,24 +66,25 @@ export interface DiscussionModeratorConfig {
 export interface DiscussionToolSchema {
   name: string;
   description: string;
+  /** JSON Schema object for structured participant output */
   schema: Record<string, unknown>;
 }
 
 export interface DiscussionConfig {
   /** Prompt template for participants. Variables: {{agentName}}, {{input}}, {{transcript}}, {{round}} */
   prompt: string;
-  /** Embedded moderator node (code or agent) */
+  /** Embedded moderator node (code or agent). Optional — defaults to round-robin with maxRounds cap. */
   moderator?: DiscussionModeratorConfig;
-  /** Filter expression to select which connected agents participate */
-  filter?: string;
   /** Optional structured output tool for participants */
   tool?: DiscussionToolSchema;
-  /** Safety cap — always stops here */
+  /** Safety cap — always terminates here regardless of moderator */
   maxRounds: number;
 }
 ```
 
-Add to `WorkflowNodeConfig` union (line 92-100):
+> **NOTE:** `filter?: string` from the original plan is **intentionally absent**. Do not add it.
+
+Update `WorkflowNodeConfig` union (line 100):
 
 ```diff
   export type WorkflowNodeConfig =
@@ -68,11 +93,9 @@ Add to `WorkflowNodeConfig` union (line 92-100):
 +   | MergeConfig | PromptConfig | OutputConfig | FileConfig | DiscussionConfig;
 ```
 
-**Key design decision:** The moderator is stored **inline** inside DiscussionConfig as embedded node data — not as a separate node in the workflow's `nodes[]` array. This avoids the complexity of "child nodes" in the graph walker. The moderator is invisible to the graph — only the discussion executor knows about it.
+---
 
-### 1.3 Add Zod validation schema
-
-**File:** `packages/shared/src/schemas/workflow.schema.ts` (after existing schemas)
+### 1.3 `packages/shared/src/schemas/workflow.schema.ts` — insert after `outputConfigSchema` (after line 53), before `workflowNodeSchema`
 
 ```typescript
 export const discussionConfigSchema = z.object({
@@ -85,358 +108,857 @@ export const discussionConfigSchema = z.object({
       config: z.record(z.unknown()),
     }),
   }).optional(),
-  filter: z.string().optional(),
   tool: z.object({
     name: z.string(),
     description: z.string(),
     schema: z.record(z.unknown()),
   }).optional(),
-  maxRounds: z.number().int().positive(),
+  maxRounds: z.number().int().min(1).max(100),
 });
 ```
 
-### 1.4 Export new types
-
-**File:** `packages/shared/src/index.ts` — add exports for `DiscussionConfig`, `DiscussionModeratorConfig`.
+> **NOTE:** `filter: z.string().optional()` is **intentionally absent**.
 
 ---
 
-## Phase 2: Server — Template Renderer
+### 1.4 `packages/shared/src/index.ts` — add to exports
 
-**Goal:** Simple mustache-style template engine used by the discussion executor.
-
-### 2.1 Create template utility
-
-**New file:** `packages/server/src/lib/template.ts`
-
+In the type exports block (line 3–25), add after `FileConfig`:
 ```typescript
-/**
- * Simple {{variable.path}} template renderer.
- * Supports dot notation: {{input.topic}}, {{agentName}}
- * Special: {{transcript}} renders the full transcript string.
- */
-export function renderTemplate(
-  template: string,
-  context: Record<string, unknown>,
-): string {
-  return template.replace(/\{\{(\w+(?:\.\w+)*)\}\}/g, (_match, path: string) => {
-    let value: unknown = context;
-    for (const segment of path.split(".")) {
-      if (value && typeof value === "object") {
-        value = (value as Record<string, unknown>)[segment];
-      } else {
-        return "";
-      }
-    }
-    if (typeof value === "object") return JSON.stringify(value);
-    return String(value ?? "");
-  });
-}
+  FileConfig,
+  DiscussionConfig,
+  DiscussionModeratorConfig,
+  DiscussionToolSchema,
 ```
 
-No external dependencies. Reuses the pattern from existing code nodes that stringify input.
+In the schema exports block (line 46–57), add after `outputConfigSchema`:
+```typescript
+  outputConfigSchema,
+  discussionConfigSchema,
+```
 
 ---
 
-## Phase 3: Server — Discussion Executor
+## Phase 2 — CSS Theme Variable
 
-**Goal:** The core execution logic for the discussion node.
-
-### 3.1 Create discussion executor
-
-**New file:** `packages/server/src/engine/nodes/discussion.ts`
-
-This is the largest new file. Key responsibilities:
-
-1. **Resolve participants** from incoming edges (filter to agent nodes only)
-2. **Apply filter expression** if configured (reuse `evaluateExpression` from `lib/expression.ts`)
-3. **Run the discussion loop:**
-   - For each round, determine speaker order
-   - For each speaker: render prompt template → invoke agent → append to transcript
-   - After each speech (agent moderator) or each round (code moderator): evaluate moderator
-4. **Invoke moderator:**
-   - Code moderator: call `executeCode()` with `{ responses, transcript, round, input }` as stdin
-   - Agent moderator: call `invokeWithTools()` with transcript + the `moderate` tool schema
-5. **Parse moderator action:** `call_next`, `call_specific`, or `end_discussion`
-6. **Build output:** `{ responses, transcript, moderatorSummary, rounds, exitReason, input }`
-
-**Dependencies (all existing):**
-- `executeCode()` from `./code.ts` — for code moderator execution
-- `invokeWithTools()` from `../../agent/llm-call.ts` — for agent moderator + structured participant output
-- `executeAgent()` from `../agent-executor.ts` — for participant agents (freeform mode)
-- `evaluateExpression()` from `../../lib/expression.ts` — for filter expressions
-- `getIncomingEdges()` from `../graph.ts` — to find participant agents
-- `renderTemplate()` from `../../lib/template.ts` — new, from Phase 2
-
-**Function signature** (must match what `node-executor.ts` switch statement calls):
-
-```typescript
-export async function executeDiscussion(
-  runId: number,
-  nodeId: string,
-  node: WorkflowNode,
-  nodeMap: Map<string, WorkflowNode>,
-  edges: WorkflowEdge[],
-  nodeOutputs: Map<string, unknown>,
-  agentSessions: Map<string, string>,
-  workflowContext: string | null,
-  input: unknown,
-  emit: (event: RunEvent) => void,
-  callerCwd?: string,
-): Promise<unknown>
-```
-
-**Events emitted during execution:**
-- `discussion:started` — { participants, moderatorType, maxRounds }
-- `discussion:speech` — { agentName, agentId, round, message }
-- `discussion:moderator` — { action, nextAgent?, summary? }
-- `discussion:completed` — { rounds, exitReason, responseCount }
-
-### 3.2 Register in node executor
-
-**File:** `packages/server/src/engine/node-executor.ts` (line 54-82 switch statement)
-
-```typescript
-import { executeDiscussion } from "./nodes/discussion";
-
-// In the switch:
-case "discussion":
-  output = await executeDiscussion(
-    runId, nodeId, node, nodeMap, edges,
-    nodeOutputs, agentSessions, workflowContext,
-    input, emit, callerCwd,
-  );
-  break;
-```
-
-### 3.3 Adjust graph walker (if needed)
-
-**File:** `packages/server/src/engine/graph-walker.ts`
-
-The discussion node consumes incoming agent edges as "participants", not as data flow. The graph walker currently resolves input from parent node outputs (lines 31-47 in node-executor.ts). 
-
-**Approach:** The discussion executor receives `input` from the normal data-flow edge (e.g., from a trigger or transform). It then separately queries `getIncomingEdges()` to find connected agent nodes. Agent nodes that are participants do NOT need to have executed first — the discussion node invokes them internally.
-
-This means participant agent edges should be treated as **metadata edges** (declaring participation), not data-flow edges. The graph walker needs a small change: when determining if a node is ready to execute, skip edges from agent nodes to discussion nodes.
-
-**Alternative (simpler):** Participants connect via a dedicated handle (e.g., `participants` handle on the left side). Data flows in through the standard top handle. The graph walker already only looks at edges matching specific handles for condition nodes — same pattern.
-
----
-
-## Phase 4: Client — Theme & Base Node Colors
-
-**Goal:** Visual identity for the discussion node.
-
-### 4.1 Add CSS color variable
-
-**File:** `packages/client/src/styles/globals.css` (line 36, after node-tool)
+### `packages/client/src/styles/globals.css` — insert at line 37 (between `--color-node-tool` and `--radius-lg`)
 
 ```css
---color-node-discussion: oklch(0.65 0.15 250);
+  --color-node-tool: oklch(0.65 0.18 200);
+  --color-node-discussion: oklch(0.65 0.15 250);    /* ← INSERT HERE */
+
+  --radius-lg: 0.75rem;
 ```
 
-Blue-purple, distinct from existing node colors.
-
-### 4.2 Add to BaseNode color maps
-
-**File:** `packages/client/src/components/editor/nodes/base-node.tsx` (lines 6-34)
-
-Add `discussion` entry to each of the three maps:
-- `nodeBorderColors`: `"discussion": "border-node-discussion/60"`
-- `nodeAccentColors`: `"discussion": "bg-node-discussion"`
-- `nodeGlowColors`: `"discussion": "shadow-[0_0_15px_-3px] shadow-node-discussion/20"`
+Blue-purple `hue=250` — visually distinct from all existing nodes (trigger=green, agent=gold, condition=amber, transform=violet-300, output=red-orange, merge/info=blue-230, knowledge=gold-55, tool=cyan-200).
 
 ---
 
-## Phase 5: Client — Discussion Node Component
+## Phase 3 — BaseNode Color Maps
 
-**Goal:** The canvas node with moderator drop zone.
+### `packages/client/src/components/editor/nodes/base-node.tsx` — lines 6–34
 
-### 5.1 Create discussion node component
-
-**New file:** `packages/client/src/components/editor/nodes/discussion-node.tsx`
-
-**Does NOT extend BaseNode** — custom layout for the larger size and moderator slot. But reuses BaseNode's color maps and handle patterns.
-
-Key elements:
-- **Size:** `w-[260px]` (wider than standard 220px), height auto but minimum ~180px
-- **Header:** icon (Users from lucide) + label + participant count subtitle
-- **Moderator slot:** bordered zone in the center
-  - Empty: dashed border, "Drop moderator here" text
-  - Filled (code): small chip with code icon + label + exitWhen preview
-  - Filled (agent): small chip with agent icon + label
-  - x button to clear
-- **Footer:** max rounds badge
-- **Handles:**
-  - Top: target handle (data input from upstream)
-  - Bottom: source handle (output to downstream)
-  - Left: target handle labeled "participants" (agent connections)
-
-**Drag-and-drop for moderator slot:**
-
-The moderator drop zone accepts `application/openconclave-node` with type "agent" or "transform". When dropped:
-1. Parse the dragged data (type, label, default config)
-2. Store it inline in `config.moderator.node` (NOT as a separate canvas node)
-3. Update via `updateNodeConfig(nodeId, { moderator: { type, node: { label, type, config } } })`
-
-This is the same pattern as agent nodes accepting tool drops (`application/openconclave-tool`), but for nodes instead.
-
-### 5.2 Register in canvas
-
-**File:** `packages/client/src/components/editor/workflow-canvas.tsx` (lines 28-37)
+Add `"discussion"` entry to all three maps. The `"file"` node is absent from these maps (pre-existing gap — do not fix):
 
 ```typescript
-import { DiscussionNode } from "./nodes/discussion-node";
+const nodeBorderColors: Record<string, string> = {
+  // ...existing 7 entries...
+  discussion: "border-node-discussion/60",   // ← ADD
+};
 
-const nodeTypes = {
-  // ...existing...
-  discussion: DiscussionNode,
+const nodeAccentColors: Record<string, string> = {
+  // ...existing 7 entries...
+  discussion: "bg-node-discussion",           // ← ADD
+};
+
+const nodeGlowColors: Record<string, string> = {
+  // ...existing 7 entries...
+  discussion: "shadow-[0_0_15px_-3px] shadow-node-discussion/20",  // ← ADD
 };
 ```
 
-Update auto-layout to use taller height for discussion nodes (lines 50, 64):
-
-```typescript
-const height = node.data.type === "discussion" ? 200 : 100;
-g.setNode(node.id, { width: 260, height });
-```
-
 ---
 
-## Phase 6: Client — Node Palette & Inspector
+## Phase 4 — Discussion Canvas Node (NEW FILE)
 
-### 6.1 Add to palette
+### `packages/client/src/components/editor/nodes/discussion-node.tsx`
 
-**File:** `packages/client/src/components/editor/node-palette.tsx`
+Full implementation. Does **not** extend `BaseNode` — the hardcoded `w-[220px]` at `base-node.tsx:70` would need override. Replicates the shell instead.
 
-Add to `paletteNodes` array (line 11-26):
-```typescript
-{
-  type: "discussion",
-  label: "Discussion",
-  icon: Users,
-  color: "bg-node-discussion",
-  description: "Multi-agent round table",
+**Critical constraints respected:**
+- All 3 handles are `type="source"` (codebase convention — `ConnectionMode.Loose` handles any-to-any)
+- `e.stopPropagation()` in both `onDragOver` and `onDrop` prevents canvas from also firing
+- Full type guard before `updateNodeConfig` (VETO-2 fix)
+- `[&>*]:pointer-events-none` while `dragOver` is true (dragleave flicker fix)
+
+```tsx
+import { useCallback, useState } from "react";
+import { Handle, Position, type NodeProps } from "@xyflow/react";
+import { Users, Code, Cpu, X } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { useWorkflowStore } from "@/stores/workflow-store";
+import { useNodeData } from "@/hooks/use-node-data";
+import type { DiscussionConfig, AgentConfig, CodeConfig } from "@openconclave/shared";
+
+const handleBase = "!h-3 !w-3 !rounded-full !border-2 !bg-card transition-colors";
+const topBottomHandle = "!border-[oklch(0.65_0.15_250)] hover:!bg-[oklch(0.65_0.15_250/0.3)]";
+const leftHandle = "!border-[oklch(0.65_0.18_260)] hover:!bg-[oklch(0.65_0.18_260/0.3)]";
+
+export function DiscussionNode(props: NodeProps) {
+  const data = useNodeData(props);
+  const config = data.config as DiscussionConfig;
+  const updateNodeConfig = useWorkflowStore((s) => s.updateNodeConfig);
+  const setSelectedNode = useWorkflowStore((s) => s.setSelectedNode);
+  const activeNodeIds = useWorkflowStore((s) => s.activeNodeIds);
+  const participantCount = useWorkflowStore(
+    useCallback((s) => s.edges.filter((e) => e.target === props.id && e.targetHandle === "participants").length, [props.id])
+  );
+
+  const isActive = activeNodeIds.has(props.id);
+  const [dragOver, setDragOver] = useState(false);
+
+  const onDragOver = useCallback((e: React.DragEvent) => {
+    if (e.dataTransfer.types.includes("application/openconclave-node")) {
+      e.preventDefault();
+      e.stopPropagation();             // prevent canvas from handling this drop
+      e.dataTransfer.dropEffect = "copy";
+      setDragOver(true);
+    }
+  }, []);
+
+  const onDragLeave = useCallback(() => {
+    setDragOver(false);
+  }, []);
+
+  const onDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();             // prevent canvas from creating a new node
+      setDragOver(false);
+
+      const raw = e.dataTransfer.getData("application/openconclave-node");
+      if (!raw) return;
+
+      // ── TYPE GUARD (VETO-2) ────────────────────────────────────
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        return; // malformed JSON — reject silently
+      }
+
+      if (
+        typeof parsed !== "object" || parsed === null ||
+        !("type" in parsed) || !("label" in parsed) || !("config" in parsed) ||
+        (parsed.type !== "agent" && parsed.type !== "transform") ||
+        typeof parsed.label !== "string" || !parsed.label.trim() ||
+        typeof parsed.config !== "object" || parsed.config === null
+      ) {
+        return; // wrong shape or wrong node type
+      }
+
+      const { type, label, config: droppedConfig } = parsed as {
+        type: "agent" | "transform";
+        label: string;
+        config: AgentConfig | CodeConfig;
+      };
+
+      updateNodeConfig(props.id, {
+        moderator: {
+          type: type === "transform" ? "code" : "agent",
+          node: { label, type, config: droppedConfig },
+        },
+      });
+    },
+    [props.id, updateNodeConfig]
+  );
+
+  const clearModerator = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      updateNodeConfig(props.id, { moderator: undefined });
+    },
+    [props.id, updateNodeConfig]
+  );
+
+  const subtitle = participantCount > 0
+    ? `${participantCount} agent${participantCount === 1 ? "" : "s"}`
+    : "no agents connected";
+
+  return (
+    <div
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      className={cn(
+        // [&>*]:pointer-events-none while dragging prevents child dragleave flicker (BUG-3 fix)
+        dragOver && "[&>*]:pointer-events-none"
+      )}
+    >
+      <div
+        className={cn(
+          "w-[260px] rounded-xl border bg-gradient-to-b from-card to-card/80 transition-all duration-200 cursor-pointer",
+          "border-node-discussion/60",
+          "shadow-[0_0_15px_-3px] shadow-node-discussion/20",
+          props.selected && "!border-primary ring-1 ring-primary/30 ring-offset-1 ring-offset-background",
+          isActive && "[animation:node-running_1.5s_ease-in-out_infinite] !border-warning"
+        )}
+        onClick={() => setSelectedNode(props.id)}
+      >
+        {/* Top handle — data input */}
+        <Handle
+          type="source"
+          id="top"
+          position={Position.Top}
+          style={{ left: "50%" }}
+          className={cn(handleBase, topBottomHandle)}
+        />
+
+        {/* Left handle — participants */}
+        <Handle
+          type="source"
+          id="participants"
+          position={Position.Left}
+          style={{ top: "50%" }}
+          className={cn(handleBase, leftHandle)}
+        >
+          <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[9px] text-muted-foreground/60 whitespace-nowrap font-medium select-none pointer-events-none">
+            agents
+          </span>
+        </Handle>
+
+        {/* Header */}
+        <div className="flex items-center gap-2.5 px-3 py-2.5">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg shrink-0 bg-node-discussion">
+            <Users className="h-4 w-4 text-white" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <span className="text-sm font-semibold truncate block">{data.label}</span>
+            <span className="text-[10px] text-muted-foreground/70 uppercase tracking-wider">
+              {subtitle}
+            </span>
+          </div>
+        </div>
+
+        {/* Moderator slot */}
+        <div className="border-t border-border/40 px-3 py-2 text-xs text-muted-foreground">
+          {config.moderator ? (
+            <div className="flex items-center gap-1.5">
+              {config.moderator.type === "code" ? (
+                <Code className="h-3 w-3 shrink-0 text-node-transform" />
+              ) : (
+                <Cpu className="h-3 w-3 shrink-0 text-node-agent" />
+              )}
+              <span className="truncate flex-1 text-[10px] font-medium text-foreground/80">
+                {config.moderator.node.label}
+              </span>
+              <span className="text-[9px] uppercase tracking-wider text-muted-foreground/60 shrink-0">
+                {config.moderator.type}
+              </span>
+              <button
+                onClick={clearModerator}
+                className="ml-0.5 rounded-full hover:bg-white/10 p-0.5 shrink-0"
+                title="Remove moderator"
+              >
+                <X className="h-2.5 w-2.5" />
+              </button>
+            </div>
+          ) : dragOver ? (
+            <div className="rounded border border-dashed border-node-discussion/60 bg-node-discussion/10 px-2 py-1.5 text-[9px] text-node-discussion text-center">
+              Drop as moderator
+            </div>
+          ) : (
+            <p className="text-[10px] text-muted-foreground/50 text-center py-0.5">
+              no moderator · round-robin
+            </p>
+          )}
+        </div>
+
+        {/* Footer — max rounds badge */}
+        <div className="border-t border-border/40 px-3 py-1.5 flex items-center justify-end">
+          <span className="text-[9px] text-muted-foreground/50 uppercase tracking-wider">
+            max {config.maxRounds ?? 3} rounds
+          </span>
+        </div>
+
+        {/* Bottom handle — data output */}
+        <Handle
+          type="source"
+          id="bottom"
+          position={Position.Bottom}
+          style={{ left: "50%" }}
+          className={cn(handleBase, topBottomHandle)}
+        />
+      </div>
+    </div>
+  );
 }
 ```
 
-Add default config in `getDefaultConfig()` (lines 28-39):
+---
+
+## Phase 5 — Workflow Canvas Registration
+
+### `packages/client/src/components/editor/workflow-canvas.tsx`
+
+**5.1 Import** (top of file, after `FileNode` import):
 ```typescript
-case "discussion":
+import { DiscussionNode } from "./nodes/discussion-node";
+```
+
+**5.2 `nodeTypes` map** (line 28–37) — add one entry:
+```typescript
+const nodeTypes = {
+  trigger: TriggerNode,
+  agent: AgentNode,
+  condition: ConditionNode,
+  transform: TransformNode,
+  merge: MergeNode,
+  prompt: PromptNode,
+  output: OutputNode,
+  file: FileNode,
+  discussion: DiscussionNode,   // ← ADD
+};
+```
+
+`nodeTypes` is a module-level `const` — do NOT move it inside the component. This is correct per @xyflow/react performance requirements.
+
+**5.3 `autoLayout` function** — replace lines 49–66 (the `for` loop + `nodes.map`) with the version below. This fixes **BUG-1** (wrong dimensions for dagre) AND **BUG-2** (wrong half-offset in position calculation):
+
+```typescript
+  for (const node of nodes) {
+    const isDiscussion = node.data.type === "discussion";
+    g.setNode(node.id, {
+      width: isDiscussion ? 260 : 220,
+      height: isDiscussion ? 200 : 100,
+    });
+  }
+  for (const edge of edges) {
+    g.setEdge(edge.source, edge.target);
+  }
+
+  dagre.layout(g);
+
+  const layoutedNodes = nodes.map((node) => {
+    const isDiscussion = node.data.type === "discussion";
+    const halfW = isDiscussion ? 130 : 110;  // half of 260 vs 220
+    const halfH = isDiscussion ? 100 : 50;   // half of 200 vs 100
+    const pos = g.node(node.id);
+    return {
+      ...node,
+      position: {
+        x: Math.round((pos.x - halfW) / 20) * 20,
+        y: Math.round((pos.y - halfH) / 20) * 20,
+      },
+    };
+  });
+```
+
+---
+
+## Phase 6 — Node Palette
+
+### `packages/client/src/components/editor/node-palette.tsx`
+
+**6.1 Import** — add `Users` to the lucide-react import at line 2:
+```typescript
+import {
+  Zap, Cpu, GitFork, Code, Combine, MessageCircleQuestion, Send, FileText, BookOpen,
+  Terminal, FileEdit, FileSearch, FolderSearch, Search, Globe, Server, ChevronDown, ChevronRight,
+  Users,   // ← ADD
+} from "lucide-react";
+```
+
+**6.2 `paletteNodes` array** (line 25) — append after the `file` entry:
+```typescript
+  { type: "file", label: "File", icon: FileText, color: "bg-info", description: "Read file as input" },
+  { type: "discussion", label: "Discussion", icon: Users, color: "bg-node-discussion", description: "Multi-agent round table" },  // ← ADD
+```
+
+**6.3 `getDefaultConfig` function** (line 28–38) — add case before the closing `}`:
+```typescript
+function getDefaultConfig(type: NodeType) {
+  switch (type) {
+    case "trigger":    return { type: "manual" };
+    case "agent":      return { model: "sonnet" };
+    case "condition":  return { expression: "" };
+    case "transform":  return { runtime: "python", code: "" };
+    case "merge":      return {};
+    case "prompt":     return { description: "Ask a question if needed" };
+    case "output":     return { type: "log", config: {} };
+    case "file":       return { path: "" };
+    case "discussion": return {              // ← ADD
+      prompt: "{{transcript}}\n\nYou are {{agentName}}. Respond to the discussion so far.",
+      maxRounds: 3,
+    };
+  }
+}
+```
+
+---
+
+## Phase 7 — Discussion Inspector Fields (NEW FILE)
+
+### `packages/client/src/components/editor/inspector/discussion-fields.tsx`
+
+Design decisions:
+- **Inspector-first**: Full moderator configuration available via select, not DnD-only
+- **Moderator type select**: "none" | "code" | "agent" — switching type resets config to a sensible default
+- **Code moderator**: runtime select + 6-row code textarea (not 10 — panel is 288px)
+- **Agent moderator**: engine select + system prompt textarea — minimal, no Ollama status fetching
+- **maxRounds**: clamped `min=1 max=100` (SEC-NEW-1 fix)
+- **Tool JSON schema**: `try/catch` + inline error display (SEC-NEW-2 fix)
+- **Shallow merge**: all nested moderator updates use explicit spread chains
+
+```tsx
+import { useState } from "react";
+import { ChevronDown, ChevronRight } from "lucide-react";
+import { useWorkflowStore } from "@/stores/workflow-store";
+import { cn } from "@/lib/utils";
+import type { DiscussionConfig, DiscussionModeratorConfig, CodeConfig, AgentConfig } from "@openconclave/shared";
+import { Field, INPUT_CLASS, MONO_INPUT_CLASS } from "./shared";
+
+const CODE_RUNTIMES = ["python", "node", "bash"] as const;
+
+const MODERATOR_CODE_PLACEHOLDER =
+  `# Input: { responses, transcript, round, input } via stdin\n` +
+  `# Output: { action: "call_next" | "call_specific" | "end_discussion", nextAgent?, summary? }\n` +
+  `import sys, json\ndata = json.load(sys.stdin)\nprint(json.dumps({ "action": "end_discussion", "summary": "done" }))`;
+
+function defaultModeratorConfig(type: "code" | "agent"): DiscussionModeratorConfig {
+  if (type === "code") {
+    return {
+      type: "code",
+      node: {
+        label: "Moderator",
+        type: "transform",
+        config: { runtime: "python", code: "" } satisfies CodeConfig,
+      },
+    };
+  }
   return {
-    prompt: "{{transcript}}\n\nYou are {{agentName}}. Share your perspective.",
-    maxRounds: 3,
+    type: "agent",
+    node: {
+      label: "Moderator",
+      type: "agent",
+      config: { engine: "claude", systemPrompt: "You are a discussion moderator. Decide who speaks next or end the discussion." } satisfies AgentConfig,
+    },
   };
+}
+
+interface DiscussionFieldsProps {
+  nodeId: string;
+  config: DiscussionConfig;
+}
+
+export function DiscussionFields({ nodeId, config }: DiscussionFieldsProps) {
+  const updateNodeConfig = useWorkflowStore((s) => s.updateNodeConfig);
+  const [toolOpen, setToolOpen] = useState(false);
+  const [schemaRaw, setSchemaRaw] = useState<string>(
+    config.tool?.schema ? JSON.stringify(config.tool.schema, null, 2) : ""
+  );
+  const [schemaError, setSchemaError] = useState<string | null>(null);
+
+  // Helper: full config update (top-level fields only — Zustand does shallow merge)
+  const update = (c: Partial<DiscussionConfig>) => updateNodeConfig(nodeId, c);
+
+  // ── Moderator type select ──────────────────────────────────────
+  const moderatorType = config.moderator?.type ?? "none";
+
+  const handleModeratorTypeChange = (newType: string) => {
+    if (newType === "none") {
+      update({ moderator: undefined });
+    } else if (newType === "code" || newType === "agent") {
+      // Preserve existing if same type, reset if switching
+      if (config.moderator?.type === newType) return;
+      update({ moderator: defaultModeratorConfig(newType) });
+    }
+  };
+
+  // ── Code moderator field updaters (shallow-merge-safe) ─────────
+  const updateCodeRuntime = (runtime: string) => {
+    if (!config.moderator) return;
+    update({
+      moderator: {
+        ...config.moderator,
+        node: {
+          ...config.moderator.node,
+          config: { ...(config.moderator.node.config as CodeConfig), runtime: runtime as CodeConfig["runtime"] },
+        },
+      },
+    });
+  };
+
+  const updateCodeContent = (code: string) => {
+    if (!config.moderator) return;
+    update({
+      moderator: {
+        ...config.moderator,
+        node: {
+          ...config.moderator.node,
+          config: { ...(config.moderator.node.config as CodeConfig), code },
+        },
+      },
+    });
+  };
+
+  // ── Agent moderator field updaters ─────────────────────────────
+  const updateAgentEngine = (engine: string) => {
+    if (!config.moderator) return;
+    update({
+      moderator: {
+        ...config.moderator,
+        node: {
+          ...config.moderator.node,
+          config: { ...(config.moderator.node.config as AgentConfig), engine: engine as AgentConfig["engine"] },
+        },
+      },
+    });
+  };
+
+  const updateAgentSystemPrompt = (systemPrompt: string) => {
+    if (!config.moderator) return;
+    update({
+      moderator: {
+        ...config.moderator,
+        node: {
+          ...config.moderator.node,
+          config: { ...(config.moderator.node.config as AgentConfig), systemPrompt },
+        },
+      },
+    });
+  };
+
+  // ── Tool section handlers ──────────────────────────────────────
+  const updateToolName = (name: string) => {
+    update({ tool: { ...(config.tool ?? { description: "", schema: {} }), name } });
+  };
+  const updateToolDescription = (description: string) => {
+    update({ tool: { ...(config.tool ?? { name: "", schema: {} }), description } });
+  };
+  const handleSchemaBlur = () => {
+    if (!schemaRaw.trim()) {
+      setSchemaError(null);
+      update({ tool: config.tool ? { ...config.tool, schema: {} } : undefined });
+      return;
+    }
+    try {
+      const schema = JSON.parse(schemaRaw) as Record<string, unknown>;
+      setSchemaError(null);
+      update({ tool: { ...(config.tool ?? { name: "", description: "" }), schema } });
+    } catch {
+      setSchemaError("Invalid JSON — schema not saved");
+    }
+  };
+
+  const codeConfig = config.moderator?.node.config as CodeConfig | undefined;
+  const agentConfig = config.moderator?.node.config as AgentConfig | undefined;
+  const ToolChevron = toolOpen ? ChevronDown : ChevronRight;
+
+  return (
+    <>
+      {/* Prompt Template */}
+      <Field label="Participant Prompt">
+        <textarea
+          value={config.prompt ?? ""}
+          onChange={(e) => update({ prompt: e.target.value })}
+          rows={5}
+          spellCheck={false}
+          className={`${MONO_INPUT_CLASS} resize-none text-xs leading-relaxed`}
+        />
+      </Field>
+      <p className="text-[10px] text-muted-foreground px-1">
+        Variables: <code className="font-mono">{"{{agentName}}"}</code>,{" "}
+        <code className="font-mono">{"{{transcript}}"}</code>,{" "}
+        <code className="font-mono">{"{{input}}"}</code>,{" "}
+        <code className="font-mono">{"{{round}}"}</code>
+      </p>
+
+      {/* Max Rounds — SEC-NEW-1: clamped min=1 max=100 */}
+      <Field label="Max Rounds">
+        <input
+          type="number"
+          min={1}
+          max={100}
+          value={config.maxRounds ?? 3}
+          onChange={(e) => {
+            const val = Math.min(100, Math.max(1, parseInt(e.target.value) || 1));
+            update({ maxRounds: val });
+          }}
+          className={INPUT_CLASS}
+        />
+      </Field>
+      <p className="text-[10px] text-muted-foreground px-1">
+        Hard cap. Discussion always stops at this round even if the moderator would continue.
+      </p>
+
+      {/* Moderator Section */}
+      <div className="border-t border-border/40 pt-3 mt-1">
+        <p className="text-xs font-medium mb-2">Moderator</p>
+
+        <Field label="Type">
+          <select
+            value={moderatorType}
+            onChange={(e) => handleModeratorTypeChange(e.target.value)}
+            className={INPUT_CLASS}
+          >
+            <option value="none">None (round-robin)</option>
+            <option value="code">Code script</option>
+            <option value="agent">Agent</option>
+          </select>
+        </Field>
+
+        {moderatorType === "none" && (
+          <p className="text-[10px] text-muted-foreground px-1 mt-1">
+            Each agent speaks once per round in connection order. You can also drag an Agent
+            or Code node from the palette directly onto the Discussion node on the canvas.
+          </p>
+        )}
+
+        {moderatorType === "code" && codeConfig && (
+          <>
+            <Field label="Runtime">
+              <select
+                value={codeConfig.runtime ?? "python"}
+                onChange={(e) => updateCodeRuntime(e.target.value)}
+                className={INPUT_CLASS}
+              >
+                {CODE_RUNTIMES.map((r) => (
+                  <option key={r} value={r}>{r === "node" ? "Node.js" : r.charAt(0).toUpperCase() + r.slice(1)}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Code">
+              <textarea
+                value={codeConfig.code ?? ""}
+                onChange={(e) => updateCodeContent(e.target.value)}
+                placeholder={MODERATOR_CODE_PLACEHOLDER}
+                rows={6}
+                spellCheck={false}
+                className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs font-mono resize-y leading-relaxed"
+              />
+            </Field>
+            <p className="text-[10px] text-muted-foreground px-1">
+              Receives <code className="font-mono">{"{ responses, transcript, round, input }"}</code> via
+              stdin. Must output <code className="font-mono">{"{ action, nextAgent?, summary? }"}</code>.
+            </p>
+          </>
+        )}
+
+        {moderatorType === "agent" && agentConfig && (
+          <>
+            <Field label="Engine">
+              <select
+                value={agentConfig.engine ?? "claude"}
+                onChange={(e) => updateAgentEngine(e.target.value)}
+                className={INPUT_CLASS}
+              >
+                <option value="claude">Claude Code</option>
+                <option value="ollama">Ollama (local)</option>
+                <option value="openai">OpenAI-compatible</option>
+              </select>
+            </Field>
+            <Field label="Instructions">
+              <textarea
+                value={agentConfig.systemPrompt ?? ""}
+                onChange={(e) => updateAgentSystemPrompt(e.target.value)}
+                rows={4}
+                className={`${INPUT_CLASS} resize-none`}
+                placeholder="You are a discussion moderator. Choose who speaks next or end the discussion by calling the moderate tool."
+              />
+            </Field>
+            <p className="text-[10px] text-muted-foreground px-1">
+              The moderator agent calls a <code className="font-mono">moderate</code> tool to
+              control flow (<code className="font-mono">call_next</code>,{" "}
+              <code className="font-mono">call_specific</code>,{" "}
+              <code className="font-mono">end_discussion</code>).
+            </p>
+          </>
+        )}
+      </div>
+
+      {/* Structured Output Tool — collapsible advanced section */}
+      <div className="border-t border-border/40 pt-3 mt-1">
+        <button
+          onClick={() => setToolOpen(!toolOpen)}
+          className="flex w-full items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <ToolChevron className="h-3.5 w-3.5 shrink-0" />
+          Structured Output Tool
+          <span className="ml-auto text-[10px] text-muted-foreground/50">optional</span>
+        </button>
+
+        {toolOpen && (
+          <div className="space-y-3 mt-3">
+            <Field label="Tool Name">
+              <input
+                type="text"
+                value={config.tool?.name ?? ""}
+                onChange={(e) => updateToolName(e.target.value)}
+                placeholder="e.g. respond"
+                className={INPUT_CLASS}
+              />
+            </Field>
+            <Field label="Description">
+              <input
+                type="text"
+                value={config.tool?.description ?? ""}
+                onChange={(e) => updateToolDescription(e.target.value)}
+                placeholder="Tool description for the agent"
+                className={INPUT_CLASS}
+              />
+            </Field>
+            <Field label="JSON Schema">
+              <textarea
+                value={schemaRaw}
+                onChange={(e) => {
+                  setSchemaRaw(e.target.value);
+                  setSchemaError(null); // clear error while typing
+                }}
+                onBlur={handleSchemaBlur}
+                rows={5}
+                spellCheck={false}
+                placeholder='{\n  "type": "object",\n  "properties": { "response": { "type": "string" } }\n}'
+                className={cn(
+                  "w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs font-mono resize-y leading-relaxed",
+                  schemaError && "border-destructive"
+                )}
+              />
+            </Field>
+            {/* SEC-NEW-2: inline JSON parse error display */}
+            {schemaError && (
+              <p className="text-[10px] text-destructive px-1">{schemaError}</p>
+            )}
+            <p className="text-[10px] text-muted-foreground px-1">
+              When set, agents use this tool to submit structured output instead of plain text.
+              Validated on blur — schema is not saved until JSON is valid.
+            </p>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
 ```
 
-### 6.2 Create inspector fields
+---
 
-**New file:** `packages/client/src/components/editor/inspector/discussion-fields.tsx`
+## Phase 8 — Node Inspector Registration
 
-Sections:
-1. **Prompt template** — textarea (6 rows, monospace), with helper text listing available variables
-2. **Filter** — optional text input, monospace, placeholder: `input.alive[agentId] === true`
-3. **Max rounds** — number input
-4. **Moderator section** — divider, then:
-   - If moderator set: chip with label + type badge + x button
-   - If code moderator: inline code editor (same textarea as code-fields.tsx) + runtime dropdown
-   - If agent moderator: inline agent config (engine, model, system prompt — reuse agent-fields patterns)
-   - If empty: helper text "Drag an Agent or Code node onto this discussion node"
-5. **Structured output tool** (collapsible, advanced) — tool name, description, JSON schema editor
+### `packages/client/src/components/editor/node-inspector.tsx`
 
-### 6.3 Register in inspector
-
-**File:** `packages/client/src/components/editor/node-inspector.tsx` (line 58-84)
+**8.1 Add to imports** — extend the `@openconclave/shared` import block (lines 3–11) and add component import:
 
 ```typescript
-import { DiscussionFields } from "./inspector/discussion-fields";
-import type { DiscussionConfig } from "@openconclave/shared";
+import type {
+  WorkflowNodeData,
+  AgentConfig,
+  TriggerConfig,
+  ConditionConfig,
+  CodeConfig,
+  PromptConfig,
+  OutputConfig,
+  DiscussionConfig,   // ← ADD
+} from "@openconclave/shared";
+```
 
-// In the conditional rendering:
-{data.type === "discussion" && (
-  <DiscussionFields nodeId={selectedNode.id} config={data.config as DiscussionConfig} />
-)}
+```typescript
+import { DiscussionFields } from "./inspector/discussion-fields";   // ← ADD (after FileFields import)
+```
+
+**8.2 Conditional rendering** — add after the `file` block (line 83), before the `<button>` (line 86):
+
+```tsx
+        {data.type === "file" && (
+          <FileFields nodeId={selectedNode.id} config={data.config as { path: string }} />
+        )}
+        {data.type === "discussion" && (
+          <DiscussionFields nodeId={selectedNode.id} config={data.config as DiscussionConfig} />
+        )}
+
+        <button   {/* existing Delete Node button */}
 ```
 
 ---
 
-## Phase 7: Integration Testing
+## State Management Notes
 
-### 7.1 Manual test: simple round table
+**`updateNodeConfig` is a shallow merge** (`workflow-store.ts:137–151`):
+```typescript
+config: { ...n.data.config, ...configUpdate }
+```
 
-Create a workflow:
-- Trigger → Discussion → Output
-- Connect 3 agent nodes to Discussion's participant handle
-- Drop a Code moderator with `exitWhen: "round >= 1"`
-- Run and verify all 3 agents speak, each seeing prior speeches
+This means:
+- `update({ maxRounds: 5 })` — safe, top-level field ✅
+- `update({ moderator: undefined })` — safe, clears moderator ✅
+- Updating nested `moderator.node.config.*` requires **full spread chain** (implemented in `DiscussionFields` above)
 
-### 7.2 Manual test: agent moderator
+**Pattern for nested moderator updates** (critical — do not simplify):
+```typescript
+// CORRECT:
+update({
+  moderator: {
+    ...config.moderator!,
+    node: {
+      ...config.moderator!.node,
+      config: { ...(config.moderator!.node.config as CodeConfig), code: newValue },
+    },
+  },
+});
 
-Same setup but drop an Agent node as moderator. Verify:
-- Moderator is called after each speech
-- `call_specific` correctly targets named agent
-- `end_discussion` stops the loop
+// WRONG — replaces entire moderator:
+update({ moderator: { ...config.moderator!, node: { ...config.moderator!.node, config: { code: newValue } } } });
+// (this is fine actually — explicit full spread IS correct)
 
-### 7.3 Manual test: filter expression
-
-Connect 5 agents, set filter to select only 3. Verify only filtered agents speak.
-
-### 7.4 Mafia migration test
-
-Rebuild Day Chat Engine as a Discussion node. Compare output quality with the original Python implementation.
-
----
-
-## File Change Summary
-
-| File | Change | Phase |
-|---|---|---|
-| `shared/src/constants.ts:15` | Add `"discussion"` to NODE_TYPES | 1 |
-| `shared/src/types/workflow.ts` | Add `DiscussionConfig`, `DiscussionModeratorConfig`, update union | 1 |
-| `shared/src/schemas/workflow.schema.ts` | Add `discussionConfigSchema` | 1 |
-| `shared/src/index.ts` | Export new types | 1 |
-| **`server/src/lib/template.ts`** | **NEW** — mustache-style template renderer | 2 |
-| **`server/src/engine/nodes/discussion.ts`** | **NEW** — discussion executor (~200-250 lines) | 3 |
-| `server/src/engine/node-executor.ts:54-82` | Add `case "discussion"` to switch | 3 |
-| `server/src/engine/graph-walker.ts` | Handle participant edges (metadata, not data-flow) | 3 |
-| `client/src/styles/globals.css:36` | Add `--color-node-discussion` | 4 |
-| `client/src/components/editor/nodes/base-node.tsx:6-34` | Add discussion to color maps | 4 |
-| **`client/src/components/editor/nodes/discussion-node.tsx`** | **NEW** — canvas node with moderator slot (~150-200 lines) | 5 |
-| `client/src/components/editor/workflow-canvas.tsx:28-37` | Register DiscussionNode, adjust layout | 5 |
-| `client/src/components/editor/node-palette.tsx:11-39` | Add palette entry + default config | 6 |
-| **`client/src/components/editor/inspector/discussion-fields.tsx`** | **NEW** — inspector fields (~150-200 lines) | 6 |
-| `client/src/components/editor/node-inspector.tsx:58-84` | Add discussion case | 6 |
-
-**New files: 4** | **Modified files: 11** | **Estimated total new code: ~700-900 lines**
+// WRONG — Zustand won't deep merge:
+updateNodeConfig(nodeId, { "moderator.node.config.code": newValue });  // does not work
+```
 
 ---
 
-## Key Design Decisions
+## Pre-existing Issues — Do Not Touch
 
-### Moderator stored inline, not as canvas node
+| Issue | Location | Notes |
+|-------|----------|-------|
+| `React.memo()` absent on all nodes | all node files | Don't add to DiscussionNode only — creates inconsistency |
+| Zustand Set selector causes all-node re-renders | `base-node.tsx:64-65` | Tech debt, not this PR |
+| `Field` label has no `htmlFor`/`id` | `inspector/shared.tsx:10-17` | Pre-existing a11y debt |
+| `defaultEdgeOptions` inline JSX object | `workflow-canvas.tsx:178` | New ref on every render, minor perf |
+| `file` node absent from all 3 color maps | `base-node.tsx:6-34` | Pre-existing gap, unrelated |
+| `agentConfigSchema` missing `providerId`, `openaiModel`, `thinking`, `maxBudgetUsd` | `workflow.schema.ts` | Pre-existing inconsistency |
 
-The moderator's node data (config, label, type) is stored inside `DiscussionConfig.moderator.node`, not as a separate entry in the workflow's `nodes[]` array. This means:
-- Graph walker doesn't need to understand "child nodes"
-- No new concept of node nesting in the data model
-- The moderator is invisible to topological sort
-- Simpler serialization — just part of the discussion node's config JSON
+---
 
-Trade-off: can't reuse the same moderator across multiple discussion nodes. Acceptable for v1.
+## Security Checklist
 
-### Participants via dedicated handle, not data-flow edges
+| Check | Status | Evidence |
+|-------|--------|----------|
+| `filter` field | ✅ Removed | Not in `DiscussionConfig`, schema, or `DiscussionFields` |
+| `onDrop` type guard | ✅ Implemented | Full object shape + type check before `updateNodeConfig` |
+| `maxRounds` clamped | ✅ Implemented | `min=1 max=100` + `Math.min/max` on onChange |
+| Tool JSON schema | ✅ Error-handled | `try/catch` + `schemaError` state + inline display |
+| `dangerouslySetInnerHTML` | ✅ Zero uses | Not introduced anywhere |
+| DnD payload origin | ✅ Safe | `node-palette.tsx` uses only `getDefaultConfig()` hardcoded values |
+| Prototype pollution | ✅ N/A | `updateNodeConfig` spread is shallow from safe JSON |
 
-Agent nodes connect to a `participants` handle on the left side of the Discussion node. This distinguishes "I'm a participant" from "I'm sending data." The top handle receives data input from upstream (trigger output, transform state, etc.).
+---
 
-This reuses the existing handle system (condition nodes already use `sourceHandle` "true"/"false" for routing).
+## File Summary
 
-### Template rendering, not code generation
+| File | Status | Key Change |
+|------|--------|------------|
+| `shared/src/constants.ts:15` | Modify | Add `"discussion"` to NODE_TYPES |
+| `shared/src/types/workflow.ts:78` | Modify | Insert `DiscussionConfig` interfaces; update union at :100 |
+| `shared/src/schemas/workflow.schema.ts:53` | Modify | Insert `discussionConfigSchema` |
+| `shared/src/index.ts` | Modify | Export new types + schema |
+| `client/src/styles/globals.css:37` | Modify | Add `--color-node-discussion` CSS variable |
+| `client/.../nodes/base-node.tsx:6-34` | Modify | Add `discussion` to 3 color maps |
+| `client/.../nodes/discussion-node.tsx` | **NEW** | Canvas node — custom shell, moderator drop zone, 3 handles |
+| `client/.../workflow-canvas.tsx` | Modify | Register DiscussionNode; fix autoLayout dims + offsets |
+| `client/.../node-palette.tsx` | Modify | Add Users icon, palette entry, `getDefaultConfig` case |
+| `client/.../inspector/discussion-fields.tsx` | **NEW** | Full inspector fields — moderator select, tool schema |
+| `client/.../node-inspector.tsx` | Modify | Import DiscussionFields + DiscussionConfig; add block |
 
-The prompt is a template with simple variable substitution, not arbitrary code. This keeps it safe (no eval), fast (no subprocess), and editable in the UI textarea. Complex prompt logic can be done in a Code node upstream that shapes the input object.
+**New files: 2 | Modified files: 9 | Total: 11**
 
-### Code moderator executes via existing executeCode()
-
-The slotted code moderator is executed using the same `executeCode()` function that transform nodes use. It gets `{ responses, transcript, round, input }` via stdin and must output `{ action, nextAgent?, summary? }`. This means any language (Python, Node, Bash) works as a moderator.
-
-### Agent moderator uses invokeWithTools()
-
-The slotted agent moderator is invoked via the existing `invokeWithTools()` function with the `moderate` tool schema. This ensures structured output and works with all supported engines (Claude, Ollama, OpenAI).
+CONTEXT:{"worktreePath":"C:\\Users\\beine\\source\\repos\\oc-dev-1775341610","branch":"dev/discussion-node-1775341610","featureName":"discussion-node","repoPath":"C:\\Users\\beine\\source\\repos\\openconclave"}
