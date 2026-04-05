@@ -14,7 +14,7 @@ import { runRoutes } from "./routes/runs";
 import { agentRoutes } from "./routes/agents";
 import { knowledgeRoutes } from "./routes/knowledge";
 import { wsHandler } from "./ws/handler";
-import { setServer, broadcastRunEvent } from "./ws/broadcast";
+import { setServer, broadcastRunEvent, broadcastToTopic } from "./ws/broadcast";
 import { createMcpServer } from "./mcp/server";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { WorkflowExecutor } from "./engine/executor";
@@ -122,6 +122,21 @@ app.get("/api/claude-code/status", async (c) => {
   } catch {
     return c.json({ installed: false, version: null });
   }
+});
+
+// ── Channel: Ask Claude to improve prompt ────────────────────
+app.post("/api/channel/improve-prompt", async (c) => {
+  const body = await c.req.json() as {
+    workflowId: string;
+    nodeId: string;
+    nodeLabel: string;
+    currentPrompt: string;
+  };
+  broadcastToTopic("dashboard", {
+    type: "channel:improve-prompt",
+    data: body,
+  });
+  return c.json({ ok: true });
 });
 
 // ── Ollama ───────────────────────────────────────────────────

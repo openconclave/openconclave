@@ -250,6 +250,37 @@ function connectWebSocket() {
             params: { content, meta },
           });
         }
+
+        if (eventType === "channel:improve-prompt") {
+          const d = data.data ?? {};
+          const content = [
+            "A user wants you to improve an agent's system prompt in OpenConclave.",
+            "",
+            `Workflow ID: ${d.workflowId}`,
+            `Node ID: ${d.nodeId}`,
+            `Node Label: ${d.nodeLabel}`,
+            "",
+            "Current prompt:",
+            d.currentPrompt || "(empty)",
+            "",
+            "Please write an improved version of this system prompt — make it clearer, more effective, and well-structured.",
+            "Then call `update_node` to save it:",
+            `  update_node(workflowId: "${d.workflowId}", nodeId: "${d.nodeId}", config: { systemPrompt: "your improved prompt" })`,
+          ].join("\n");
+
+          await mcp.server.notification({
+            method: "notifications/claude/channel",
+            params: {
+              content,
+              meta: {
+                event_type: "channel:improve-prompt",
+                workflow_id: String(d.workflowId),
+                node_id: String(d.nodeId),
+                node_label: String(d.nodeLabel),
+              },
+            },
+          });
+        }
       } catch {
         // ignore parse errors
       }

@@ -1,8 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useWorkflowStore } from "@/stores/workflow-store";
 import type { AgentConfig, ToolConfig } from "@openconclave/shared";
-import { Terminal, Server, BookOpen, X } from "lucide-react";
+import { Terminal, Server, BookOpen, X, Sparkles, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { api } from "@/lib/api";
+import { toast } from "@/components/ui/toast";
 import { Field, INPUT_CLASS } from "./shared";
 
 interface ProviderInfo {
@@ -32,8 +34,74 @@ export function AgentFields({ nodeId, config }: AgentFieldsProps) {
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [providerModels, setProviderModels] = useState<string[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
+  const [claudeAvailable, setClaudeAvailable] = useState(false);
+  const [improving, setImproving] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const engine = config.engine ?? "claude";
+
+  // Check Claude Code availability once
+  useEffect(() => {
+    api.get<{ installed: boolean }>("/claude-code/status")
+      .then((d) => setClaudeAvailable(d.installed))
+      .catch(() => {});
+  }, []);
+
+  // Cleanup polling on unmount
+  useEffect(() => () => {
+    if (pollRef.current) clearInterval(pollRef.current);
+  }, []);
+
+  const workflowId = window.location.pathname.match(/\/workflows\/(\d+)/)?.[1];
+
+  const handleImprovePrompt = useCallback(async () => {
+    if (!workflowId || improving) return;
+    const sentPrompt = config.systemPrompt ?? "";
+    setImproving(true);
+
+    try {
+      await api.post("/channel/improve-prompt", {
+        workflowId,
+        nodeId,
+        nodeLabel: useWorkflowStore.getState().nodes.find((n) => n.id === nodeId)?.data.label ?? nodeId,
+        currentPrompt: sentPrompt,
+      });
+      toast("Sent to Claude Code — waiting for improved prompt...");
+    } catch {
+      toast("Failed to send to Claude Code", "error");
+      setImproving(false);
+      return;
+    }
+
+    // Poll for the updated prompt in the DB
+    let elapsed = 0;
+    pollRef.current = setInterval(async () => {
+      elapsed += 3000;
+      if (elapsed > 60000) {
+        if (pollRef.current) clearInterval(pollRef.current);
+        pollRef.current = null;
+        setImproving(false);
+        toast("Timed out waiting for Claude to update the prompt", "error");
+        return;
+      }
+      try {
+        const wf = await api.get<Record<string, unknown>>(`/workflows/${workflowId}`);
+        const def = (wf.definition ?? wf) as Record<string, unknown>;
+        const nodes = (def.nodes ?? []) as Array<Record<string, unknown>>;
+        const node = nodes.find((n) => n.id === nodeId);
+        const nodeData = node?.data as Record<string, unknown> | undefined;
+        const nodeConfig = nodeData?.config as Record<string, unknown> | undefined;
+        const dbPrompt = (nodeConfig?.systemPrompt as string) ?? "";
+        if (dbPrompt && dbPrompt !== sentPrompt) {
+          update({ systemPrompt: dbPrompt });
+          if (pollRef.current) clearInterval(pollRef.current);
+          pollRef.current = null;
+          setImproving(false);
+          toast("Prompt improved by Claude");
+        }
+      } catch { /* ignore poll errors */ }
+    }, 3000);
+  }, [workflowId, nodeId, config.systemPrompt, improving]);
 
   useEffect(() => {
     if (engine === "ollama" && !ollamaStatus) {
@@ -112,10 +180,32 @@ export function AgentFields({ nodeId, config }: AgentFieldsProps) {
               className={`${INPUT_CLASS} resize-none`}
             />
           </Field>
-          <p className="text-[10px] text-muted-foreground px-1">
-            The agent receives input from the previous node as a user message. Instructions define the
-            agent's role and behavior.
-          </p>
+          <div className="flex items-center gap-2 px-1">
+            <p className="text-[10px] text-muted-foreground flex-1">
+              The agent receives input from the previous node as a user message. Instructions define the
+              agent's role and behavior.
+            </p>
+            {claudeAvailable && workflowId && (
+              <button
+                onClick={handleImprovePrompt}
+                disabled={improving}
+                className={cn(
+                  "flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-medium transition-colors shrink-0",
+                  improving
+                    ? "text-muted-foreground cursor-wait"
+                    : "text-primary hover:bg-primary/10"
+                )}
+                title="Ask Claude Code to improve this system prompt"
+              >
+                {improving ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Sparkles className="h-3 w-3" />
+                )}
+                {improving ? "Improving..." : "Improve"}
+              </button>
+            )}
+          </div>
         </>
       )}
 

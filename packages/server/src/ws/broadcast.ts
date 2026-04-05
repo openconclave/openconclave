@@ -12,3 +12,8 @@ export function broadcastRunEvent(event: RunEvent) {
   serverRef.publish(`run:${event.runId}`, json);
   serverRef.publish("dashboard", json);
 }
+
+export function broadcastToTopic(topic: string, data: unknown) {
+  if (!serverRef) return;
+  serverRef.publish(topic, JSON.stringify(data));
+}
