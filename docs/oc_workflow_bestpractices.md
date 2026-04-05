@@ -116,6 +116,7 @@ Note: `type` appears twice — once at the node level (for React Flow) and once 
 | `merge` | `{}` (empty) | Fan-in, wait for all inputs |
 | `prompt` | `description` | Human-in-the-loop |
 | `output` | `type` ("log", "claude-code", "telegram"), `config` | Send results |
+| `discussion` | `topic`, `maxRounds`, `moderator` (type, code/agent config) | Round-table multi-agent discussion |
 | `file` | `path`, `mode` ("read", "write") | File I/O |
 
 ### Trigger Types
@@ -746,13 +747,27 @@ From run #89 (14 agents, 20 tasks including review loops):
 **Problem:** Tests pass individually but fail when run together due to shared mocks.
 **Fix:** Agent-written tests often use `vi.mock()` at module level. These mocks leak across test files in the same Bun test run. Add `vi.restoreAllMocks()` in `afterEach` or use `--isolate` flag.
 
-### Pitfall 8: Teardown Can't Find Context
+### Pitfall 8: Teardown Can't Find Context (FIXED)
 
-**Problem:** The teardown node receives merged agent output (natural language) and can't extract the worktree path.
-**Fix:** Don't rely on agents to propagate structured data. Either:
-- Store the worktree path in an environment variable or file at setup time
-- Have the teardown scan for worktree directories by timestamp
-- Use the OC API to query the setup node's output directly
+**Problem:** The teardown node receives merged agent output (natural language) and can't extract the worktree path. Agents told to "Preserve CONTEXT:{...}" don't reliably do it — LLMs summarize and rewrite.
+**Fix:** Use a **marker file**. Setup writes `.oc-active-worktree.json` to the repo root. Teardown reads it. All agents can read it too via `cat C:/path/to/repo/.oc-active-worktree.json`.
+
+```python
+# In setup code node:
+marker = os.path.join(repo, ".oc-active-worktree.json")
+with open(marker, 'w') as mf:
+    json.dump({"worktreePath": worktree, "branch": branch, "featureName": feature_name, "repoPath": repo}, mf)
+
+# In teardown code node:
+marker = os.path.join(repo, ".oc-active-worktree.json")
+if os.path.exists(marker):
+    with open(marker) as f:
+        ctx = json.load(f)
+    wt = ctx["worktreePath"]
+    os.remove(marker)  # cleanup
+```
+
+**Do NOT use CONTEXT:{...} text propagation.** Agents don't reliably pass structured data through text output.
 
 ### Pitfall 9: PUT API Format
 
@@ -768,6 +783,11 @@ From run #89 (14 agents, 20 tasks including review loops):
 
 **Problem:** Condition node can't route because the agent's verdict text doesn't match the expression.
 **Fix:** Use exact string markers (`VERDICT:APPROVED`) not natural language ("I approve this code"). Agents are unreliable with formatting — the simpler the marker, the more reliable the routing.
+
+### Pitfall 12: CONTEXT:{...} Text Propagation
+
+**Problem:** Asking agents to "Preserve the CONTEXT:{...} JSON line" in their output doesn't work. Agents are LLMs — they summarize, rewrite, and lose structured data. After 3-4 agents in a chain, the CONTEXT line is gone.
+**Fix:** Use a marker file (see Pitfall 8) or the OC API to share structured context between nodes. Never rely on agents to pass through data they didn't produce.
 
 ---
 
@@ -823,6 +843,16 @@ Setup node:
 ```python
 subprocess.run(["git", "worktree", "add", worktree, "-b", branch],
                check=True, cwd=repo, stdout=DEVNULL, stderr=DEVNULL)
+
+# Write marker file for all agents and teardown to find the worktree
+marker = os.path.join(repo, ".oc-active-worktree.json")
+with open(marker, 'w') as mf:
+    json.dump({"worktreePath": worktree, "branch": branch, "featureName": feature_name, "repoPath": repo}, mf)
+```
+
+Agent prompts should reference the marker file:
+```
+cd to worktreePath (run: `cat C:/path/to/repo/.oc-active-worktree.json`)
 ```
 
 ### Pattern 6: Knowledge-Augmented Agents
@@ -841,7 +871,20 @@ Agent B ──participants──→     (moderator: code or agent)
 Agent C ──participants──→
 ```
 
-Sequential conversation where each agent sees the full transcript. Moderator controls speaker order and exit conditions. (Requires discussion node type — see design docs.)
+Sequential conversation where each agent sees the full transcript. Moderator controls speaker order and exit conditions.
+
+**Handle types are critical:**
+- Top handle: `type="target"` (data-flow input)
+- Participants handle: `type="target"` (left side, receives participant agents)
+- Bottom handle: `type="source"` (data-flow output)
+
+Edges connecting participants MUST have `targetHandle: "participants"`. Without this, the server finds 0 participants and the discussion ends immediately.
+
+**Moderator types:**
+- `code` — Python/Node/Bash script receives `{responses, transcript, round, input}` via stdin, returns `{action, nextAgent?, summary?}`
+- `agent` — LLM agent with a `moderate` tool (`call_next`, `call_specific`, `end_discussion`). Uses `invokeWithTools()`.
+
+**Moderator summaries appear as `[Moderator] ...` in the transcript**, so participants can see moderator feedback in subsequent rounds.
 
 ---
 
