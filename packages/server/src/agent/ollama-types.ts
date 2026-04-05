@@ -11,10 +11,16 @@ export type OllamaTool = {
 
 // ── Status check ─────────────────────────────────────────────
 
+export type OllamaModelInfo = {
+  name: string;
+  capabilities: string[];
+};
+
 export type OllamaStatus = {
   installed: boolean;
   running: boolean;
   models: string[];
+  modelDetails?: OllamaModelInfo[];
 };
 
 // ── Runtime options ──────────────────────────────────────────

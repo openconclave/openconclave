@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Header } from "@/components/layout/header";
 import { api } from "@/lib/api";
 import { toast } from "@/components/ui/toast";
-import { Save, Eye, EyeOff, Plus, Trash2, Plug, TestTube, Pencil } from "lucide-react";
+import { Save, Eye, EyeOff, Plus, Trash2, Plug, TestTube, Pencil, Sparkles } from "lucide-react";
 
 type SettingsMap = Record<string, string>;
 
@@ -319,6 +319,26 @@ export function SettingsPage() {
                 ))}
               </div>
             )}
+          </section>
+
+          {/* Setup Wizard */}
+          <section>
+            <h2 className="text-lg font-semibold mb-4">Setup</h2>
+            <div className="rounded-lg border border-border bg-card p-4 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium">Setup Wizard</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Re-run the onboarding wizard to reconfigure providers and Ollama.
+                </p>
+              </div>
+              <a
+                href="/?onboarding"
+                className={`${BTN} bg-primary/10 text-primary hover:bg-primary/20`}
+              >
+                <Sparkles className="h-4 w-4" />
+                Run Wizard
+              </a>
+            </div>
           </section>
 
         </div>

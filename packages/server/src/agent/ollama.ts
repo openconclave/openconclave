@@ -14,8 +14,8 @@ import { AgentBase } from "./base";
 import { createOllamaRoutingTool } from "./ollama-routing";
 import type { ResolvedAgentConfig } from "@openconclave/shared";
 
-export type { OllamaStatus, OllamaRunOptions, ThinkingBlock, OllamaResult } from "./ollama-types";
-import type { OllamaTool, OllamaRunOptions, OllamaResult, OllamaStatus, ThinkingBlock } from "./ollama-types";
+export type { OllamaStatus, OllamaModelInfo, OllamaRunOptions, ThinkingBlock, OllamaResult } from "./ollama-types";
+import type { OllamaTool, OllamaRunOptions, OllamaResult, OllamaStatus, OllamaModelInfo, ThinkingBlock } from "./ollama-types";
 
 // ── Debug logging ─────────────────────────────────────────────
 
@@ -44,7 +44,26 @@ export async function checkOllama(): Promise<OllamaStatus> {
     const data = (await res.json()) as { models?: { name: string }[] };
     const models = (data.models ?? []).map((m) => m.name);
 
-    return { installed: true, running: true, models };
+    // Fetch capabilities for each model in parallel
+    const modelDetails: OllamaModelInfo[] = await Promise.all(
+      models.map(async (name) => {
+        try {
+          const showRes = await fetch(`${OLLAMA_URL}/api/show`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ model: name }),
+            signal: AbortSignal.timeout(3000),
+          });
+          if (showRes.ok) {
+            const info = (await showRes.json()) as { capabilities?: string[] };
+            return { name, capabilities: info.capabilities ?? [] };
+          }
+        } catch { /* ignore per-model failures */ }
+        return { name, capabilities: [] };
+      })
+    );
+
+    return { installed: true, running: true, models, modelDetails };
   } catch {
     try {
       const proc = spawn({ cmd: ["ollama", "--version"], stdout: "pipe", stderr: "pipe" });

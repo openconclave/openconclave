@@ -111,6 +111,19 @@ app.get("/api/providers/:id/models", async (c) => {
   return c.json({ models });
 });
 
+// ── Claude Code detection ────────────────────────────────────
+app.get("/api/claude-code/status", async (c) => {
+  try {
+    const proc = Bun.spawn({ cmd: ["claude", "--version"], stdout: "pipe", stderr: "pipe" });
+    await proc.exited;
+    const out = await new Response(proc.stdout).text();
+    const version = out.trim().split("\n")[0] ?? "";
+    return c.json({ installed: true, version });
+  } catch {
+    return c.json({ installed: false, version: null });
+  }
+});
+
 // ── Ollama ───────────────────────────────────────────────────
 app.get("/api/ollama/status", async (c) => {
   const status = await checkOllama();
