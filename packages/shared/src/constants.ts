@@ -12,7 +12,16 @@ export const TELEGRAM_POLL_TIMEOUT_S = 30;
 export const API_PORT = 4000;
 export const CLIENT_PORT = 5173;
 
-export const NODE_TYPES = ["trigger", "agent", "condition", "transform", "merge", "prompt", "output", "file", "discussion"] as const;
+export const NODE_TYPES = ["trigger", "agent", "condition", "code", "merge", "prompt", "output", "file", "discussion"] as const;
+
+/**
+ * Aliases for backward compatibility with legacy node type names.
+ * Maps old type names to their current equivalents.
+ * Support for legacy types can be removed after a deprecation period.
+ */
+export const NODE_TYPE_ALIASES = {
+  "transform": "code"
+} as const;
 export const TRIGGER_TYPES = ["manual", "cron", "webhook", "channel", "telegram", "chat"] as const;
 export const AGENT_ENGINES = ["claude", "ollama", "openai", "debug"] as const;
 export const CODE_RUNTIMES = ["python", "node", "bash"] as const;

@@ -82,7 +82,8 @@ export interface DiscussionModeratorConfig {
   type: "code" | "agent";
   node: {
     label: string;
-    type: "transform" | "agent";
+    /** Support both "transform" (legacy) and "code" (current) node types for backward compatibility */
+    type: "transform" | "code" | "agent";
     config: CodeConfig | AgentConfig;
   };
 }

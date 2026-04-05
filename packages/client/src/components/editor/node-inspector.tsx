@@ -66,7 +66,7 @@ export function NodeInspector() {
         {data.type === "condition" && (
           <ConditionFields nodeId={selectedNode.id} config={data.config as ConditionConfig} />
         )}
-        {data.type === "transform" && (
+        {data.type === "code" && (
           <CodeFields nodeId={selectedNode.id} config={data.config as CodeConfig} />
         )}
         {data.type === "prompt" && (

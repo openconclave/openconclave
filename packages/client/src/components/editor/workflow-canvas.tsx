@@ -30,7 +30,7 @@ const nodeTypes = {
   trigger: TriggerNode,
   agent: AgentNode,
   condition: ConditionNode,
-  transform: TransformNode,
+  code: TransformNode,
   merge: MergeNode,
   prompt: PromptNode,
   output: OutputNode,

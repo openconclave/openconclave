@@ -139,21 +139,23 @@ export function DiscussionNode(props: NodeProps) {
         // config must be an object — null config would crash inspector on every render
         typeof parsed.config !== "object" ||
         parsed.config === null ||
-        // Only agent and transform (code) nodes are valid moderators
-        (parsed.type !== "agent" && parsed.type !== "transform") ||
+        // Only agent and code nodes are valid moderators (also accept legacy "transform" type)
+        (parsed.type !== "agent" && parsed.type !== "transform" && parsed.type !== "code") ||
         typeof parsed.label !== "string" ||
         !parsed.label.trim()
       ) {
         return;
       }
 
+      // nodeType is read from node.data.type (the authoritative property used by executors).
+      // Server normalization keeps node.type and node.data.type synchronized.
       const { type: nodeType, label, config: dropConfig } = parsed as {
-        type: "agent" | "transform";
+        type: "agent" | "transform" | "code";
         label: string;
         config: AgentConfig | CodeConfig;
       };
 
-      const moderatorType: "code" | "agent" = nodeType === "transform" ? "code" : "agent";
+      const moderatorType: "code" | "agent" = (nodeType === "transform" || nodeType === "code") ? "code" : "agent";
 
       // store.ts:145 shallow merge preserves prompt/maxRounds/tool automatically.
       updateNodeConfig(props.id, {
@@ -205,14 +207,40 @@ export function DiscussionNode(props: NodeProps) {
           className={cn(handleBase, handleBlue)}
         />
 
-        {/* Bottom handle — output to downstream */}
+        {/* Bottom handles — three output modes */}
         <Handle
           type="source"
-          id="bottom"
+          id="full"
+          position={Position.Bottom}
+          style={{ left: "20%" }}
+          className={cn(handleBase, handleCyan)}
+        >
+          <span className="absolute top-4 left-1/2 -translate-x-1/2 text-[10px] text-muted-foreground/60 whitespace-nowrap font-medium">
+            Full
+          </span>
+        </Handle>
+        <Handle
+          type="source"
+          id="last"
           position={Position.Bottom}
           style={{ left: "50%" }}
           className={cn(handleBase, handleCyan)}
-        />
+        >
+          <span className="absolute top-4 left-1/2 -translate-x-1/2 text-[10px] text-muted-foreground/60 whitespace-nowrap font-medium">
+            Last
+          </span>
+        </Handle>
+        <Handle
+          type="source"
+          id="summary"
+          position={Position.Bottom}
+          style={{ left: "80%" }}
+          className={cn(handleBase, handleCyan)}
+        >
+          <span className="absolute top-4 left-1/2 -translate-x-1/2 text-[10px] text-muted-foreground/60 whitespace-nowrap font-medium">
+            Summary
+          </span>
+        </Handle>
 
         {/* Header */}
         <div className="flex items-center gap-2.5 px-3 py-2.5">

@@ -1,8 +1,21 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+import { NODE_TYPES, NODE_TYPE_ALIASES } from "@openconclave/shared/src/constants";
 
 const OC_URL = process.env.OPENCONCLAVE_URL ?? "http://localhost:4000";
+
+/**
+ * Accepted node types for MCP workflow creation/update.
+ * Includes both current and legacy type names for backward compatibility.
+ * Legacy names are mapped to their current equivalents by the workflow normalizer.
+ *
+ * Note: This set is more restrictive than NODE_TYPES because the MCP API
+ * doesn't expose all node types (e.g., "file" and "discussion" are internal only).
+ */
+const legacyNodeTypes = Object.keys(NODE_TYPE_ALIASES) as string[];
+const workflowNodeTypesForMcp = ["trigger", "agent", "condition", "code", "merge", "prompt", "output"] as const;
+const acceptedWorkflowNodeTypes = [...workflowNodeTypesForMcp, ...legacyNodeTypes] as [string, ...string[]];
 
 async function ocApi(path: string, method = "GET", body?: unknown): Promise<unknown> {
   const res = await fetch(`${OC_URL}/api${path}`, {
@@ -65,11 +78,11 @@ export function createMcpServer() {
         .array(
           z.object({
             id: z.string(),
-            type: z.enum(["trigger", "agent", "condition", "transform", "merge", "prompt", "output"]),
+            type: z.enum(acceptedWorkflowNodeTypes),
             position: z.object({ x: z.number(), y: z.number() }),
             data: z.object({
               label: z.string(),
-              type: z.enum(["trigger", "agent", "condition", "transform", "merge", "prompt", "output"]),
+              type: z.enum(acceptedWorkflowNodeTypes),
               config: z.record(z.unknown()),
             }),
           })
@@ -103,11 +116,11 @@ export function createMcpServer() {
       enabled: z.boolean().optional(),
       nodes: z.array(z.object({
         id: z.string(),
-        type: z.enum(["trigger", "agent", "condition", "transform", "merge", "prompt", "output"]),
+        type: z.enum(acceptedWorkflowNodeTypes),
         position: z.object({ x: z.number(), y: z.number() }),
         data: z.object({
           label: z.string(),
-          type: z.enum(["trigger", "agent", "condition", "transform", "merge", "prompt", "output"]),
+          type: z.enum(acceptedWorkflowNodeTypes),
           config: z.record(z.unknown()),
         }),
       })).optional(),

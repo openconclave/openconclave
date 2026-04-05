@@ -4,6 +4,7 @@ import { db } from "../db/client";
 import { runs, checkpoints } from "../db/schema";
 import { getIncomingEdges, getOutgoingEdges } from "./graph";
 import { executeNode } from "./node-executor";
+import { normalizeWorkflowNodeTypes } from "./normalize-workflow";
 import { logger } from "../lib/logger";
 import { AppError, ErrorCode, MAX_WORKFLOW_ITERATIONS } from "@openconclave/shared";
 import type { WorkflowDefinition, WorkflowNode, WorkflowEdge } from "@openconclave/shared";
@@ -49,7 +50,10 @@ export async function executeGraph(
   triggerNodeId?: string,
   resumeFromCheckpointId?: number // undefined = fresh run
 ): Promise<void> {
-  const { nodes, edges } = workflow;
+  // Normalize workflow to handle legacy type names (e.g., "transform" → "code")
+  // This ensures all downstream code sees consistent, current node types.
+  const normalizedWorkflow = normalizeWorkflowNodeTypes(workflow);
+  const { nodes, edges } = normalizedWorkflow;
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
   const nodeOutputs = new Map<string, unknown>();
   // Session IDs per agent — Claude: SDK session ID, non-Claude: JSONL file path

@@ -59,7 +59,8 @@ export const discussionConfigSchema = z.object({
       type: z.enum(["code", "agent"]),
       node: z.object({
         label: z.string(),
-        type: z.enum(["transform", "agent"]),
+        // Support both "transform" (legacy) and "code" (current) for backward compatibility
+        type: z.enum(["transform", "code", "agent"]),
         config: z.record(z.unknown()),
       }),
     })
