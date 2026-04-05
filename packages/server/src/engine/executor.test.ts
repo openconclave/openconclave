@@ -11,18 +11,15 @@
  *  - execute(): fires executeGraph asynchronously (non-blocking)
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "bun:test";
 import type { WorkflowDefinition, WorkflowNode, WorkflowEdge } from "@openconclave/shared";
 
-// ── Hoisted mocks ────────────────────────────────────────────
+// ── Mock functions (declared before vi.mock so they're available in factory closures) ──
 
-const { mockDbSelect, mockDbInsert, mockDbUpdate, mockExecuteGraph } =
-  vi.hoisted(() => ({
-    mockDbSelect: vi.fn(),
-    mockDbInsert: vi.fn(),
-    mockDbUpdate: vi.fn(),
-    mockExecuteGraph: vi.fn().mockResolvedValue(undefined),
-  }));
+const mockDbSelect = vi.fn();
+const mockDbInsert = vi.fn();
+const mockDbUpdate = vi.fn();
+const mockExecuteGraph = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("../db/client", () => ({
   db: {
@@ -176,7 +173,7 @@ describe("WorkflowExecutor", () => {
       await executor.resume(10, workflow);
 
       // Wait for the fire-and-forget executeGraph to be called
-      await vi.waitFor(() => expect(mockExecuteGraph).toHaveBeenCalled());
+      await new Promise((r) => setTimeout(r, 10));
 
       // executeGraph called with the checkpoint ID (6th argument = resumeFromCheckpointId)
       const callArgs = mockExecuteGraph.mock.calls[0];
@@ -193,7 +190,7 @@ describe("WorkflowExecutor", () => {
 
       await executor.resume(10, workflow);
 
-      await vi.waitFor(() => expect(mockExecuteGraph).toHaveBeenCalled());
+      await new Promise((r) => setTimeout(r, 10));
 
       const callArgs = mockExecuteGraph.mock.calls[0];
       expect(callArgs[0]).toBe(10);
@@ -227,7 +224,7 @@ describe("WorkflowExecutor", () => {
       const executor = new WorkflowExecutor(onEvent);
       await executor.resume(5, workflow);
 
-      await vi.waitFor(() => expect(mockExecuteGraph).toHaveBeenCalled());
+      await new Promise((r) => setTimeout(r, 10));
 
       const callArgs = mockExecuteGraph.mock.calls[0];
       // 5th argument (index 4) = triggerNodeId
@@ -242,7 +239,7 @@ describe("WorkflowExecutor", () => {
       const executor = new WorkflowExecutor(onEvent);
       await executor.resume(5, workflow);
 
-      await vi.waitFor(() => expect(mockExecuteGraph).toHaveBeenCalled());
+      await new Promise((r) => setTimeout(r, 10));
 
       const callArgs = mockExecuteGraph.mock.calls[0];
       expect(callArgs[4]).toBeUndefined();
@@ -322,7 +319,7 @@ describe("WorkflowExecutor", () => {
 
       await executor.execute(workflow);
 
-      await vi.waitFor(() => expect(mockExecuteGraph).toHaveBeenCalled());
+      await new Promise((r) => setTimeout(r, 10));
 
       const callArgs = mockExecuteGraph.mock.calls[0];
       expect(callArgs[0]).toBe(42); // runId
