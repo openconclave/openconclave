@@ -77,6 +77,34 @@ export interface FileConfig {
   path: string;
 }
 
+export interface DiscussionModeratorConfig {
+  /** "code" = deterministic script via code.ts, "agent" = LLM-driven via invokeWithTools */
+  type: "code" | "agent";
+  node: {
+    label: string;
+    type: "transform" | "agent";
+    config: CodeConfig | AgentConfig;
+  };
+}
+
+export interface DiscussionConfig {
+  /**
+   * Prompt template rendered for each participant turn.
+   * Supported variables: {{agentName}}, {{input}}, {{transcript}}, {{round}}
+   * Dot notation: {{input.topic}}
+   * NOTE: no `filter` field — evaluateExpression() uses new Function() (CVE-2026-25049)
+   */
+  prompt: string;
+  moderator?: DiscussionModeratorConfig;
+  /** Optional tool registration (used by workflow tool system, not the discussion loop) */
+  tool?: {
+    name: string;
+    description: string;
+    schema: Record<string, unknown>;
+  };
+  maxRounds: number;
+}
+
 export interface ToolConfig {
   /** "builtin" for Claude Code tools, "mcp" for MCP servers, "knowledge" for KBs */
   toolType: "builtin" | "mcp" | "knowledge";
@@ -97,7 +125,8 @@ export type WorkflowNodeConfig =
   | MergeConfig
   | PromptConfig
   | OutputConfig
-  | FileConfig;
+  | FileConfig
+  | DiscussionConfig;
 
 // ── Node Data ────────────────────────────────────────────────
 

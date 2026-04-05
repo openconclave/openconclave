@@ -24,6 +24,23 @@ export function setPersistentSession(workflowId: string, nodeId: string, session
 
 // ── Graph Walker ────────────────────────────────────────────
 
+/**
+ * Returns true when ALL of a node's outgoing edges target discussion nodes via the
+ * "participants" handle — meaning this node exists only as a discussion participant and
+ * must NOT be treated as a graph entry point.
+ *
+ * Without this: participant agents (0 incoming edges) are queued as entry nodes, run
+ * standalone, then re-invoked internally by the discussion executor → double execution,
+ * double LLM billing.
+ */
+function isParticipantOnlyNode(nodeId: string, edges: WorkflowEdge[]): boolean {
+  const outgoing = getOutgoingEdges(nodeId, edges);
+  return (
+    outgoing.length > 0 &&
+    outgoing.every((e) => e.targetHandle === "participants")
+  );
+}
+
 export async function executeGraph(
   runId: number,
   workflow: WorkflowDefinition,
@@ -75,7 +92,9 @@ export async function executeGraph(
       entryNodes = triggerNode ? [triggerNode] : [];
     } else {
       entryNodes = nodes.filter(
-        (n) => getIncomingEdges(n.id, edges).length === 0
+        (n) =>
+          getIncomingEdges(n.id, edges).length === 0 &&
+          !isParticipantOnlyNode(n.id, edges)
       );
     }
 
@@ -287,6 +306,7 @@ function resolveNextEntries(
     }
   } else {
     for (const edge of outgoing) {
+      if (edge.targetHandle === "participants") continue; // discussion participant edges are never data-flow
       next.push({ nodeId: edge.target, triggeredBy: entry.nodeId });
     }
   }

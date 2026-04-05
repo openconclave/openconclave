@@ -11,6 +11,7 @@ const nodeBorderColors: Record<string, string> = {
   merge: "border-info/60",
   prompt: "border-warning/60",
   output: "border-node-output/60",
+  discussion: "border-node-discussion/60",
 };
 
 const nodeAccentColors: Record<string, string> = {
@@ -21,6 +22,7 @@ const nodeAccentColors: Record<string, string> = {
   merge: "bg-info",
   prompt: "bg-warning",
   output: "bg-node-output",
+  discussion: "bg-node-discussion",
 };
 
 const nodeGlowColors: Record<string, string> = {
@@ -31,6 +33,7 @@ const nodeGlowColors: Record<string, string> = {
   merge: "shadow-[0_0_15px_-3px] shadow-info/20",
   prompt: "shadow-[0_0_15px_-3px] shadow-warning/20",
   output: "shadow-[0_0_15px_-3px] shadow-node-output/20",
+  discussion: "shadow-[0_0_15px_-3px] shadow-node-discussion/20",
 };
 
 const handleColors = [

@@ -52,6 +52,30 @@ export const outputConfigSchema = z.object({
   config: z.record(z.unknown()),
 });
 
+export const discussionConfigSchema = z.object({
+  prompt: z.string().min(1).max(10_000),
+  moderator: z
+    .object({
+      type: z.enum(["code", "agent"]),
+      node: z.object({
+        label: z.string(),
+        type: z.enum(["transform", "agent"]),
+        config: z.record(z.unknown()),
+      }),
+    })
+    .optional(),
+  tool: z
+    .object({
+      name: z.string(),
+      description: z.string(),
+      schema: z.record(z.unknown()),
+    })
+    .optional(),
+  // Hard cap: prevents user-configurable DoS. Document ≤10 for stable operation.
+  maxRounds: z.number().int().min(1).max(100),
+  // filter intentionally absent — new Function() sandbox bypass (CVE-2026-25049)
+});
+
 export const workflowNodeSchema = z.object({
   id: z.string(),
   type: z.enum(NODE_TYPES),

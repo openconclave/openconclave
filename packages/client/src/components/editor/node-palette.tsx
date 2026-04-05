@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import {
   Zap, Cpu, GitFork, Code, Combine, MessageCircleQuestion, Send, FileText, BookOpen,
   Terminal, FileEdit, FileSearch, FolderSearch, Search, Globe, Server, ChevronDown, ChevronRight,
+  Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { NodeType, KnowledgeBase } from "@openconclave/shared";
@@ -23,6 +24,7 @@ const paletteNodes: {
   { type: "prompt", label: "Channel Loop", icon: MessageCircleQuestion, color: "bg-warning", description: "Ask via channel" },
   { type: "output", label: "Output", icon: Send, color: "bg-node-output", description: "Send result" },
   { type: "file", label: "File", icon: FileText, color: "bg-info", description: "Read file as input" },
+  { type: "discussion", label: "Discussion", icon: Users, color: "bg-node-discussion", description: "Multi-agent round table" },
 ];
 
 function getDefaultConfig(type: NodeType) {
@@ -35,6 +37,11 @@ function getDefaultConfig(type: NodeType) {
     case "prompt": return { description: "Ask a question if needed" };
     case "output": return { type: "log", config: {} };
     case "file": return { path: "" };
+    case "discussion":
+      return {
+        prompt: "{{transcript}}\n\nYou are {{agentName}}. Share your perspective.",
+        maxRounds: 3,
+      };
   }
 }
 
