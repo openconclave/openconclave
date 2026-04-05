@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import { Header } from "@/components/layout/header";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import type { Run, AgentTask, RunEvent } from "@openconclave/shared";
+import { toast } from "@/components/ui/toast";
+import type { RunEvent, RunDetailResponse } from "@openconclave/shared";
 import {
   CheckCircle,
   XCircle,
@@ -18,13 +19,8 @@ import {
   ChevronRight,
   AlertTriangle,
   Square,
+  RotateCcw,
 } from "lucide-react";
-
-type RunDetail = {
-  run: Run;
-  tasks: AgentTask[];
-  events: RunEvent[];
-};
 
 const statusIcon: Record<string, ReactNode> = {
   queued: <Clock className="h-4 w-4 text-muted-foreground" />,
@@ -119,6 +115,7 @@ const eventTypeLabels: Record<string, string> = {
   "node:started": "Started",
   "node:completed": "Completed",
   "node:failed": "Failed",
+  "node:skipped": "Skipped (resumed)",
   "agent:started": "Agent spawned",
   "agent:output": "Agent output",
   "agent:thinking": "Thinking",
@@ -133,6 +130,7 @@ const eventTypeColor: Record<string, string> = {
   "node:started": "text-muted-foreground",
   "node:completed": "text-success",
   "node:failed": "text-destructive",
+  "node:skipped": "text-muted-foreground",
   "agent:started": "text-node-agent",
   "agent:output": "text-muted-foreground",
   "agent:thinking": "text-node-transform",
@@ -174,7 +172,7 @@ function formatEventData(event: RunEvent): string | null {
 // ── Page ────────────────────────────────────────────────────
 
 export function RunDetailPage() {
-  const [data, setData] = useState<RunDetail | null>(null);
+  const [data, setData] = useState<RunDetailResponse | null>(null);
   const [loadError, setLoadError] = useState(false); // Bug #5 fix: separate error state
   const [nodeLabels, setNodeLabels] = useState<Map<string, string>>(new Map());
   const labelsLoadedFor = useRef<number | null>(null); // Bug #3 fix: track which workflow loaded
@@ -210,7 +208,7 @@ export function RunDetailPage() {
 
     const load = () => {
       api
-        .get<RunDetail>(`/runs/${runId}`)
+        .get<RunDetailResponse>(`/runs/${runId}`)
         .then((d) => {
           setData(d);
           setLoadError(false);
@@ -256,9 +254,23 @@ export function RunDetailPage() {
     if (!runId) return;
     try {
       await api.post(`/runs/${runId}/cancel`, {});
-      api.get<RunDetail>(`/runs/${runId}`).then(setData);
+      api.get<RunDetailResponse>(`/runs/${runId}`).then(setData);
     } catch {}
   };
+
+  const [isResuming, startResumeTransition] = useTransition();
+
+  const handleResume = () =>
+    startResumeTransition(async () => {
+      if (!runId) return;
+      try {
+        const result = await api.post<{ runId: number }>(`/runs/${runId}/resume`, {});
+        if (typeof result.runId !== "number") throw new Error("Invalid server response");
+        window.location.href = `/runs/${result.runId}`;
+      } catch (err) {
+        toast(err instanceof Error ? err.message : "Failed to resume run", "error");
+      }
+    });
 
   // Bug #5 fix: show error state instead of infinite loader
   if (!data) {
@@ -304,6 +316,23 @@ export function RunDetailPage() {
               >
                 <Square className="h-3 w-3" />
                 Stop
+              </button>
+            )}
+            {(run.status === "failure" || run.status === "interrupted") && data.checkpoint != null && (
+              <button
+                onClick={handleResume}
+                disabled={isResuming}
+                aria-busy={isResuming}
+                aria-disabled={isResuming}
+                className={cn(
+                  "ml-auto inline-flex items-center gap-1.5 rounded-md bg-info px-3 py-1 text-xs font-medium text-white transition-colors",
+                  isResuming ? "opacity-60 cursor-not-allowed" : "hover:bg-info/90"
+                )}
+              >
+                {isResuming
+                  ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+                  : <RotateCcw className="h-3 w-3" aria-hidden="true" />}
+                {isResuming ? "Resuming…" : "Resume from checkpoint"}
               </button>
             )}
           </div>

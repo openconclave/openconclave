@@ -65,7 +65,9 @@ export function BaseNode({
 }) {
   const setSelectedNode = useWorkflowStore((s) => s.setSelectedNode);
   const activeNodeIds = useWorkflowStore((s) => s.activeNodeIds);
+  const skippedNodeIds = useWorkflowStore((s) => s.skippedNodeIds);
   const isActive = activeNodeIds.has(id);
+  const isSkipped = skippedNodeIds.has(id);
 
   return (
     <div
@@ -74,7 +76,8 @@ export function BaseNode({
         nodeBorderColors[data.type],
         nodeGlowColors[data.type],
         selected && "!border-primary ring-1 ring-primary/30 ring-offset-1 ring-offset-background",
-        isActive && "[animation:node-running_1.5s_ease-in-out_infinite] !border-warning"
+        isActive && "[animation:node-running_1.5s_ease-in-out_infinite] !border-warning",
+        isSkipped && "opacity-40 !border-muted-foreground grayscale-[0.5]"
       )}
       onClick={() => setSelectedNode(id)}
     >

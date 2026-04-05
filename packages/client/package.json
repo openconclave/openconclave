@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run --config vitest.config.ts",
+    "test:watch": "vitest --config vitest.config.ts"
   },
   "dependencies": {
     "@openconclave/shared": "workspace:*",
@@ -22,11 +24,15 @@
     "zustand": "^5"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^4",
+    "jsdom": "^29.0.1",
     "tailwindcss": "^4",
-    "@tailwindcss/vite": "^4",
     "typescript": "^5",
     "vite": "^6"
   }

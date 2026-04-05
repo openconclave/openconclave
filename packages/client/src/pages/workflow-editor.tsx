@@ -23,6 +23,7 @@ export function WorkflowEditorPage() {
   const [loaded, setLoaded] = useState(false);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const setActiveNodes = useWorkflowStore((s) => s.setActiveNodes);
+  const setSkippedNodes = useWorkflowStore((s) => s.setSkippedNodes);
 
   const path = window.location.pathname;
   const existingId = path.startsWith("/workflows/") ? path.split("/")[2] : null;
@@ -89,8 +90,9 @@ export function WorkflowEditorPage() {
     return () => clearInterval(interval);
   }, [existingId]);
 
-  // Track active nodes when a run is in progress (poll + WebSocket)
+  // Track active and skipped nodes when a run is in progress (poll + WebSocket)
   const activeRef = useRef(new Set<string>());
+  const skippedRef = useRef(new Set<string>());
 
   const refreshActiveNodes = useCallback(() => {
     if (!activeRunId) return;
@@ -101,15 +103,21 @@ export function WorkflowEditorPage() {
           setActiveRunId(null);
           setActiveNodes(new Set());
           activeRef.current = new Set();
+          setSkippedNodes(new Set());
+          skippedRef.current = new Set();
           return;
         }
         const active = new Set<string>();
+        const skipped = new Set<string>();
         for (const e of d.events) {
           if ((e.type === "node:started" || e.type === "agent:started") && e.nodeId) active.add(e.nodeId);
           if ((e.type === "node:completed" || e.type === "agent:completed") && e.nodeId) active.delete(e.nodeId);
+          if (e.type === "node:skipped" && e.nodeId) { active.delete(e.nodeId); skipped.add(e.nodeId); }
         }
         activeRef.current = active;
         setActiveNodes(active);
+        skippedRef.current = skipped;
+        setSkippedNodes(skipped);
       })
       .catch(() => {});
   }, [activeRunId]);
@@ -118,6 +126,8 @@ export function WorkflowEditorPage() {
     if (!activeRunId) {
       setActiveNodes(new Set());
       activeRef.current = new Set();
+      setSkippedNodes(new Set());
+      skippedRef.current = new Set();
       return;
     }
 
@@ -130,6 +140,12 @@ export function WorkflowEditorPage() {
         active.add(data.nodeId);
       } else if (data.type === "node:completed" || data.type === "agent:completed") {
         active.delete(data.nodeId);
+      } else if (data.type === "node:skipped") {
+        active.delete(data.nodeId);
+        const skipped = new Set(skippedRef.current);
+        skipped.add(data.nodeId);
+        skippedRef.current = skipped;
+        setSkippedNodes(skipped);
       } else {
         return;
       }

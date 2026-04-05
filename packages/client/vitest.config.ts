@@ -10,7 +10,7 @@ export default defineConfig({
     globals: true,
     environment: "jsdom",
     setupFiles: [path.resolve(__dirname, "src/test/setup.ts")],
-    include: ["packages/client/src/**/*.test.tsx", "packages/client/src/**/*.test.ts"],
+    include: ["src/**/*.test.tsx", "src/**/*.test.ts"],
     exclude: ["**/node_modules/**"],
   },
   resolve: {

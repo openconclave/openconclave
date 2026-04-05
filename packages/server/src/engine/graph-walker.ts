@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 
 import { db } from "../db/client";
-import { runs } from "../db/schema";
+import { runs, checkpoints } from "../db/schema";
 import { getIncomingEdges, getOutgoingEdges } from "./graph";
 import { executeNode } from "./node-executor";
 import { logger } from "../lib/logger";
@@ -46,13 +46,20 @@ export async function executeGraph(
   workflow: WorkflowDefinition,
   emit: (event: RunEvent) => void,
   triggerPayload?: unknown,
-  triggerNodeId?: string
+  triggerNodeId?: string,
+  resumeFromCheckpointId?: number // undefined = fresh run
 ): Promise<void> {
   const { nodes, edges } = workflow;
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
   const nodeOutputs = new Map<string, unknown>();
   // Session IDs per agent — Claude: SDK session ID, non-Claude: JSONL file path
   const agentSessions = new Map<string, string>();
+  // Tracks nodes that completed successfully (used for skip logic on resume)
+  const completedNodes = new Set<string>();
+  // Raw executeNode outputs — never mutated by resolveNextEntries (which overwrites nodeOutputs
+  // for condition/routing nodes with passthrough). Checkpoints store these raw values so that
+  // on any subsequent resume the skip path can always call resolveNextEntries correctly.
+  const checkpointOutputs = new Map<string, unknown>();
 
   // For chat workflows, restore persistent sessions from previous runs
   const isChatWorkflow = nodes.some((n) => {
@@ -71,6 +78,26 @@ export async function executeGraph(
       }
     }
   }
+  // Resume: hydrate accumulated state from the latest checkpoint
+  if (resumeFromCheckpointId !== undefined) {
+    const [cp] = await db
+      .select()
+      .from(checkpoints)
+      .where(eq(checkpoints.id, resumeFromCheckpointId));
+    if (cp) {
+      for (const [k, v] of Object.entries(cp.nodeOutputs as Record<string, unknown>)) {
+        nodeOutputs.set(k, v);
+        checkpointOutputs.set(k, v); // checkpoint only ever stored raw outputs
+      }
+      for (const nodeId of cp.completedNodes as string[]) {
+        completedNodes.add(nodeId);
+      }
+      for (const [k, v] of Object.entries(cp.agentSessions as Record<string, string>)) {
+        agentSessions.set(k, v);
+      }
+    }
+  }
+
   // Extract internal fields from trigger payload
   let callerCwd: string | undefined;
   let cleanPayload = triggerPayload;
@@ -112,6 +139,10 @@ export async function executeGraph(
     const pendingInputs = new Map<string, Map<string, unknown>>(); // nodeId -> (sourceId -> output)
     // Track which merge nodes have already fired to prevent double-execution
     const firedMerges = new Set<string>();
+    // Resume: prevent already-completed merge nodes from waiting for inputs again
+    for (const nodeId of completedNodes) {
+      if (nodeMap.get(nodeId)?.data.type === "merge") firedMerges.add(nodeId);
+    }
     let iterations = 0;
 
     while (queue.length > 0) {
@@ -179,6 +210,23 @@ export async function executeGraph(
           const node = nodeMap.get(entry.nodeId);
           if (!node) return [];
 
+          // Resume: skip nodes that already completed in a previous execution attempt.
+          // We pass checkpointOutputs (raw executeNode values, never mutated) to resolveNextEntries
+          // so that condition branching (__conditionResult) and agent routing (__routeTo) work
+          // correctly even after multiple resume cycles — nodeOutputs may have been overwritten
+          // by a prior resolveNextEntries call (e.g. condition passthrough).
+          if (completedNodes.has(entry.nodeId)) {
+            emit({ type: "node:skipped", runId, nodeId: entry.nodeId });
+            return resolveNextEntries(
+              entry,
+              node,
+              checkpointOutputs.get(entry.nodeId),
+              edges,
+              nodeMap,
+              nodeOutputs
+            );
+          }
+
           const output = await executeNode(
             runId,
             entry.nodeId,
@@ -193,6 +241,16 @@ export async function executeGraph(
             entry.triggeredBy,
             callerCwd
           );
+
+          // ORDERING INVARIANT: checkpoint MUST come before resolveNextEntries.
+          // For condition nodes, resolveNextEntries calls nodeOutputs.set(nodeId, passthrough),
+          // overwriting the raw {__conditionResult, __passthrough} output. Same for agent routing
+          // nodes that strip __routeTo. If checkpoint ran after, it would store the mutated value.
+          // checkpointOutputs is a separate map that only ever holds raw executeNode outputs —
+          // it is never touched by resolveNextEntries, so subsequent checkpoints are always safe.
+          checkpointOutputs.set(entry.nodeId, output);
+          completedNodes.add(entry.nodeId);
+          await writeCheckpoint(runId, entry.nodeId, checkpointOutputs, completedNodes, agentSessions);
 
           return resolveNextEntries(entry, node, output, edges, nodeMap, nodeOutputs);
         })
@@ -232,6 +290,45 @@ export async function executeGraph(
       .set({ status: "failure", completedAt: now, error: message })
       .where(eq(runs.id, runId));
     emit({ type: "run:completed", runId, data: { status: "failure", error: message } });
+  }
+}
+
+// ── Checkpoint writer ──────────────────────────────────────────
+
+/**
+ * Writes a full-snapshot checkpoint after each successfully completed node.
+ *
+ * `nodeOutputs` here is the `checkpointOutputs` map — raw `executeNode` return values,
+ * never overwritten by `resolveNextEntries`. This invariant ensures every checkpoint row
+ * stores values that can be safely passed back to `resolveNextEntries` on any future resume
+ * cycle, preserving `__conditionResult` and `__routeTo` for conditional/routing nodes.
+ *
+ * Each row is a complete accumulated snapshot (O(n²) storage for n nodes). Acceptable for
+ * Phase 1. Phase 3 cleanup: delete all but the latest checkpoint row once a run succeeds.
+ *
+ * Never throws — a missed checkpoint must not abort workflow execution. The run falls back
+ * to an earlier checkpoint (or re-executes from scratch) on the next resume.
+ */
+async function writeCheckpoint(
+  runId: number,
+  nodeId: string,
+  nodeOutputs: Map<string, unknown>,
+  completedNodes: Set<string>,
+  agentSessions: Map<string, string>
+): Promise<void> {
+  try {
+    await db.insert(checkpoints).values({
+      runId,
+      nodeId,
+      nodeOutputs: Object.fromEntries(nodeOutputs),
+      completedNodes: Array.from(completedNodes),
+      agentSessions: Object.fromEntries(agentSessions),
+      createdAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    logger.error("Failed to write checkpoint", { runId, nodeId, error: String(err) });
+    // Intentionally not re-throwing — a missed checkpoint degrades resume granularity,
+    // but must never abort workflow execution.
   }
 }
 

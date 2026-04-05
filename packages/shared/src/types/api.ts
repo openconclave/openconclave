@@ -20,10 +20,17 @@ export type RunListResponse = {
   runs: Run[];
 };
 
+export type CheckpointInfo = {
+  /** IDs of nodes that completed successfully before the failure */
+  completedNodes: string[];
+  createdAt: string;
+};
+
 export type RunDetailResponse = {
   run: Run;
   tasks: AgentTask[];
   events: RunEvent[];
+  checkpoint?: CheckpointInfo | null;
 };
 
 export type DashboardResponse = {

@@ -58,6 +58,16 @@ export function runMigrations(): void {
     created_at TEXT NOT NULL
   )`);
 
+  db.run(sql`CREATE TABLE IF NOT EXISTS checkpoints (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL REFERENCES runs(id),
+    node_id TEXT NOT NULL,
+    node_outputs TEXT NOT NULL,
+    completed_nodes TEXT NOT NULL,
+    agent_sessions TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  )`);
+
   db.run(sql`CREATE TABLE IF NOT EXISTS mcp_servers (
     name TEXT PRIMARY KEY,
     type TEXT NOT NULL,
@@ -121,6 +131,7 @@ export function runMigrations(): void {
   db.run(sql`CREATE INDEX IF NOT EXISTS idx_documents_kb_id ON documents(knowledge_base_id)`);
   db.run(sql`CREATE INDEX IF NOT EXISTS idx_chunks_doc_id ON chunks(document_id)`);
   db.run(sql`CREATE INDEX IF NOT EXISTS idx_chunks_kb_id ON chunks(knowledge_base_id)`);
+  db.run(sql`CREATE INDEX IF NOT EXISTS idx_checkpoints_run_id ON checkpoints(run_id)`);
 
   logger.info("Database migrations complete");
 }

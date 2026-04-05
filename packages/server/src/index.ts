@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, and, inArray } from "drizzle-orm";
 
 import { logger } from "./lib/logger";
 import { errorHandler } from "./lib/errors";
@@ -195,6 +195,44 @@ app.post("/api/workflows/:id/run", async (c) => {
   );
 
   return c.json({ runId, status: "running" }, 201);
+});
+
+// ── Resume Failed / Interrupted Run ─────────────────────────
+app.post("/api/runs/:id/resume", async (c) => {
+  const id = Number(c.req.param("id"));
+
+  // Atomically claim this run for re-execution. SQLite serializes all writers, so exactly one
+  // of N concurrent resume requests will update a row (updated.length === 1). The rest see 0
+  // rows updated and receive a 409. We also clear completedAt/error so the row is clean for
+  // the new attempt.
+  const updated = await db
+    .update(runs)
+    .set({ status: "running", startedAt: new Date().toISOString(), completedAt: null, error: null })
+    .where(and(eq(runs.id, id), inArray(runs.status, ["failure", "interrupted"])))
+    .returning({ id: runs.id, workflowId: runs.workflowId });
+
+  if (updated.length === 0) {
+    // Distinguish 404 (run doesn't exist) from 409 (exists but not in a resumable state)
+    const run = await db.select().from(runs).where(eq(runs.id, id)).get();
+    if (!run) throw AppError.notFound("Run", String(id));
+    return c.json(
+      { error: { code: "CONFLICT", message: `Run ${id} is not resumable (status: ${run.status})` } },
+      409
+    );
+  }
+
+  const wf = await db
+    .select()
+    .from(workflows)
+    .where(eq(workflows.id, updated[0].workflowId))
+    .get();
+  if (!wf) throw AppError.notFound("Workflow", String(updated[0].workflowId));
+
+  // WARNING: resuming against a modified workflow definition may produce unexpected results
+  // if nodes before the checkpoint were added, removed, or renamed since the original run.
+  // Future: store workflowUpdatedAt in the checkpoint row and warn on mismatch.
+  await executor.resume(id, wf.definition as never);
+  return c.json({ resumed: true, runId: id }, 200);
 });
 
 // ── Chat Message (continue existing run) ─────────────────────

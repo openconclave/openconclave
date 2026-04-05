@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { eq, desc } from "drizzle-orm";
 
 import { db } from "../db/client";
-import { runs, agentTasks, runEvents } from "../db/schema";
+import { runs, agentTasks, runEvents, checkpoints } from "../db/schema";
 import { clearPromptsForRun } from "../engine/prompt-registry";
 import { AppError } from "@openconclave/shared";
 
@@ -44,7 +44,21 @@ export const runRoutes = new Hono()
     const tasks = await db.select().from(agentTasks).where(eq(agentTasks.runId, id));
     const events = await db.select().from(runEvents).where(eq(runEvents.runId, id));
 
-    return c.json({ run, tasks, events });
+    const [latestCp] = await db
+      .select()
+      .from(checkpoints)
+      .where(eq(checkpoints.runId, id))
+      .orderBy(desc(checkpoints.id))
+      .limit(1);
+
+    return c.json({
+      run,
+      tasks,
+      events,
+      checkpoint: latestCp
+        ? { completedNodes: latestCp.completedNodes as string[], createdAt: latestCp.createdAt }
+        : null,
+    });
   })
 
   .post("/:id/cancel", async (c) => {

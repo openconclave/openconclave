@@ -40,6 +40,7 @@ export type {
   UpdateWorkflowRequest,
   WorkflowListResponse,
   RunListResponse,
+  CheckpointInfo,
   RunDetailResponse,
   DashboardResponse,
 } from "./types/api";

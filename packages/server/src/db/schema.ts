@@ -49,6 +49,18 @@ export const runEvents = sqliteTable("run_events", {
   createdAt: text("created_at").notNull(),
 });
 
+export const checkpoints = sqliteTable("checkpoints", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  runId: integer("run_id").references(() => runs.id).notNull(),
+  nodeId: text("node_id").notNull(),
+  // Full snapshot of raw executeNode outputs at checkpoint time — never mutated by resolveNextEntries.
+  // Each row is a complete accumulation so resume only needs the latest row.
+  nodeOutputs: text("node_outputs", { mode: "json" }).notNull(),    // Record<nodeId, raw output>
+  completedNodes: text("completed_nodes", { mode: "json" }).notNull(), // string[]
+  agentSessions: text("agent_sessions", { mode: "json" }).notNull(), // Record<nodeId, sessionId>
+  createdAt: text("created_at").notNull(),
+});
+
 export const settings = sqliteTable("settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),

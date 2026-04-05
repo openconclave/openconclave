@@ -48,6 +48,7 @@ interface WorkflowState {
   edges: Edge[];
   selectedNodeId: string | null;
   activeNodeIds: Set<string>;
+  skippedNodeIds: Set<string>;
   workflowName: string;
   workflowDescription: string;
   toolName?: string;
@@ -58,6 +59,7 @@ interface WorkflowState {
   onConnect: OnConnect;
   setSelectedNode: (id: string | null) => void;
   setActiveNodes: (ids: Set<string>) => void;
+  setSkippedNodes: (ids: Set<string>) => void;
   addNode: (node: Node<WorkflowNodeData>) => void;
   updateNodeData: (id: string, data: Partial<WorkflowNodeData>) => void;
   updateNodeConfig: (id: string, config: Partial<WorkflowNodeConfig>) => void;
@@ -80,6 +82,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   edges: [],
   selectedNodeId: null,
   activeNodeIds: new Set<string>(),
+  skippedNodeIds: new Set<string>(),
   workflowName: "Untitled Workflow",
   workflowDescription: "",
   isDirty: false,
@@ -120,6 +123,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
 
   setSelectedNode: (id) => set({ selectedNodeId: id }),
   setActiveNodes: (ids) => set({ activeNodeIds: ids }),
+  setSkippedNodes: (ids) => set({ skippedNodeIds: ids }),
 
   addNode: (node) => {
     set({ nodes: [...get().nodes, node], isDirty: true });
@@ -181,6 +185,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       isDirty: false,
       selectedNodeId: null,
       activeNodeIds: new Set<string>(),
+      skippedNodeIds: new Set<string>(),
     });
   },
 
@@ -190,6 +195,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       edges: [],
       selectedNodeId: null,
       activeNodeIds: new Set<string>(),
+      skippedNodeIds: new Set<string>(),
       workflowName: "Untitled Workflow",
       workflowDescription: "",
       isDirty: false,

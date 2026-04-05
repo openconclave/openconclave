@@ -1,5 +1,7 @@
+import { eq, desc } from "drizzle-orm";
+
 import { db } from "../db/client";
-import { runs, runEvents } from "../db/schema";
+import { runs, runEvents, checkpoints } from "../db/schema";
 import { executeGraph } from "./graph-walker";
 import { logger } from "../lib/logger";
 import type { WorkflowDefinition } from "@openconclave/shared";
@@ -65,6 +67,38 @@ export class WorkflowExecutor {
     );
 
     return runId;
+  }
+
+  /**
+   * Resume a failed or interrupted run from its latest checkpoint.
+   *
+   * PRECONDITION: the caller (resume route in index.ts) has already atomically updated
+   * run.status to "running" via a conditional UPDATE. This prevents double-resume races —
+   * only one concurrent request can win the atomic claim.
+   *
+   * If no checkpoint exists (the run failed before completing any node), executeGraph
+   * runs from scratch — equivalent to a clean retry with at-least-once semantics.
+   */
+  async resume(runId: number, workflow: WorkflowDefinition): Promise<void> {
+    const [latestCp] = await db
+      .select()
+      .from(checkpoints)
+      .where(eq(checkpoints.runId, runId))
+      .orderBy(desc(checkpoints.id))
+      .limit(1);
+
+    const nodes = (workflow.nodes ?? []) as Array<{ id: string; data?: { type?: string } }>;
+    const triggerNode = nodes.find((n) => n.data?.type === "trigger");
+    const emit = (event: RunEvent) => this.emit(event);
+
+    this.emit({ type: "run:started", runId });
+
+    executeGraph(runId, workflow, emit, undefined, triggerNode?.id, latestCp?.id).catch(
+      (err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        logger.error(`Run ${runId} resume failed`, { error: message });
+      }
+    );
   }
 
   // ── Events ──────────────────────────────────────────────
