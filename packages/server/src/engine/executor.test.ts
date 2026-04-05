@@ -11,15 +11,17 @@
  *  - execute(): fires executeGraph asynchronously (non-blocking)
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { WorkflowDefinition, WorkflowNode, WorkflowEdge } from "@openconclave/shared";
 
-// ── Mock functions (declared before vi.mock so they're available in factory closures) ──
+// ── Mock functions (vi.hoisted so vitest hoists them alongside vi.mock) ──
 
-const mockDbSelect = vi.fn();
-const mockDbInsert = vi.fn();
-const mockDbUpdate = vi.fn();
-const mockExecuteGraph = vi.fn().mockResolvedValue(undefined);
+const { mockDbSelect, mockDbInsert, mockDbUpdate, mockExecuteGraph } = vi.hoisted(() => ({
+  mockDbSelect: vi.fn(),
+  mockDbInsert: vi.fn(),
+  mockDbUpdate: vi.fn(),
+  mockExecuteGraph: vi.fn().mockResolvedValue(undefined),
+}));
 
 vi.mock("../db/client", () => ({
   db: {

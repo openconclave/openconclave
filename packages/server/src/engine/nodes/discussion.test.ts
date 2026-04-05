@@ -33,6 +33,7 @@ vi.mock("../../lib/logger", () => ({
 // ── Imports (after mocks) ─────────────────────────────────────
 
 import { executeDiscussion } from "./discussion";
+
 import { db } from "../../db/client";
 import { executeAgent } from "../agent-executor";
 import { invokeWithTools } from "../../agent/llm-call";

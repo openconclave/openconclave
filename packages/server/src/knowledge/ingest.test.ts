@@ -1,14 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 
-// Mock Bun.file — vi.stubGlobal is not available in Bun's test runner
-const originalBunFile = Bun.file;
+// Mock Bun global for vitest (runs under Node, not Bun)
 const mockBunFile = vi.fn();
-// @ts-expect-error — overriding read-only Bun.file for testing
-Bun.file = mockBunFile;
-afterAll(() => {
-  // @ts-expect-error — restoring original
-  Bun.file = originalBunFile;
-});
+if (typeof globalThis.Bun === "undefined") {
+  (globalThis as Record<string, unknown>).Bun = { file: mockBunFile };
+} else {
+  const originalBunFile = Bun.file;
+  // @ts-expect-error — overriding read-only Bun.file for testing
+  Bun.file = mockBunFile;
+  afterAll(() => {
+    // @ts-expect-error — restoring original
+    Bun.file = originalBunFile;
+  });
+}
 
 // Mock database
 vi.mock("../db/client", () => ({

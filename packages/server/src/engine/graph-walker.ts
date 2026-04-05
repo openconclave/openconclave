@@ -54,8 +54,12 @@ export async function executeGraph(
   const nodeOutputs = new Map<string, unknown>();
   // Session IDs per agent — Claude: SDK session ID, non-Claude: JSONL file path
   const agentSessions = new Map<string, string>();
-  // Tracks nodes that completed successfully (used for skip logic on resume)
+  // Tracks nodes that completed successfully (used for checkpoint tracking)
   const completedNodes = new Set<string>();
+  // Nodes loaded from checkpoint — only these are skipped on resume.
+  // Separate from completedNodes so that loop-back targets re-execute during
+  // normal execution instead of being skipped indefinitely.
+  const resumeSkipNodes = new Set<string>();
   // Raw executeNode outputs — never mutated by resolveNextEntries (which overwrites nodeOutputs
   // for condition/routing nodes with passthrough). Checkpoints store these raw values so that
   // on any subsequent resume the skip path can always call resolveNextEntries correctly.
@@ -91,6 +95,7 @@ export async function executeGraph(
       }
       for (const nodeId of cp.completedNodes as string[]) {
         completedNodes.add(nodeId);
+        resumeSkipNodes.add(nodeId);
       }
       for (const [k, v] of Object.entries(cp.agentSessions as Record<string, string>)) {
         agentSessions.set(k, v);
@@ -210,12 +215,12 @@ export async function executeGraph(
           const node = nodeMap.get(entry.nodeId);
           if (!node) return [];
 
-          // Resume: skip nodes that already completed in a previous execution attempt.
-          // We pass checkpointOutputs (raw executeNode values, never mutated) to resolveNextEntries
-          // so that condition branching (__conditionResult) and agent routing (__routeTo) work
-          // correctly even after multiple resume cycles — nodeOutputs may have been overwritten
-          // by a prior resolveNextEntries call (e.g. condition passthrough).
-          if (completedNodes.has(entry.nodeId)) {
+          // Resume: skip nodes that completed in a previous execution attempt.
+          // Only nodes loaded from the checkpoint are skipped — nodes that completed
+          // earlier in THIS run are NOT skipped, allowing condition-driven loops
+          // (e.g. reviewer → condition:false → developer) to re-execute correctly.
+          if (resumeSkipNodes.has(entry.nodeId)) {
+            resumeSkipNodes.delete(entry.nodeId); // one-time skip; loops re-execute
             emit({ type: "node:skipped", runId, nodeId: entry.nodeId });
             return resolveNextEntries(
               entry,

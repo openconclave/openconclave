@@ -11,17 +11,19 @@
  *  - Resume: checkpoint row missing → fresh run (fallback)
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { WorkflowDefinition, WorkflowNode, WorkflowEdge } from "@openconclave/shared";
 
-// ── Mock functions (declared before vi.mock so they're available in factory closures) ──
+// ── Mock functions (vi.hoisted so vitest hoists them alongside vi.mock) ──
 
-const mockDbSelect = vi.fn();
-const mockDbInsert = vi.fn();
-const mockDbUpdate = vi.fn();
-const mockLoggerError = vi.fn();
-const mockLoggerWarn = vi.fn();
-const mockExecuteNode = vi.fn();
+const { mockDbSelect, mockDbInsert, mockDbUpdate, mockLoggerError, mockLoggerWarn, mockExecuteNode } = vi.hoisted(() => ({
+  mockDbSelect: vi.fn(),
+  mockDbInsert: vi.fn(),
+  mockDbUpdate: vi.fn(),
+  mockLoggerError: vi.fn(),
+  mockLoggerWarn: vi.fn(),
+  mockExecuteNode: vi.fn(),
+}));
 
 vi.mock("../db/client", () => ({
   db: {

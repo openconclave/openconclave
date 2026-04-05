@@ -1,7 +1,14 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+
+// Mock modules with Bun-specific imports (bun:sqlite) so vitest can load agent-executor
+vi.mock("../db/client", () => ({ db: {} }));
+vi.mock("../agent/pool", () => ({ agentPool: { submit: vi.fn() } }));
+vi.mock("../agent/ollama", () => ({ runOllamaAgent: vi.fn() }));
+vi.mock("../agent/openai", () => ({ runOpenAIAgent: vi.fn() }));
+vi.mock("../lib/logger", () => ({ logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
+vi.mock("../lib/workspace", () => ({ SESSIONS_DIR: "/tmp/sessions" }));
 
 // mapOllamaTools is a pure function — no external deps needed.
-// Import it directly after ensuring it is exported.
 import { mapOllamaTools } from "./agent-executor";
 
 import type { ResolvedAgentConfig } from "@openconclave/shared";
