@@ -85,13 +85,9 @@ export function DiscussionNode(props: NodeProps) {
 
   const isActive = activeNodeIds.has(props.id);
 
-  // BUG-1 fix: count edges in BOTH directions via the "participants" handle.
-  // When the user drags from this node outward → edge stored as source=this, sourceHandle="participants".
-  // When the user drags from an agent inward → edge stored as target=this, targetHandle="participants".
+  // Participants connect TO the "participants" target handle on the left side.
   const participantCount = edges.filter(
-    (e) =>
-      (e.source === props.id && e.sourceHandle === "participants") ||
-      (e.target === props.id && e.targetHandle === "participants")
+    (e) => e.target === props.id && e.targetHandle === "participants"
   ).length;
 
   const [dragOver, setDragOver] = useState(false);
@@ -191,7 +187,7 @@ export function DiscussionNode(props: NodeProps) {
       >
         {/* Top handle — data input from upstream */}
         <Handle
-          type="source"
+          type="target"
           id="top"
           position={Position.Top}
           style={{ left: "50%" }}
@@ -202,7 +198,7 @@ export function DiscussionNode(props: NodeProps) {
             BUG-3 fix: no children inside Handle (causes layout anomalies at non-100% zoom).
             The participant count in the header subtitle conveys the same information. */}
         <Handle
-          type="source"
+          type="target"
           id="participants"
           position={Position.Left}
           style={{ top: "50%" }}
