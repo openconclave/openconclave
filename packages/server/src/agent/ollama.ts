@@ -111,6 +111,7 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
   const resolvedConfig: ResolvedAgentConfig = {
     allowedTools: options.allowedTools ?? [],
     mcpServers: options.mcpServers ?? [],
+    mcpTools: options.mcpTools,
     knowledgeBases: options.knowledgeBases ?? [],
   };
   const agent = new AgentBase(resolvedConfig, options.workspace);

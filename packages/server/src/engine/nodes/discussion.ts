@@ -16,6 +16,7 @@ import type {
   ResolvedAgentConfig,
   DiscussionConfig,
   DiscussionModeratorConfig,
+  ToolConfig,
 } from "@openconclave/shared";
 import type { RunEvent } from "../types";
 import type { Workspace } from "../workspace";
@@ -115,10 +116,11 @@ export async function executeDiscussion(
     // Resolve tools from agent config — respect what the workflow setup configured
     const connectedTools: string[] = [];
     const connectedMcpServers: string[] = [];
+    const connectedMcpTools: ToolConfig[] = [];
     const connectedKnowledgeBases: string[] = [];
     for (const tool of agentConfig.tools ?? []) {
       if (tool.toolType === "builtin") connectedTools.push(tool.toolId);
-      else if (tool.toolType === "mcp") connectedMcpServers.push(tool.toolId);
+      else if (tool.toolType === "mcp") { connectedMcpServers.push(tool.toolId); connectedMcpTools.push(tool); }
       else if (tool.toolType === "knowledge") connectedKnowledgeBases.push(tool.toolId);
     }
 
@@ -126,6 +128,7 @@ export async function executeDiscussion(
       ...agentConfig,
       allowedTools: connectedTools,
       mcpServers: connectedMcpServers,
+      mcpTools: connectedMcpTools,
       knowledgeBases: connectedKnowledgeBases,
     };
 

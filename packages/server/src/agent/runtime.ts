@@ -59,10 +59,21 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
   }
 
   // Build MCP server config from workspace (single source of truth for dirs + configs)
+  // Claude SDK only supports stdio transport — remote servers are handled by McpBridge in other engines.
   const mcpServers: Record<string, { command: string; args: string[]; env?: Record<string, string> }> = {};
 
   if (config.mcpServers?.length) {
-    Object.assign(mcpServers, ws.getMcpServerConfigs(config.mcpServers));
+    const mcpTools = config.mcpTools ?? [];
+    const legacyIds = config.mcpServers.filter(
+      (id) => !mcpTools.some((t) => t.toolId === id),
+    );
+    const resolved = ws.getMcpToolConfigs(mcpTools, legacyIds);
+    for (const [id, cfg] of Object.entries(resolved)) {
+      // Claude SDK only supports stdio MCP servers
+      if (cfg.transport === "stdio" && cfg.command) {
+        mcpServers[id] = { command: cfg.command, args: cfg.args ?? [], env: cfg.env };
+      }
+    }
   }
 
   // Add OpenConclave workflow MCP server for routing and knowledge tools
@@ -111,7 +122,10 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
         tools: config.allowedTools?.length
           ? config.allowedTools
           : { type: "preset" as const, preset: "claude_code" as const },
-        mcpServers: Object.keys(mcpServers).length > 0 ? mcpServers : undefined,
+        mcpServers,
+        // Isolate agent from user's personal MCP servers (Gmail, Sknet, etc.)
+        // Only servers explicitly passed in mcpServers above will be available.
+        strictMcpConfig: true,
         resume: options.sessionId,
         thinking: { type: "enabled" as const, budgetTokens: 31999 },
       },

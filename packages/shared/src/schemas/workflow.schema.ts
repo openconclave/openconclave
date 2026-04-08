@@ -16,10 +16,39 @@ export const triggerConfigSchema = z.object({
   chatId: z.string().optional(),
 });
 
+const mcpServerLaunchConfigSchema = z.object({
+  registryName: z.string(),
+  package: z.object({
+    registryType: z.enum(["npm", "pypi", "oci"]),
+    identifier: z.string(),
+    version: z.string().optional(),
+    runtimeHint: z.string().optional(),
+    environmentVariables: z.array(z.object({
+      name: z.string(),
+      description: z.string().optional(),
+      isRequired: z.boolean(),
+      isSecret: z.boolean(),
+    })).optional(),
+    packageArguments: z.array(z.object({
+      name: z.string(),
+      description: z.string().optional(),
+      isRequired: z.boolean(),
+      type: z.enum(["named", "positional"]),
+    })).optional(),
+  }).optional(),
+  remote: z.object({
+    type: z.enum(["streamable-http", "sse"]),
+    url: z.string(),
+  }).optional(),
+  envValues: z.record(z.string()).optional(),
+  argValues: z.record(z.string()).optional(),
+}).passthrough();
+
 const toolConfigSchema = z.object({
   toolType: z.enum(["builtin", "mcp", "knowledge"]),
   toolId: z.string(),
   toolName: z.string(),
+  mcpLaunchConfig: mcpServerLaunchConfigSchema.optional(),
 });
 
 export const agentConfigSchema = z.object({

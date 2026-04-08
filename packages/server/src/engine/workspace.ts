@@ -12,6 +12,7 @@
  */
 
 import { join, isAbsolute, resolve, normalize } from "path";
+import type { ToolConfig } from "@openconclave/shared";
 
 // ── MCP server configs ──────────────────────────────────────
 
@@ -20,7 +21,8 @@ interface McpServerConfig {
   args: string[];
 }
 
-const MCP_SERVER_CONFIGS: Record<string, McpServerConfig> = {
+/** Legacy hardcoded servers — used as fallback for old workflows. */
+const LEGACY_MCP_SERVER_CONFIGS: Record<string, McpServerConfig> = {
   playwright: {
     command: "npx",
     args: ["@playwright/mcp@latest"],
@@ -38,6 +40,17 @@ const MCP_SERVER_CONFIGS: Record<string, McpServerConfig> = {
     args: ["@modelcontextprotocol/server-fetch@latest"],
   },
 };
+
+/** Resolved config for launching an MCP server (stdio or remote). */
+export interface McpResolvedConfig {
+  transport: "stdio" | "streamable-http" | "sse";
+  /** For stdio transport */
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  /** For remote transports */
+  url?: string;
+}
 
 // ── Workspace ───────────────────────────────────────────────
 
@@ -118,14 +131,14 @@ export class Workspace {
   // ── MCP server configs ──────────────────────────────────────
 
   /**
-   * Get MCP server launch configs for the given server IDs.
+   * Get MCP server launch configs for the given server IDs (legacy path).
    * Automatically injects allowed directories into the filesystem server args.
    */
   getMcpServerConfigs(serverIds: string[]): Record<string, { command: string; args: string[] }> {
     const result: Record<string, { command: string; args: string[] }> = {};
 
     for (const id of serverIds) {
-      const config = MCP_SERVER_CONFIGS[id];
+      const config = LEGACY_MCP_SERVER_CONFIGS[id];
       if (!config) continue;
 
       const args = [...config.args];
@@ -139,13 +152,86 @@ export class Workspace {
     return result;
   }
 
-  /** Look up a single MCP server base config (without filesystem dirs injected). */
-  static getMcpServerBaseConfig(serverId: string): McpServerConfig | undefined {
-    return MCP_SERVER_CONFIGS[serverId];
+  /**
+   * Resolve MCP server configs from full ToolConfig objects (registry path)
+   * and legacy string IDs (backward compat).
+   *
+   * Returns a map of serverId → McpResolvedConfig ready for McpBridge.
+   */
+  getMcpToolConfigs(
+    mcpTools: ToolConfig[],
+    legacyIds: string[] = [],
+  ): Record<string, McpResolvedConfig> {
+    const result: Record<string, McpResolvedConfig> = {};
+
+    // Registry-sourced tools
+    for (const tool of mcpTools) {
+      const lc = tool.mcpLaunchConfig;
+      if (!lc) {
+        // No launch config — fall through to legacy lookup
+        const legacy = LEGACY_MCP_SERVER_CONFIGS[tool.toolId];
+        if (legacy) {
+          const args = [...legacy.args];
+          if (tool.toolId === "filesystem") args.push(...this.getAllowedDirs());
+          result[tool.toolId] = { transport: "stdio", command: legacy.command, args };
+        }
+        continue;
+      }
+
+      // Prefer stdio package if available
+      if (lc.package) {
+        const pkg = lc.package;
+        const runtime = pkg.runtimeHint ?? (pkg.registryType === "npm" ? "npx" : "uvx");
+        const pkgRef = pkg.version ? `${pkg.identifier}@${pkg.version}` : pkg.identifier;
+        const args = [pkgRef];
+
+        // Append user-provided named arguments
+        if (lc.argValues) {
+          for (const [name, value] of Object.entries(lc.argValues)) {
+            args.push(`--${name}`, value);
+          }
+        }
+
+        // Build env from user-provided values
+        const env: Record<string, string> = {};
+        if (lc.envValues) {
+          Object.assign(env, lc.envValues);
+        }
+
+        result[tool.toolId] = {
+          transport: "stdio",
+          command: runtime,
+          args,
+          env: Object.keys(env).length > 0 ? env : undefined,
+        };
+      } else if (lc.remote) {
+        result[tool.toolId] = {
+          transport: lc.remote.type,
+          url: lc.remote.url,
+        };
+      }
+    }
+
+    // Legacy string IDs not already covered
+    for (const id of legacyIds) {
+      if (result[id]) continue;
+      const legacy = LEGACY_MCP_SERVER_CONFIGS[id];
+      if (!legacy) continue;
+      const args = [...legacy.args];
+      if (id === "filesystem") args.push(...this.getAllowedDirs());
+      result[id] = { transport: "stdio", command: legacy.command, args };
+    }
+
+    return result;
   }
 
-  /** All known MCP server IDs. */
+  /** Look up a single legacy MCP server base config. */
+  static getMcpServerBaseConfig(serverId: string): McpServerConfig | undefined {
+    return LEGACY_MCP_SERVER_CONFIGS[serverId];
+  }
+
+  /** All known legacy MCP server IDs. */
   static get knownMcpServerIds(): string[] {
-    return Object.keys(MCP_SERVER_CONFIGS);
+    return Object.keys(LEGACY_MCP_SERVER_CONFIGS);
   }
 }

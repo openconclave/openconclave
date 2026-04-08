@@ -24,6 +24,7 @@ export type {
   WorkflowDefinition,
   DiscussionConfig,
   DiscussionModeratorConfig,
+  McpServerLaunchConfig,
 } from "./types/workflow";
 
 export type { AgentTask, Run, RunEvent } from "./types/agent";
@@ -43,6 +44,8 @@ export type {
   CheckpointInfo,
   RunDetailResponse,
   DashboardResponse,
+  McpRegistryServer,
+  McpRegistrySearchResponse,
 } from "./types/api";
 
 // Schemas

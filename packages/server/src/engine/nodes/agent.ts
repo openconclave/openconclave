@@ -1,6 +1,6 @@
 import { join } from "path";
 import { mkdirSync, existsSync, appendFileSync } from "fs";
-import type { WorkflowNode, WorkflowEdge, AgentConfig, ResolvedAgentConfig } from "@openconclave/shared";
+import type { WorkflowNode, WorkflowEdge, AgentConfig, ResolvedAgentConfig, ToolConfig } from "@openconclave/shared";
 import { executeAgent } from "../agent-executor";
 import { SESSIONS_DIR } from "../../lib/workspace";
 import type { RunEvent } from "../types";
@@ -23,6 +23,7 @@ export async function executeAgentNode(
   const agentConfig = node.data.config as AgentConfig;
   const connectedTools: string[] = [];
   const connectedMcpServers: string[] = [];
+  const connectedMcpTools: ToolConfig[] = [];
   const connectedKnowledgeBases: string[] = [];
 
   for (const tool of agentConfig.tools ?? []) {
@@ -30,6 +31,7 @@ export async function executeAgentNode(
       connectedTools.push(tool.toolId);
     } else if (tool.toolType === "mcp") {
       connectedMcpServers.push(tool.toolId);
+      connectedMcpTools.push(tool);
     } else if (tool.toolType === "knowledge") {
       connectedKnowledgeBases.push(tool.toolId);
     }
@@ -55,6 +57,7 @@ export async function executeAgentNode(
     ...agentConfig,
     allowedTools: connectedTools,
     mcpServers: connectedMcpServers,
+    mcpTools: connectedMcpTools,
     knowledgeBases: connectedKnowledgeBases,
   };
 

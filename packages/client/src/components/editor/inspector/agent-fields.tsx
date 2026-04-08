@@ -371,33 +371,69 @@ export function AgentFields({ nodeId, config }: AgentFieldsProps) {
             Drag tools from the palette onto this agent node.
           </p>
         ) : (
-          <div className="flex flex-wrap gap-1.5">
-            {(config.tools ?? []).map((tool: ToolConfig, i: number) => {
-              const Icon = tool.toolType === "knowledge" ? BookOpen
-                : tool.toolType === "mcp" ? Server : Terminal;
-              const color = tool.toolType === "knowledge" ? "bg-node-knowledge" : "bg-node-tool";
-              return (
-                <span
-                  key={`${tool.toolType}-${tool.toolId}`}
-                  className={cn(
-                    "inline-flex items-center gap-1 rounded-full pl-1.5 pr-1 py-0.5 text-[10px] font-medium text-white",
-                    color
-                  )}
-                >
-                  <Icon className="h-3 w-3" />
-                  {tool.toolName}
-                  <button
-                    onClick={() => {
-                      const existing = config.tools ?? [];
-                      update({ tools: existing.filter((_, idx) => idx !== i) });
-                    }}
-                    className="ml-0.5 rounded-full hover:bg-white/20 p-0.5"
+          <div className="space-y-2">
+            <div className="flex flex-wrap gap-1.5">
+              {(config.tools ?? []).map((tool: ToolConfig, i: number) => {
+                const Icon = tool.toolType === "knowledge" ? BookOpen
+                  : tool.toolType === "mcp" ? Server : Terminal;
+                const color = tool.toolType === "knowledge" ? "bg-node-knowledge" : "bg-node-tool";
+                return (
+                  <span
+                    key={`${tool.toolType}-${tool.toolId}`}
+                    className={cn(
+                      "inline-flex items-center gap-1 rounded-full pl-1.5 pr-1 py-0.5 text-[10px] font-medium text-white",
+                      color
+                    )}
                   >
-                    <X className="h-2.5 w-2.5" />
-                  </button>
-                </span>
-              );
-            })}
+                    <Icon className="h-3 w-3" />
+                    {tool.toolName}
+                    <button
+                      onClick={() => {
+                        const existing = config.tools ?? [];
+                        update({ tools: existing.filter((_, idx) => idx !== i) });
+                      }}
+                      className="ml-0.5 rounded-full hover:bg-white/20 p-0.5"
+                    >
+                      <X className="h-2.5 w-2.5" />
+                    </button>
+                  </span>
+                );
+              })}
+            </div>
+            {/* Env var configuration for registry MCP tools */}
+            {(config.tools ?? [])
+              .filter((t: ToolConfig) => t.mcpLaunchConfig?.package?.environmentVariables?.length)
+              .map((tool: ToolConfig, _i: number) => (
+                <div key={`env-${tool.toolId}`} className="rounded border border-border/40 p-2 space-y-1.5">
+                  <p className="text-[10px] font-medium">{tool.toolName} - Environment</p>
+                  {tool.mcpLaunchConfig!.package!.environmentVariables!.map((ev) => (
+                    <div key={ev.name}>
+                      <label className="text-[9px] text-muted-foreground">{ev.name}{ev.isRequired ? " *" : ""}</label>
+                      {ev.description && <p className="text-[8px] text-muted-foreground/70">{ev.description}</p>}
+                      <input
+                        type={ev.isSecret ? "password" : "text"}
+                        value={tool.mcpLaunchConfig?.envValues?.[ev.name] ?? ""}
+                        placeholder={ev.name}
+                        onChange={(e) => {
+                          const existing = config.tools ?? [];
+                          const updated = existing.map((t: ToolConfig) => {
+                            if (t.toolId !== tool.toolId) return t;
+                            return {
+                              ...t,
+                              mcpLaunchConfig: {
+                                ...t.mcpLaunchConfig!,
+                                envValues: { ...t.mcpLaunchConfig?.envValues, [ev.name]: e.target.value },
+                              },
+                            };
+                          });
+                          update({ tools: updated });
+                        }}
+                        className="w-full rounded border border-border bg-background px-1.5 py-0.5 text-[10px] focus:outline-none focus:ring-1 focus:ring-ring"
+                      />
+                    </div>
+                  ))}
+                </div>
+              ))}
           </div>
         )}
       </div>

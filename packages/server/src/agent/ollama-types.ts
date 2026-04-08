@@ -26,6 +26,7 @@ export type OllamaStatus = {
 // ── Runtime options ──────────────────────────────────────────
 
 import type { Workspace } from "../engine/workspace";
+import type { ToolConfig } from "@openconclave/shared";
 
 export type OllamaRunOptions = {
   model: string;
@@ -35,6 +36,8 @@ export type OllamaRunOptions = {
   allowedTools?: string[];
   knowledgeBases?: string[];
   mcpServers?: string[];
+  /** Full tool configs for registry-sourced MCP servers */
+  mcpTools?: ToolConfig[];
   routeTargets?: Array<{ nodeId: string; label: string; type: string }>;
   workspace?: Workspace;
   sessionFile?: string;

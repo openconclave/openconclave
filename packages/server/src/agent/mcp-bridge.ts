@@ -1,7 +1,40 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { spawn } from "bun";
-import { Workspace } from "../engine/workspace";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+import { Workspace, type McpResolvedConfig } from "../engine/workspace";
+
+/** Sanitize a server ID for use in tool name prefixes (OpenAI requires ^[a-zA-Z0-9_-]+$). */
+function sanitizePrefix(id: string): string {
+  return id.replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+/** Recursively fix JSON Schema constructs that OpenAI doesn't support (e.g. tuple items). */
+function sanitizeSchema(schema: unknown): Record<string, unknown> {
+  if (!schema || typeof schema !== "object") return {};
+  const s = { ...(schema as Record<string, unknown>) };
+
+  // OpenAI requires items to be object|boolean, not array (tuple validation)
+  if (Array.isArray(s.items)) {
+    s.items = s.items[0] ?? {};
+  }
+
+  // Recurse into properties
+  if (s.properties && typeof s.properties === "object") {
+    const props: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(s.properties as Record<string, unknown>)) {
+      props[k] = sanitizeSchema(v);
+    }
+    s.properties = props;
+  }
+
+  // Recurse into items if it's an object
+  if (s.items && typeof s.items === "object" && !Array.isArray(s.items)) {
+    s.items = sanitizeSchema(s.items);
+  }
+
+  return s;
+}
 
 type OllamaTool = {
   type: "function";
@@ -14,31 +47,34 @@ type OllamaTool = {
 
 export class McpBridge {
   private clients = new Map<string, Client>();
-  private transports = new Map<string, StdioClientTransport>();
+  private transports = new Map<string, StdioClientTransport | StreamableHTTPClientTransport | SSEClientTransport>();
   private toolMap = new Map<string, { serverId: string; toolName: string }>();
   private ollamaTools: OllamaTool[] = [];
 
-  async connect(serverIds: string[], allowedDirs?: string[]): Promise<void> {
-    // Build server configs using Workspace (single source of truth for MCP server definitions).
-    // If allowedDirs are provided, create a temp workspace with those dirs for filesystem server.
-    const ws = new Workspace();
-    if (allowedDirs?.length) {
-      ws.setAllowedDirs(allowedDirs);
-    }
-    const serverConfigs = ws.getMcpServerConfigs(serverIds);
-
-    for (const id of serverIds) {
-      const config = serverConfigs[id];
-      if (!config) continue;
-
+  /**
+   * Connect to MCP servers using resolved configs.
+   * Supports stdio, streamable-http, and sse transports.
+   */
+  async connectResolved(configs: Record<string, McpResolvedConfig>): Promise<void> {
+    for (const [id, config] of Object.entries(configs)) {
       try {
-        const transport = new StdioClientTransport({
-          command: config.command,
-          args: config.args,
-        });
+        let transport: StdioClientTransport | StreamableHTTPClientTransport | SSEClientTransport;
+
+        if (config.transport === "stdio") {
+          transport = new StdioClientTransport({
+            command: config.command!,
+            args: config.args ?? [],
+            env: config.env ? { ...process.env, ...config.env } as Record<string, string> : undefined,
+          });
+        } else if (config.transport === "streamable-http") {
+          transport = new StreamableHTTPClientTransport(new URL(config.url!));
+        } else {
+          // SSE transport
+          transport = new SSEClientTransport(new URL(config.url!));
+        }
 
         const client = new Client(
-          { name: "openconclave-ollama", version: "0.1.0" },
+          { name: "openconclave", version: "0.1.0" },
           { capabilities: {} }
         );
 
@@ -48,8 +84,7 @@ export class McpBridge {
         const toolsResult = await client.listTools();
 
         for (const tool of toolsResult.tools) {
-          // Prefix tool name with server ID to avoid conflicts
-          const prefixedName = `${id}__${tool.name}`;
+          const prefixedName = `${sanitizePrefix(id)}__${tool.name}`;
           this.toolMap.set(prefixedName, { serverId: id, toolName: tool.name });
 
           this.ollamaTools.push({
@@ -57,7 +92,7 @@ export class McpBridge {
             function: {
               name: prefixedName,
               description: tool.description ?? "",
-              parameters: tool.inputSchema as Record<string, unknown>,
+              parameters: sanitizeSchema(tool.inputSchema),
             },
           });
         }
@@ -68,6 +103,25 @@ export class McpBridge {
         console.error(`Failed to connect MCP server "${id}":`, err.message);
       }
     }
+  }
+
+  /**
+   * Legacy connect path: resolve server IDs via Workspace hardcoded configs.
+   * Used by code that still passes string[] server IDs.
+   */
+  async connect(serverIds: string[], allowedDirs?: string[]): Promise<void> {
+    const ws = new Workspace();
+    if (allowedDirs?.length) {
+      ws.setAllowedDirs(allowedDirs);
+    }
+    const serverConfigs = ws.getMcpServerConfigs(serverIds);
+
+    const resolved: Record<string, McpResolvedConfig> = {};
+    for (const [id, config] of Object.entries(serverConfigs)) {
+      resolved[id] = { transport: "stdio", command: config.command, args: config.args };
+    }
+
+    await this.connectResolved(resolved);
   }
 
   getTools(): OllamaTool[] {

@@ -49,6 +49,8 @@ export interface AgentConfig {
 export interface ResolvedAgentConfig extends AgentConfig {
   allowedTools: string[];
   mcpServers: string[];
+  /** Full tool configs for registry-sourced MCP servers */
+  mcpTools?: ToolConfig[];
   knowledgeBases: string[];
 }
 
@@ -108,6 +110,40 @@ export interface DiscussionConfig {
   maxRounds: number;
 }
 
+/** Launch config for an MCP server discovered from the registry */
+export interface McpServerLaunchConfig {
+  /** Registry server name (e.g. "io.github.foo/bar") */
+  registryName: string;
+  /** stdio package config — present if the server supports local launch */
+  package?: {
+    registryType: "npm" | "pypi" | "oci";
+    identifier: string;
+    version?: string;
+    runtimeHint?: string;
+    environmentVariables?: Array<{
+      name: string;
+      description?: string;
+      isRequired: boolean;
+      isSecret: boolean;
+    }>;
+    packageArguments?: Array<{
+      name: string;
+      description?: string;
+      isRequired: boolean;
+      type: "named" | "positional";
+    }>;
+  };
+  /** Remote endpoint — present if the server supports HTTP transport */
+  remote?: {
+    type: "streamable-http" | "sse";
+    url: string;
+  };
+  /** User-provided environment variable values (stored per-workflow) */
+  envValues?: Record<string, string>;
+  /** User-provided argument values (stored per-workflow) */
+  argValues?: Record<string, string>;
+}
+
 export interface ToolConfig {
   /** "builtin" for Claude Code tools, "mcp" for MCP servers, "knowledge" for KBs */
   toolType: "builtin" | "mcp" | "knowledge";
@@ -115,6 +151,8 @@ export interface ToolConfig {
   toolId: string;
   /** Display name */
   toolName: string;
+  /** For MCP tools: full launch config from registry (absent for legacy hardcoded servers) */
+  mcpLaunchConfig?: McpServerLaunchConfig;
 }
 
 // Keep backward compat alias

@@ -76,7 +76,17 @@ export class AgentBase {
 
     this.mcpBridge = new McpBridge();
     try {
-      await this.mcpBridge.connect(this.config.mcpServers, this.workspace.getAllowedDirs());
+      // Use new registry-aware path if mcpTools are available
+      const mcpTools = this.config.mcpTools ?? [];
+      const legacyIds = this.config.mcpServers.filter(
+        (id) => !mcpTools.some((t) => t.toolId === id),
+      );
+      const configs = this.workspace.getMcpToolConfigs(mcpTools, legacyIds);
+
+      if (Object.keys(configs).length > 0) {
+        await this.mcpBridge.connectResolved(configs);
+      }
+
       for (const tool of this.mcpBridge.getTools()) {
         const name = tool.function.name;
         this.tools.push({

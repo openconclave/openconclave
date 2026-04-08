@@ -13,6 +13,7 @@ import { workflowRoutes } from "./routes/workflows";
 import { runRoutes } from "./routes/runs";
 import { agentRoutes } from "./routes/agents";
 import { knowledgeRoutes } from "./routes/knowledge";
+import { mcpRegistryRoutes } from "./routes/mcp-registry";
 import { wsHandler } from "./ws/handler";
 import { setServer, broadcastRunEvent, broadcastToTopic } from "./ws/broadcast";
 import { createMcpServer } from "./mcp/server";
@@ -212,6 +213,7 @@ app.route("/api/workflows", workflowRoutes);
 app.route("/api/runs", runRoutes);
 app.route("/api/agents", agentRoutes);
 app.route("/api/knowledge", knowledgeRoutes);
+app.route("/api/mcp-registry", mcpRegistryRoutes);
 
 // ── Executor ─────────────────────────────────────────────────
 let server: ReturnType<typeof Bun.serve>;

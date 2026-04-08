@@ -40,6 +40,7 @@ export async function runResponsesAPI(options: OpenAIRunOptions): Promise<OpenAI
   const resolvedConfig: ResolvedAgentConfig = {
     allowedTools: options.allowedTools ?? [],
     mcpServers: options.mcpServers ?? [],
+    mcpTools: options.mcpTools,
     knowledgeBases: options.knowledgeBases ?? [],
   };
   const agent = new AgentBase(resolvedConfig, options.workspace);

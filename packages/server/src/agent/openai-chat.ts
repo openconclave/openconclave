@@ -39,6 +39,7 @@ export async function runChatCompletions(options: OpenAIRunOptions): Promise<Ope
   const resolvedConfig: ResolvedAgentConfig = {
     allowedTools: options.allowedTools ?? [],
     mcpServers: options.mcpServers ?? [],
+    mcpTools: options.mcpTools,
     knowledgeBases: options.knowledgeBases ?? [],
   };
   const agent = new AgentBase(resolvedConfig, options.workspace);
@@ -51,6 +52,12 @@ export async function runChatCompletions(options: OpenAIRunOptions): Promise<Ope
   if (options.routeTargets && options.routeTargets.length >= 1) {
     activeTools.push(createRoutingToolChat(options.routeTargets));
   }
+
+  // Debug: log resolved tools so operators can verify MCP connections
+  openaiLog("RESOLVED TOOLS", {
+    toolCount: activeTools.length,
+    tools: activeTools.map((t) => t.function.name),
+  });
 
   const thinkingBlocks: Array<{ thinking: string }> = [];
 

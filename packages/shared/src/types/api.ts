@@ -1,4 +1,4 @@
-import type { WorkflowDefinition } from "./workflow";
+import type { WorkflowDefinition, McpServerLaunchConfig } from "./workflow";
 import type { Run, AgentTask, RunEvent } from "./agent";
 
 export type CreateWorkflowRequest = {
@@ -38,4 +38,26 @@ export type DashboardResponse = {
   totalWorkflows: number;
   recentRuns: Run[];
   agentTasks: AgentTask[];
+};
+
+// ── MCP Registry ────────────────────────────────────────────
+
+export type McpRegistryServer = {
+  /** Registry server name (reverse-DNS, e.g. "io.github.foo/bar") */
+  name: string;
+  /** Human-readable title */
+  title: string;
+  /** Short description */
+  description: string;
+  /** Icon URL (first available) */
+  iconUrl?: string;
+  /** Repo URL */
+  repositoryUrl?: string;
+  /** Launch config derived from registry package/remote info */
+  launchConfig: McpServerLaunchConfig;
+};
+
+export type McpRegistrySearchResponse = {
+  servers: McpRegistryServer[];
+  nextCursor?: string;
 };

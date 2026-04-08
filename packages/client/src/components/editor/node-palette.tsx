@@ -1,11 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Zap, Cpu, GitFork, Code, Combine, MessageCircleQuestion, Send, FileText, BookOpen,
   Terminal, FileEdit, FileSearch, FolderSearch, Search, Globe, Server, ChevronDown, ChevronRight,
-  Users,
+  Users, Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { NodeType, KnowledgeBase } from "@openconclave/shared";
+import type { NodeType, KnowledgeBase, McpRegistrySearchResponse, McpRegistryServer } from "@openconclave/shared";
 
 // ── Node palette items ────────────────────────────────────────
 
@@ -66,12 +66,117 @@ const builtinToolItems: ToolItem[] = [
   { toolType: "builtin", toolId: "WebSearch", toolName: "WebSearch", icon: Globe, description: "Search the web" },
 ];
 
-const mcpToolItems: ToolItem[] = [
-  { toolType: "mcp", toolId: "playwright", toolName: "Playwright", icon: Server, description: "Browser automation" },
-  { toolType: "mcp", toolId: "telegram-voice", toolName: "Telegram", icon: Server, description: "Send/receive Telegram" },
-  { toolType: "mcp", toolId: "filesystem", toolName: "Filesystem", icon: Server, description: "File system access" },
-  { toolType: "mcp", toolId: "fetch", toolName: "Fetch", icon: Server, description: "HTTP requests" },
-];
+// ── MCP Registry search ──────────────────────────────────────
+
+function McpRegistrySearch() {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<McpRegistryServer[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [hasSearched, setHasSearched] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(null);
+
+  const doSearch = useCallback((q: string) => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (!q.trim()) {
+      setResults([]);
+      setHasSearched(false);
+      return;
+    }
+    debounceRef.current = setTimeout(async () => {
+      setLoading(true);
+      try {
+        const res = await fetch(`/api/mcp-registry/search?q=${encodeURIComponent(q)}&limit=10`);
+        if (res.ok) {
+          const data = (await res.json()) as McpRegistrySearchResponse;
+          setResults(data.servers);
+        }
+      } catch { /* ignore */ }
+      setLoading(false);
+      setHasSearched(true);
+    }, 300);
+  }, []);
+
+  useEffect(() => {
+    doSearch(query);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [query, doSearch]);
+
+  const toToolItem = (server: McpRegistryServer): ToolItem & { mcpLaunchConfig: McpRegistryServer["launchConfig"] } => ({
+    toolType: "mcp",
+    toolId: server.name,
+    toolName: server.title,
+    icon: Server,
+    description: server.description.slice(0, 60),
+    mcpLaunchConfig: server.launchConfig,
+  });
+
+  return (
+    <div className="space-y-1.5">
+      <div className="relative">
+        <Search className="absolute left-1.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+        <input
+          type="text"
+          placeholder="Search MCP Registry..."
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          className="w-full rounded-md border border-border bg-background pl-6 pr-2 py-1 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+        />
+        {loading && <Loader2 className="absolute right-1.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground animate-spin" />}
+      </div>
+      {results.map((server) => {
+        const item = toToolItem(server);
+        return (
+          <div
+            key={server.name}
+            draggable
+            onDragStart={(e) => {
+              const data = JSON.stringify({
+                toolType: item.toolType,
+                toolId: item.toolId,
+                toolName: item.toolName,
+                mcpLaunchConfig: item.mcpLaunchConfig,
+              });
+              e.dataTransfer.setData("application/openconclave-tool", data);
+              e.dataTransfer.effectAllowed = "copy";
+            }}
+            className="flex items-center gap-2 rounded-md border border-border bg-secondary/50 px-2 py-1.5 cursor-grab active:cursor-grabbing hover:bg-secondary transition-colors"
+          >
+            {server.iconUrl ? (
+              <img src={server.iconUrl} alt="" className="h-5 w-5 rounded shrink-0 object-contain" />
+            ) : (
+              <div className="flex h-5 w-5 items-center justify-center rounded shrink-0 bg-node-tool">
+                <Server className="h-3 w-3 text-white" />
+              </div>
+            )}
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-medium truncate">{server.title}</p>
+              <p className="text-[9px] text-muted-foreground truncate">{server.description}</p>
+              <div className="flex gap-1 mt-0.5">
+                {server.launchConfig.package && (
+                  <span className="text-[8px] px-1 py-0 rounded bg-blue-500/20 text-blue-400">stdio</span>
+                )}
+                {server.launchConfig.remote && (
+                  <span className="text-[8px] px-1 py-0 rounded bg-green-500/20 text-green-400">{server.launchConfig.remote.type}</span>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+      {hasSearched && results.length === 0 && !loading && (
+        <p className="text-[9px] text-muted-foreground px-1">No servers found.</p>
+      )}
+      {!hasSearched && !loading && (
+        <p className="text-[9px] text-muted-foreground px-1">
+          Search the{" "}
+          <a href="https://registry.modelcontextprotocol.io" target="_blank" rel="noopener" className="underline text-primary hover:text-primary/80">
+            MCP Registry
+          </a>
+        </p>
+      )}
+    </div>
+  );
+}
 
 // ── Collapsible group ─────────────────────────────────────────
 
@@ -204,9 +309,7 @@ export function NodePalette() {
         </ToolGroup>
 
         <ToolGroup label="MCP Servers">
-          {mcpToolItems.map((item) => (
-            <DraggableToolItem key={item.toolId} item={item} onDragStart={onToolDragStart} />
-          ))}
+          <McpRegistrySearch />
         </ToolGroup>
 
         <ToolGroup label="Knowledge Bases" defaultOpen={knowledgeToolItems.length > 0}>

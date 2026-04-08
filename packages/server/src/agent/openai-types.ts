@@ -22,6 +22,7 @@ export interface OpenAITool {
 }
 
 import type { Workspace } from "../engine/workspace";
+import type { ToolConfig } from "@openconclave/shared";
 
 // ── Runtime options ─────────────────────────────────────────
 
@@ -34,6 +35,8 @@ export interface OpenAIRunOptions {
   tools?: OpenAITool[];
   allowedTools?: string[];
   mcpServers?: string[];
+  /** Full tool configs for registry-sourced MCP servers */
+  mcpTools?: ToolConfig[];
   knowledgeBases?: string[];
   workspace?: Workspace;
   routeTargets?: Array<{ nodeId: string; label: string; type: string }>;
