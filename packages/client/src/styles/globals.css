@@ -27,14 +27,19 @@
   --color-warning: oklch(0.70 0.16 80);
   --color-info: oklch(0.65 0.15 230);
 
-  --color-node-trigger: oklch(0.65 0.18 145);
-  --color-node-agent: oklch(0.68 0.12 70);
-  --color-node-condition: oklch(0.70 0.16 80);
-  --color-node-transform: oklch(0.65 0.15 300);
-  --color-node-output: oklch(0.60 0.15 20);
+  /* Group: Flow (trigger, output) — teal */
+  --color-node-trigger: oklch(0.65 0.18 170);
+  --color-node-output: oklch(0.65 0.18 170);
+  /* Group: AI (agent, discussion) — amber */
+  --color-node-agent: oklch(0.68 0.14 65);
+  --color-node-discussion: oklch(0.68 0.14 65);
+  /* Group: Logic (condition, code, merge) — violet */
+  --color-node-condition: oklch(0.65 0.18 290);
+  --color-node-transform: oklch(0.65 0.18 290);
+  /* Group: I/O (file, prompt) — blue */
+  --color-node-io: oklch(0.65 0.18 240);
   --color-node-knowledge: oklch(0.65 0.16 55);
   --color-node-tool: oklch(0.65 0.18 200);
-  --color-node-discussion: oklch(0.65 0.15 250);
 
   --radius-lg: 0.75rem;
   --radius-md: 0.5rem;
@@ -48,6 +53,23 @@ body {
   min-height: 100vh;
 }
 
+/* Dark scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: oklch(0.3 0.01 60) transparent;
+}
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: oklch(0.25 0.01 60);
+  border-radius: 3px;
+}
+
 .react-flow__node {
   background: transparent !important;
   box-shadow: none !important;
@@ -56,20 +78,17 @@ body {
 }
 
 .react-flow__edge.selected .react-flow__edge-path {
-  stroke: oklch(0.72 0.14 70) !important;
-  stroke-width: 4 !important;
-  stroke-dasharray: none !important;
-  filter: drop-shadow(0 0 6px oklch(0.72 0.14 70 / 0.5));
+  filter: drop-shadow(0 0 6px oklch(0.85 0.10 200 / 0.4));
 }
 
 @keyframes node-running {
   0%, 100% {
-    box-shadow: 0 0 8px 2px oklch(0.68 0.12 70 / 0.3), 0 0 2px 1px oklch(0.68 0.12 70 / 0.5);
-    border-color: oklch(0.68 0.12 70 / 0.8);
+    box-shadow: 0 0 8px 2px oklch(0.85 0.02 260 / 0.2), 0 0 2px 1px oklch(0.85 0.02 260 / 0.4);
+    border-color: oklch(0.85 0.02 260 / 0.7);
   }
   50% {
-    box-shadow: 0 0 20px 6px oklch(0.68 0.12 70 / 0.5), 0 0 4px 2px oklch(0.68 0.12 70 / 0.7);
-    border-color: oklch(0.68 0.12 70);
+    box-shadow: 0 0 20px 6px oklch(0.85 0.02 260 / 0.4), 0 0 4px 2px oklch(0.85 0.02 260 / 0.6);
+    border-color: oklch(0.85 0.02 260);
   }
 }
 
@@ -77,6 +96,7 @@ body {
   cursor: pointer;
 }
 
-.react-flow__edge:hover .react-flow__edge-path {
-  stroke-width: 3 !important;
+.react-flow__edgeupdater {
+  cursor: crosshair;
 }
+
