@@ -1,30 +1,53 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import {
-  Zap, Cpu, GitFork, Code, Combine, MessageCircleQuestion, Send, FileText, BookOpen,
+  Zap, User, GitFork, Code, Combine, MessageCircleQuestion, Send, FileText, BookOpen,
   Terminal, FileEdit, FileSearch, FolderSearch, Search, Globe, Server, ChevronDown, ChevronRight,
   Users, Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { NodeType, KnowledgeBase, McpRegistrySearchResponse, McpRegistryServer } from "@openconclave/shared";
+import { useWorkflowStore } from "@/stores/workflow-store";
 
 // ── Node palette items ────────────────────────────────────────
 
-const paletteNodes: {
+interface PaletteNode {
   type: NodeType;
   label: string;
   icon: React.ElementType;
   color: string;
   description: string;
-}[] = [
-  { type: "trigger", label: "Trigger", icon: Zap, color: "bg-node-trigger", description: "Start a workflow" },
-  { type: "agent", label: "Agent", icon: Cpu, color: "bg-node-agent", description: "AI agent task" },
-  { type: "condition", label: "Condition", icon: GitFork, color: "bg-node-condition", description: "Branch logic" },
-  { type: "code", label: "Code", icon: Code, color: "bg-node-transform", description: "Run Python/Node/Bash" },
-  { type: "merge", label: "Merge", icon: Combine, color: "bg-info", description: "Combine all inputs" },
-  { type: "prompt", label: "Channel Loop", icon: MessageCircleQuestion, color: "bg-warning", description: "Ask via channel" },
-  { type: "output", label: "Output", icon: Send, color: "bg-node-output", description: "Send result" },
-  { type: "file", label: "File", icon: FileText, color: "bg-info", description: "Read file as input" },
-  { type: "discussion", label: "Discussion", icon: Users, color: "bg-node-discussion", description: "Multi-agent round table" },
+}
+
+interface PaletteGroup {
+  label: string;
+  nodes: PaletteNode[];
+}
+
+const paletteGroups: PaletteGroup[] = [
+  {
+    label: "Flow",
+    nodes: [
+      { type: "trigger", label: "Trigger", icon: Zap, color: "bg-node-trigger", description: "Start a workflow" },
+      { type: "prompt", label: "Channel Loop", icon: MessageCircleQuestion, color: "bg-node-trigger", description: "Pause and ask" },
+      { type: "output", label: "Output", icon: Send, color: "bg-node-trigger", description: "Send result" },
+    ],
+  },
+  {
+    label: "AI",
+    nodes: [
+      { type: "agent", label: "Agent", icon: User, color: "bg-node-agent", description: "AI agent task" },
+      { type: "discussion", label: "Discussion", icon: Users, color: "bg-node-discussion", description: "Multi-agent round table" },
+    ],
+  },
+  {
+    label: "Logic",
+    nodes: [
+      { type: "condition", label: "Condition", icon: GitFork, color: "bg-node-condition", description: "Branch logic" },
+      { type: "merge", label: "Merge", icon: Combine, color: "bg-node-condition", description: "Combine all inputs" },
+      { type: "code", label: "Code", icon: Code, color: "bg-node-transform", description: "Run Python/Node/Bash" },
+      { type: "file", label: "File", icon: FileText, color: "bg-node-condition", description: "Read file as input" },
+    ],
+  },
 ];
 
 function getDefaultConfig(type: NodeType) {
@@ -55,13 +78,16 @@ interface ToolItem {
   description: string;
 }
 
-const builtinToolItems: ToolItem[] = [
+const codeToolItems: ToolItem[] = [
   { toolType: "builtin", toolId: "Bash", toolName: "Bash", icon: Terminal, description: "Run shell commands" },
   { toolType: "builtin", toolId: "Edit", toolName: "Edit", icon: FileEdit, description: "Edit files" },
   { toolType: "builtin", toolId: "Read", toolName: "Read", icon: FileSearch, description: "Read files" },
   { toolType: "builtin", toolId: "Write", toolName: "Write", icon: FileEdit, description: "Write files" },
   { toolType: "builtin", toolId: "Glob", toolName: "Glob", icon: FolderSearch, description: "Find files by pattern" },
   { toolType: "builtin", toolId: "Grep", toolName: "Grep", icon: Search, description: "Search file contents" },
+];
+
+const webToolItems: ToolItem[] = [
   { toolType: "builtin", toolId: "WebFetch", toolName: "WebFetch", icon: Globe, description: "Fetch web content" },
   { toolType: "builtin", toolId: "WebSearch", toolName: "WebSearch", icon: Globe, description: "Search the web" },
 ];
@@ -249,7 +275,10 @@ export function NodePalette() {
     e.dataTransfer.effectAllowed = "move";
   };
 
+  const setDraggingTool = useWorkflowStore((s) => s.setDraggingTool);
+
   const onToolDragStart = (e: React.DragEvent, item: ToolItem) => {
+    setDraggingTool(true);
     const data = JSON.stringify({
       toolType: item.toolType,
       toolId: item.toolId,
@@ -269,24 +298,30 @@ export function NodePalette() {
 
   return (
     <div className="w-52 border-r border-border bg-card p-3 space-y-2 overflow-y-auto">
-      {/* Nodes section */}
       <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1 mb-3">
         Nodes
       </h3>
-      {paletteNodes.map((nt) => (
-        <div
-          key={nt.type}
-          draggable
-          onDragStart={(e) => onNodeDragStart(e, nt.type, nt.label)}
-          className="flex items-center gap-2.5 rounded-md border border-border bg-secondary/50 px-3 py-2.5 cursor-grab active:cursor-grabbing hover:bg-secondary transition-colors"
-        >
-          <div className={cn("flex h-7 w-7 items-center justify-center rounded", nt.color)}>
-            <nt.icon className="h-4 w-4 text-white" />
-          </div>
-          <div>
-            <p className="text-sm font-medium">{nt.label}</p>
-            <p className="text-[10px] text-muted-foreground">{nt.description}</p>
-          </div>
+      {paletteGroups.map((group) => (
+        <div key={group.label} className="space-y-1.5">
+          <p className="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider px-1">
+            {group.label}
+          </p>
+          {group.nodes.map((nt) => (
+            <div
+              key={nt.type}
+              draggable
+              onDragStart={(e) => onNodeDragStart(e, nt.type, nt.label)}
+              className="flex items-center gap-2.5 rounded-lg border border-border bg-secondary/50 px-3 py-2.5 cursor-grab active:cursor-grabbing hover:bg-secondary transition-colors"
+            >
+              <div className={cn("flex h-7 w-7 items-center justify-center shrink-0 rounded-lg", nt.color)}>
+                <nt.icon className="h-4 w-4 text-white" />
+              </div>
+              <div>
+                <p className="text-sm font-medium">{nt.label}</p>
+                <p className="text-[10px] text-muted-foreground">{nt.description}</p>
+              </div>
+            </div>
+          ))}
         </div>
       ))}
 
@@ -302,8 +337,14 @@ export function NodePalette() {
       </p>
 
       <div className="space-y-3">
-        <ToolGroup label="Built-in Tools">
-          {builtinToolItems.map((item) => (
+        <ToolGroup label="Code">
+          {codeToolItems.map((item) => (
+            <DraggableToolItem key={item.toolId} item={item} onDragStart={onToolDragStart} />
+          ))}
+        </ToolGroup>
+
+        <ToolGroup label="Web">
+          {webToolItems.map((item) => (
             <DraggableToolItem key={item.toolId} item={item} onDragStart={onToolDragStart} />
           ))}
         </ToolGroup>
