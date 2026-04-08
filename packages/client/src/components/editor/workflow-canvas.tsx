@@ -441,6 +441,8 @@ export function WorkflowCanvas() {
       <ReactFlow
         nodes={nodes}
         edges={edges}
+        minZoom={0.1}
+        maxZoom={4}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
