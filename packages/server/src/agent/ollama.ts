@@ -79,7 +79,7 @@ export async function checkOllama(): Promise<OllamaStatus> {
 
 export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaResult> {
   const { model, abortSignal, onOutput } = options;
-  const maxTurns = options.maxTurns ?? 10;
+  const maxTurns = options.maxTurns ?? 25;
   const startTime = Date.now();
 
   // Read messages from session file (managed by executor)

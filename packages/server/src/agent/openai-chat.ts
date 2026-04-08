@@ -11,7 +11,7 @@ import type { OpenAIRunOptions, OpenAIResult, OpenAITool } from "./openai-types"
  */
 export async function runChatCompletions(options: OpenAIRunOptions): Promise<OpenAIResult> {
   const { provider, model, sessionFile, onOutput } = options;
-  const maxTurns = options.maxTurns ?? 10;
+  const maxTurns = options.maxTurns ?? 25;
   const startTime = Date.now();
 
   // Read messages from session file (managed by executor)

@@ -11,7 +11,7 @@ import type { OpenAIRunOptions, OpenAIResult } from "./openai-types";
  */
 export async function runResponsesAPI(options: OpenAIRunOptions): Promise<OpenAIResult> {
   const { provider, model, sessionFile, onOutput } = options;
-  const maxTurns = options.maxTurns ?? 10;
+  const maxTurns = options.maxTurns ?? 25;
   const startTime = Date.now();
 
   // Build input array from session file

@@ -291,7 +291,7 @@ export async function executeAgent(
         routeTargets,
         extraTools: askUserExtraTools.length > 0 ? askUserExtraTools : undefined,
         sessionFile: openaiSessionFile,
-        maxTurns: config.maxTurns ?? 10,
+        maxTurns: config.maxTurns ?? 25,
         onOutput: (chunk) => {
           emit({ type: "agent:output", runId, nodeId, data: { taskId, chunk } });
         },

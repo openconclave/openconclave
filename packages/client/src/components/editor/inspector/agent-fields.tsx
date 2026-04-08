@@ -210,6 +210,17 @@ export function AgentFields({ nodeId, config, onUpdate }: AgentFieldsProps) {
         </>
       )}
 
+      {engine !== "debug" && (
+        <Field label="Max Turns">
+          <input
+            type="number"
+            value={config.maxTurns ?? 25}
+            onChange={(e) => update({ maxTurns: parseInt(e.target.value) || 25 })}
+            className={INPUT_CLASS}
+          />
+        </Field>
+      )}
+
       {engine === "claude" && (
         <>
           <Field label="Model">
@@ -222,14 +233,6 @@ export function AgentFields({ nodeId, config, onUpdate }: AgentFieldsProps) {
               <option value="opus">Opus</option>
               <option value="haiku">Haiku</option>
             </select>
-          </Field>
-          <Field label="Max Turns">
-            <input
-              type="number"
-              value={config.maxTurns ?? 25}
-              onChange={(e) => update({ maxTurns: parseInt(e.target.value) || 25 })}
-              className={INPUT_CLASS}
-            />
           </Field>
           <Field label="Max Budget (USD)">
             <input
