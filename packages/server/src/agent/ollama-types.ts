@@ -39,6 +39,11 @@ export type OllamaRunOptions = {
   /** Full tool configs for registry-sourced MCP servers */
   mcpTools?: ToolConfig[];
   routeTargets?: Array<{ nodeId: string; label: string; type: string }>;
+  /** Dynamic tools injected by the executor (e.g., ask_user for channel loops) */
+  extraTools?: Array<{
+    tool: OllamaTool;
+    execute: (args: Record<string, unknown>) => Promise<string>;
+  }>;
   workspace?: Workspace;
   sessionFile?: string;
   thinking?: boolean;

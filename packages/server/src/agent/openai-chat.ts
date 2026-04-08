@@ -53,6 +53,14 @@ export async function runChatCompletions(options: OpenAIRunOptions): Promise<Ope
     activeTools.push(createRoutingToolChat(options.routeTargets));
   }
 
+  // Register extra dynamic tools (e.g., ask_user for channel loops)
+  if (options.extraTools) {
+    for (const et of options.extraTools) {
+      activeTools.push(et.tool);
+      toolExecutors.set(et.tool.function.name, et.execute);
+    }
+  }
+
   // Debug: log resolved tools so operators can verify MCP connections
   openaiLog("RESOLVED TOOLS", {
     toolCount: activeTools.length,

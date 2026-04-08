@@ -40,6 +40,11 @@ export interface OpenAIRunOptions {
   knowledgeBases?: string[];
   workspace?: Workspace;
   routeTargets?: Array<{ nodeId: string; label: string; type: string }>;
+  /** Dynamic tools injected by the executor (e.g., ask_user for channel loops) */
+  extraTools?: Array<{
+    tool: OpenAITool;
+    execute: (args: Record<string, unknown>) => Promise<string>;
+  }>;
   sessionFile?: string;
   maxTurns?: number;
   onOutput?: (chunk: string) => void;

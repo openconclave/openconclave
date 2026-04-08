@@ -400,6 +400,23 @@ function resolveNextEntries(
       }
     }
   } else if (node.data.type === "agent" && outgoing.length >= 2) {
+    // Filter out bidirectional prompt connections — these are ask_user tool connections,
+    // not forward routes. A prompt node with a return edge back to this agent is a tool.
+    const forwardEdges = outgoing.filter((e) => {
+      const target = nodeMap.get(e.target);
+      if (target?.data.type !== "prompt") return true;
+      const hasReturn = edges.some((re) => re.source === e.target && re.target === entry.nodeId);
+      return !hasReturn;
+    });
+
+    // If filtering reduced to <2 edges, treat as simple forward (no routing needed)
+    if (forwardEdges.length < 2) {
+      for (const edge of forwardEdges) {
+        next.push({ nodeId: edge.target, triggeredBy: entry.nodeId });
+      }
+      return next;
+    }
+
     // Agent with routing — check for __routeTo in output
     let routeTo: string | null = null;
     try {
@@ -429,8 +446,8 @@ function resolveNextEntries(
         throw new Error(`Agent "${node.data.label}" routed to unknown target "${routeTo}"`);
       }
     } else {
-      // No routing metadata — fan out to all targets (parallel execution)
-      for (const edge of outgoing) {
+      // No routing metadata — fan out to all forward targets (parallel execution)
+      for (const edge of forwardEdges) {
         next.push({ nodeId: edge.target, triggeredBy: entry.nodeId });
       }
     }

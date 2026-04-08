@@ -131,6 +131,14 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
     toolExecutors.set("openconclave_next", routingTool.execute);
   }
 
+  // Register extra dynamic tools (e.g., ask_user for channel loops)
+  if (options.extraTools) {
+    for (const et of options.extraTools) {
+      activeTools.push(et.tool);
+      toolExecutors.set(et.tool.function.name, et.execute);
+    }
+  }
+
   const hasTools = activeTools.length > 0;
   const thinkingBlocks: ThinkingBlock[] = [];
 

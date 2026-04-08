@@ -16,6 +16,7 @@ import { getOutgoingEdges } from "./graph";
 
 import type { RouteTarget, RunEvent } from "./types";
 import type { Workspace } from "./workspace";
+import { registerPrompt } from "./prompt-registry";
 
 // ── Ollama tool mapping ─────────────────────────────────────
 
@@ -64,11 +65,73 @@ export async function executeAgent(
   const now = new Date().toISOString();
   const engine = config.engine ?? "claude";
 
+  // Detect bidirectional prompt connections (agent ↔ prompt) and convert to ask_user tools.
+  // These are tool connections, not forward routes — exclude from route targets.
+  const askUserExtraTools: Array<{
+    tool: { type: "function"; function: { name: string; description: string; parameters: Record<string, unknown> } };
+    execute: (args: Record<string, unknown>) => Promise<string>;
+  }> = [];
+  const promptToolNodeIds = new Set<string>();
+
+  if (edges && nodeMap) {
+    const outEdges = getOutgoingEdges(nodeId, edges);
+    for (const e of outEdges) {
+      const target = nodeMap.get(e.target);
+      if (target?.data.type === "prompt") {
+        const hasReturn = edges.some((re) => re.source === e.target && re.target === nodeId);
+        if (hasReturn) {
+          promptToolNodeIds.add(e.target);
+          const targetConfig = target.data.config as Record<string, unknown> | undefined;
+          const agentLabel = nodeMap.get(nodeId)?.data.label ?? nodeId;
+          const promptNodeId = e.target;
+          const promptLabel = target.data.label;
+          const promptDescription = (targetConfig?.description as string) ?? undefined;
+
+          askUserExtraTools.push({
+            tool: {
+              type: "function",
+              function: {
+                name: "ask_user",
+                description: promptDescription || "Ask the user a question and wait for their response. Use when you need clarification or more information.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    question: { type: "string", description: "The question to ask the user" },
+                  },
+                  required: ["question"],
+                },
+              },
+            },
+            execute: async (args: Record<string, unknown>): Promise<string> => {
+              const question = String(args.question ?? "");
+              emit({
+                type: "prompt:question",
+                runId,
+                nodeId: promptNodeId,
+                data: {
+                  question,
+                  waitingForResponse: true,
+                  workflowName: "",
+                  nodeLabel: promptLabel,
+                  senderNode: agentLabel,
+                  senderType: "agent",
+                },
+              });
+              return registerPrompt(runId, promptNodeId, question, null);
+            },
+          });
+        }
+      }
+    }
+  }
+
   // Self-resolve route targets from graph topology if not explicitly provided.
   // Any agent with 2+ outgoing edges gets routing tools automatically.
+  // Exclude bidirectional prompt nodes — they are ask_user tools, not forward routes.
   if (!routeTargets && edges && nodeMap) {
     const outEdges = getOutgoingEdges(nodeId, edges)
-      .filter((e) => e.targetHandle !== "participants"); // exclude discussion participant edges
+      .filter((e) => e.targetHandle !== "participants") // exclude discussion participant edges
+      .filter((e) => !promptToolNodeIds.has(e.target)); // exclude prompt tool connections
     if (outEdges.length >= 1) {
       routeTargets = outEdges.map((e) => {
         const target = nodeMap.get(e.target);
@@ -151,11 +214,17 @@ export async function executeAgent(
       const resolvedTools = agent.toChatTools();
       await agent.disconnect();
 
+      // Include ask_user tools in debug output so users can verify the tool was injected
+      const allTools = [
+        ...resolvedTools,
+        ...askUserExtraTools.map((et) => et.tool),
+      ];
+
       const debugInfo = {
         debugResponse: config.debugResponse ?? "(no debug response configured)",
         receivedInput: input,
         systemPrompt: augmentedConfig.systemPrompt,
-        tools: resolvedTools,
+        tools: allTools,
         knowledgeBases: config.knowledgeBases,
         routeTargets: routeTargets ?? [],
         workspace: workspace ? {
@@ -182,6 +251,7 @@ export async function executeAgent(
         allowedTools: config.allowedTools,
         knowledgeBases: config.knowledgeBases,
         routeTargets,
+        extraTools: askUserExtraTools.length > 0 ? askUserExtraTools : undefined,
         mcpServers: config.mcpServers,
         mcpTools: config.mcpTools,
         workspace,
@@ -219,6 +289,7 @@ export async function executeAgent(
         knowledgeBases: config.knowledgeBases,
         workspace,
         routeTargets,
+        extraTools: askUserExtraTools.length > 0 ? askUserExtraTools : undefined,
         sessionFile: openaiSessionFile,
         maxTurns: config.maxTurns ?? 10,
         onOutput: (chunk) => {
