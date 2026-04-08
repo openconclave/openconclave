@@ -55,7 +55,7 @@ export function AutoTextarea({ minRows = 4, label, className, value, onChange, .
         <button
           type="button"
           onClick={() => setExpanded(true)}
-          className="absolute top-1.5 right-1.5 rounded p-1 text-muted-foreground/40 opacity-0 group-hover:opacity-100 hover:text-muted-foreground hover:bg-accent transition-all"
+          className="absolute top-1.5 right-1.5 rounded p-1 text-muted-foreground/30 hover:text-muted-foreground hover:bg-accent transition-colors"
           aria-label="Expand editor"
         >
           <Maximize2 className="h-3 w-3" />
