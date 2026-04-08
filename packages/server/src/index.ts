@@ -218,8 +218,12 @@ app.route("/api/mcp-registry", mcpRegistryRoutes);
 // ── Executor ─────────────────────────────────────────────────
 let server: ReturnType<typeof Bun.serve>;
 
+// Late-bound reference — set after TelegramTrigger is created below
+let telegramTrigger: InstanceType<typeof TelegramTrigger> | null = null;
+
 const executor = new WorkflowExecutor((event) => {
   broadcastRunEvent(event);
+  telegramTrigger?.onEvent(event);
 });
 
 // ── Workflow Run Trigger ─────────────────────────────────────
@@ -425,7 +429,7 @@ app.post("/api/scheduler/sync", async (c) => {
 });
 
 // ── Telegram Trigger ─────────────────────────────────────────
-const telegramTrigger = new TelegramTrigger(executor);
+telegramTrigger = new TelegramTrigger(executor);
 telegramTrigger.start();
 
 app.post("/api/telegram/restart", async (c) => {

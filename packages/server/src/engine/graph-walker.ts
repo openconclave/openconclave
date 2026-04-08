@@ -73,7 +73,7 @@ export async function executeGraph(
   // For chat workflows, restore persistent sessions from previous runs
   const isChatWorkflow = nodes.some((n) => {
     const cfg = n.data.config as Record<string, unknown>;
-    return n.data.type === "trigger" && cfg.type === "chat";
+    return n.data.type === "trigger" && (cfg.type === "chat" || cfg.type === "telegram");
   });
   if (isChatWorkflow) {
     // Restore Claude SDK sessions for chat continuation (same runId).

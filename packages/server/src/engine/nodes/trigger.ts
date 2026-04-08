@@ -11,7 +11,7 @@ export function executeTrigger(
   emit: (event: RunEvent) => void
 ): unknown {
   const config = node.data.config as TriggerConfig;
-  if (config.type === "chat" && input !== undefined && input !== null) {
+  if ((config.type === "chat" || config.type === "telegram") && input !== undefined && input !== null) {
     const content = typeof input === "string" ? input : JSON.stringify(input, null, 2);
     emit({
       type: "chat:response",
