@@ -35,7 +35,7 @@ export async function executeCode(config: CodeConfig, input: unknown, context?: 
   const inputStr = typeof payload === "string" ? payload : (JSON.stringify(payload) ?? "");
 
   const cmdMap: Record<string, string[]> = {
-    python: ["python3", "-c", code],
+    python: [process.platform === "win32" ? "python" : "python3", "-c", code],
     node: ["node", "-e", code],
     bash: [GIT_BASH, "-c", code],
   };
