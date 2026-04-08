@@ -256,6 +256,7 @@ export async function executeAgent(
         mcpTools: config.mcpTools,
         workspace,
         sessionFile: ollamaSessionFile,
+        maxTurns: config.maxTurns ?? 25,
         thinking: config.thinking ?? true,
         onOutput: (chunk) => {
           emit({ type: "agent:output", runId, nodeId, data: { taskId, chunk } });

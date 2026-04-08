@@ -257,7 +257,7 @@ app.post("/api/runs/:id/resume", async (c) => {
   const updated = await db
     .update(runs)
     .set({ status: "running", startedAt: new Date().toISOString(), completedAt: null, error: null })
-    .where(and(eq(runs.id, id), inArray(runs.status, ["failure", "interrupted"])))
+    .where(and(eq(runs.id, id), inArray(runs.status, ["failure", "interrupted", "cancelled"])))
     .returning({ id: runs.id, workflowId: runs.workflowId });
 
   if (updated.length === 0) {

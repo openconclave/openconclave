@@ -338,7 +338,7 @@ export function RunDetailPage() {
                 Continue Chat
               </a>
             )}
-            {(run.status === "failure" || run.status === "interrupted") && data.checkpoint != null && (
+            {(run.status === "failure" || run.status === "interrupted" || run.status === "cancelled") && data.checkpoint != null && (
               <button
                 onClick={handleResume}
                 disabled={isResuming}

@@ -205,25 +205,32 @@ export async function executeGraph(
         if (!node) continue;
 
         if (node.data.type === "merge") {
-          // Skip merge nodes that have already fired
-          if (firedMerges.has(entry.nodeId)) continue;
-
-          // Merge nodes: wait for ALL incoming edges before executing once
-          const incomingEdges = getIncomingEdges(entry.nodeId, edges);
-
-          if (!pendingInputs.has(entry.nodeId)) {
-            pendingInputs.set(entry.nodeId, new Map());
-          }
-          const inputs = pendingInputs.get(entry.nodeId)!;
-          if (entry.triggeredBy) {
-            inputs.set(entry.triggeredBy, nodeOutputs.get(entry.triggeredBy));
-          }
-
-          // Bug fix: use total incoming edge count, not just edges with existing outputs
-          if (inputs.size >= incomingEdges.length) {
-            ready.push(entry);
-            pendingInputs.delete(entry.nodeId);
+          // Resume: merge nodes from checkpoint need to pass through for skip traversal,
+          // not get blocked by firedMerges. Only let the first arrival through —
+          // add to firedMerges immediately so subsequent arrivals are dropped.
+          if (resumeSkipNodes.has(entry.nodeId) && !firedMerges.has(entry.nodeId)) {
             firedMerges.add(entry.nodeId);
+            ready.push(entry);
+          } else if (firedMerges.has(entry.nodeId)) {
+            // Skip merge nodes that have already fired in THIS run
+            continue;
+          } else {
+            // Merge nodes: wait for ALL incoming edges before executing once
+            const incomingEdges = getIncomingEdges(entry.nodeId, edges);
+
+            if (!pendingInputs.has(entry.nodeId)) {
+              pendingInputs.set(entry.nodeId, new Map());
+            }
+            const inputs = pendingInputs.get(entry.nodeId)!;
+            if (entry.triggeredBy) {
+              inputs.set(entry.triggeredBy, nodeOutputs.get(entry.triggeredBy));
+            }
+
+            if (inputs.size >= incomingEdges.length) {
+              ready.push(entry);
+              pendingInputs.delete(entry.nodeId);
+              firedMerges.add(entry.nodeId);
+            }
           }
         } else {
           // All other nodes: run once per trigger
