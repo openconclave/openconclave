@@ -2,7 +2,7 @@ import { useWorkflowStore } from "@/stores/workflow-store";
 import { cn } from "@/lib/utils";
 import type { TriggerConfig } from "@openconclave/shared";
 import { FolderOpen } from "lucide-react";
-import { Field, INPUT_CLASS, MONO_INPUT_CLASS } from "./shared";
+import { Field, INPUT_CLASS, MONO_INPUT_CLASS, AutoTextarea } from "./shared";
 
 const CRON_PRESETS = [
   { label: "Every 5m", cron: "*/5 * * * *" },
@@ -127,12 +127,12 @@ export function TriggerFields({ nodeId, config }: TriggerFieldsProps) {
 
       {(config.type === "manual" || config.type === "cron") && (
         <Field label="Input Prompt">
-          <textarea
+          <AutoTextarea
             value={config.prompt ?? ""}
             onChange={(e) => update({ prompt: e.target.value })}
             placeholder="Initial data passed to the first node..."
-            rows={3}
-            className={`${INPUT_CLASS} resize-none`}
+            minRows={3}
+            className={INPUT_CLASS}
           />
         </Field>
       )}

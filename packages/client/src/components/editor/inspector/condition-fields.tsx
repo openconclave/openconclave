@@ -1,6 +1,6 @@
 import { useWorkflowStore } from "@/stores/workflow-store";
 import type { ConditionConfig } from "@openconclave/shared";
-import { Field, MONO_INPUT_CLASS } from "./shared";
+import { Field, MONO_INPUT_CLASS, AutoTextarea } from "./shared";
 
 interface ConditionFieldsProps {
   nodeId: string;
@@ -12,12 +12,12 @@ export function ConditionFields({ nodeId, config }: ConditionFieldsProps) {
 
   return (
     <Field label="Expression">
-      <textarea
+      <AutoTextarea
         value={config.expression}
         onChange={(e) => updateNodeConfig(nodeId, { expression: e.target.value })}
         placeholder="input.includes('done')"
-        rows={3}
-        className={`${MONO_INPUT_CLASS} resize-none`}
+        minRows={3}
+        className={MONO_INPUT_CLASS}
       />
     </Field>
   );

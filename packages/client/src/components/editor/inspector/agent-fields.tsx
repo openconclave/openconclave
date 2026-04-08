@@ -5,7 +5,7 @@ import { Terminal, Server, BookOpen, X, Sparkles, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { toast } from "@/components/ui/toast";
-import { Field, INPUT_CLASS } from "./shared";
+import { Field, INPUT_CLASS, AutoTextarea } from "./shared";
 
 interface ProviderInfo {
   id: string;
@@ -173,12 +173,12 @@ export function AgentFields({ nodeId, config, onUpdate }: AgentFieldsProps) {
       {engine !== "debug" && (
         <>
           <Field label="Instructions (System Prompt)">
-            <textarea
+            <AutoTextarea
               value={config.systemPrompt ?? ""}
               onChange={(e) => update({ systemPrompt: e.target.value })}
               placeholder="Agent's role and behavior. Input comes from the previous node automatically."
-              rows={4}
-              className={`${INPUT_CLASS} resize-none`}
+              minRows={4}
+              className={INPUT_CLASS}
             />
           </Field>
           <div className="flex items-center gap-2 px-1">
@@ -353,12 +353,12 @@ export function AgentFields({ nodeId, config, onUpdate }: AgentFieldsProps) {
       {engine === "debug" && (
         <>
           <Field label="Response Text">
-            <textarea
+            <AutoTextarea
               value={config.debugResponse ?? ""}
               onChange={(e) => update({ debugResponse: e.target.value })}
               placeholder="Static text this agent will return (no LLM call)"
-              rows={4}
-              className={`${INPUT_CLASS} resize-none`}
+              minRows={4}
+              className={INPUT_CLASS}
             />
           </Field>
           <p className="text-[10px] text-muted-foreground px-1">
