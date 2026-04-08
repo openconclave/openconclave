@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type { Run } from "@openconclave/shared";
-import { Play, Clock, DollarSign, Timer, ChevronLeft, ChevronRight, Square } from "lucide-react";
+import { Play, Clock, DollarSign, Timer, ChevronLeft, ChevronRight, Square, MessageSquare } from "lucide-react";
 
 type RunWithMeta = Run & { totalCost?: number; durationMs?: number | null };
 
@@ -19,7 +19,7 @@ const statusColors: Record<string, string> = {
 
 export function RunsPage() {
   const [runs, setRuns] = useState<RunWithMeta[]>([]);
-  const [workflows, setWorkflows] = useState<Map<string, string>>(new Map());
+  const [workflows, setWorkflows] = useState<Map<string, { name: string; toolName?: string; triggerType?: string }>>(new Map());
   const [page, setPage] = useState(0);
 
   useEffect(() => {
@@ -29,10 +29,16 @@ export function RunsPage() {
       .catch(() => setRuns([]));
 
     api
-      .get<{ workflows: Array<{ id: string; name: string }> }>("/workflows")
+      .get<{ workflows: Array<{ id: string; name: string; definition?: Record<string, unknown> }> }>("/workflows")
       .then((d) => {
-        const map = new Map<string, string>();
-        for (const w of d.workflows) map.set(String(w.id), w.name);
+        const map = new Map<string, { name: string; toolName?: string; triggerType?: string }>();
+        for (const w of d.workflows) {
+          const def = w.definition;
+          const nodes = (def?.nodes ?? []) as Array<{ data?: { type?: string; config?: Record<string, unknown> } }>;
+          const triggerNode = nodes.find((n) => n.data?.type === "trigger");
+          const triggerType = triggerNode?.data?.config?.type as string | undefined;
+          map.set(String(w.id), { name: w.name, toolName: def?.toolName as string | undefined, triggerType });
+        }
         setWorkflows(map);
       })
       .catch(() => {});
@@ -81,7 +87,7 @@ export function RunsPage() {
                       {run.status}
                     </span>
                     <span className="text-sm truncate">
-                      {workflows.get(String(run.workflowId)) ?? "Unknown workflow"}
+                      {workflows.get(String(run.workflowId))?.name ?? "Unknown workflow"}
                     </span>
                     <span className="text-[10px] font-mono text-muted-foreground/50 shrink-0">
                       #{run.id}
@@ -102,6 +108,22 @@ export function RunsPage() {
                       <Clock className="h-3 w-3" />
                       {run.createdAt ? new Date(run.createdAt).toLocaleString() : "—"}
                     </span>
+                    {(() => {
+                      const wf = workflows.get(String(run.workflowId));
+                      if (wf?.triggerType === "chat" && wf.toolName) {
+                        return (
+                          <a
+                            href={`/${wf.toolName}/chat/${run.id}`}
+                            onClick={(e) => e.stopPropagation()}
+                            className="inline-flex items-center gap-1 rounded-md bg-primary/10 text-primary px-2 py-1 text-[10px] font-medium hover:bg-primary/20 transition-colors"
+                          >
+                            <MessageSquare className="h-3 w-3" />
+                            Continue
+                          </a>
+                        );
+                      }
+                      return null;
+                    })()}
                     {(run.status === "running" || run.status === "queued") && (
                       <button
                         onClick={(e) => handleCancel(e, run.id)}

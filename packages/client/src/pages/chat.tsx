@@ -36,6 +36,7 @@ export function ChatPage() {
   const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const hydratedRef = useRef(!urlRunId); // true if new chat, false until history loads
 
   // Load workflow info
   useEffect(() => {
@@ -54,6 +55,82 @@ export function ChatPage() {
       .catch(() => setError(`Workflow "${toolName}" not found`));
   }, [toolName]);
 
+  // Hydrate conversation history when loading an existing run
+  useEffect(() => {
+    if (!chatRunId || !workflow || hydratedRef.current) return;
+
+    interface RunEvent {
+      type: string;
+      nodeId?: string;
+      data?: Record<string, unknown>;
+    }
+    interface RunDetail {
+      run: { triggerPayload?: unknown; status?: string };
+      events: RunEvent[];
+    }
+
+    api.get<RunDetail>(`/runs/${chatRunId}`)
+      .then(({ run, events }) => {
+        const restored: ChatMessage[] = [];
+
+        // First user message comes from run.triggerPayload
+        if (run.triggerPayload != null) {
+          const content = typeof run.triggerPayload === "string"
+            ? run.triggerPayload
+            : JSON.stringify(run.triggerPayload);
+          restored.push({ role: "user", content });
+        }
+
+        // Walk events chronologically to rebuild the conversation
+        for (const ev of events) {
+          const d = ev.data;
+          if (ev.type === "chat:userMessage" && d?.content) {
+            restored.push({ role: "user", content: d.content as string });
+          } else if (ev.type === "chat:response" && d?.content) {
+            restored.push({ role: "assistant", content: d.content as string, runId: chatRunId, status: "done" });
+          } else if (ev.type === "node:completed" && ev.nodeId) {
+            const node = workflow.nodes.find((n: WorkflowNode) => n.id === ev.nodeId);
+            if (node && node.data.type === "agent") {
+              let content = typeof d === "string" ? d : JSON.stringify(d, null, 2);
+              try {
+                const parsed = JSON.parse(content);
+                if (parsed?.__routeTo) content = parsed.content ?? content;
+              } catch { /* not JSON */ }
+              restored.push({ role: "agent", content, label: node.data.label, runId: chatRunId, status: "done" });
+            }
+          } else if (ev.type === "discussion:speech" && d?.message) {
+            restored.push({
+              role: "agent",
+              content: d.message as string,
+              label: `${d.agentName} (Round ${d.round})`,
+              runId: chatRunId,
+              status: "done",
+            });
+          } else if (ev.type === "discussion:moderator" && d?.summary) {
+            restored.push({
+              role: "moderator",
+              content: d.summary as string,
+              label: `Moderator${d.action === "end_discussion" ? " — Ending discussion" : ""}`,
+              runId: chatRunId,
+              status: "done",
+            });
+          }
+        }
+
+        if (restored.length > 0) {
+          setMessages(restored);
+        }
+        if (run.status === "running") {
+          setLoading(true);
+        }
+        hydratedRef.current = true;
+      })
+      .catch((err) => {
+        console.error("Failed to load conversation history:", err);
+        hydratedRef.current = true; // allow WebSocket events even if hydration fails
+      });
+  }, [chatRunId, workflow]);
+
   // Listen for chat:response events via WebSocket
   useEffect(() => {
     const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -66,6 +143,8 @@ export function ChatPage() {
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
+        // Skip WebSocket events while hydration is in progress to avoid duplicates
+        if (!hydratedRef.current) return;
         // Show intermediate agent outputs
         if (data.type === "node:completed" && data.nodeId && data.runId) {
           setMessages((prev) => {

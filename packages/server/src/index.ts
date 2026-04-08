@@ -295,6 +295,22 @@ app.post("/api/runs/:runId/message", async (c) => {
   const nodes = (definition.nodes ?? []) as Array<{ id: string; data?: { type?: string } }>;
   const triggerNode = nodes.find((n) => n.data?.type === "trigger");
 
+  // Persist user message as a run event so chat history survives page reloads
+  const now = new Date().toISOString();
+  await db.insert(runEvents).values({
+    runId,
+    nodeId: triggerNode?.id ?? null,
+    type: "chat:userMessage",
+    data: { content: message },
+    createdAt: now,
+  });
+  broadcastRunEvent({
+    type: "chat:userMessage",
+    runId,
+    nodeId: triggerNode?.id,
+    data: { content: message },
+  });
+
   await executor.executeInRun(
     runId,
     definition as never,

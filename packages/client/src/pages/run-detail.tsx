@@ -20,6 +20,7 @@ import {
   AlertTriangle,
   Square,
   RotateCcw,
+  MessageSquare,
 } from "lucide-react";
 
 const statusIcon: Record<string, ReactNode> = {
@@ -176,6 +177,7 @@ export function RunDetailPage() {
   const [loadError, setLoadError] = useState(false); // Bug #5 fix: separate error state
   const [nodeLabels, setNodeLabels] = useState<Map<string, string>>(new Map());
   const labelsLoadedFor = useRef<number | null>(null); // Bug #3 fix: track which workflow loaded
+  const [chatUrl, setChatUrl] = useState<string | null>(null);
   const [expandedTasks, setExpandedTasks] = useState<number[]>([]);
   const [expandedEvents, setExpandedEvents] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<number[]>([]);
@@ -190,14 +192,23 @@ export function RunDetailPage() {
     if (!workflowId || labelsLoadedFor.current === workflowId) return;
 
     labelsLoadedFor.current = workflowId;
-    api.get<{ definition: { nodes: Array<{ id: string; data?: { label?: string } }> } }>(`/workflows/${workflowId}`)
+    api.get<{ definition: { nodes: Array<{ id: string; data?: { label?: string; type?: string; config?: Record<string, unknown> } }>; toolName?: string } }>(`/workflows/${workflowId}`)
       .then((wf) => {
-        const def = (wf as Record<string, unknown>).definition ?? wf;
+        const def = ((wf as Record<string, unknown>).definition ?? wf) as Record<string, unknown>;
+        const nodes = (def.nodes as Array<{ id: string; data?: { label?: string; type?: string; config?: Record<string, unknown> } }>) ?? [];
         const labels = new Map<string, string>();
-        for (const n of (def as Record<string, unknown>).nodes as Array<{ id: string; data?: { label?: string } }> ?? []) {
+        for (const n of nodes) {
           labels.set(n.id, n.data?.label ?? n.id);
         }
         setNodeLabels(labels);
+
+        // Detect chat workflow for "Continue Chat" button
+        const triggerNode = nodes.find((n) => n.data?.type === "trigger");
+        const triggerType = triggerNode?.data?.config?.type as string | undefined;
+        const toolName = def.toolName as string | undefined;
+        if (triggerType === "chat" && toolName && runId) {
+          setChatUrl(`/${toolName}/chat/${runId}`);
+        }
       })
       .catch(() => {});
   }, [data?.run.workflowId]);
@@ -317,6 +328,15 @@ export function RunDetailPage() {
                 <Square className="h-3 w-3" />
                 Stop
               </button>
+            )}
+            {chatUrl && (
+              <a
+                href={chatUrl}
+                className="ml-auto inline-flex items-center gap-1.5 rounded-md bg-primary/10 text-primary px-3 py-1 text-xs font-medium hover:bg-primary/20 transition-colors"
+              >
+                <MessageSquare className="h-3 w-3" />
+                Continue Chat
+              </a>
             )}
             {(run.status === "failure" || run.status === "interrupted") && data.checkpoint != null && (
               <button
