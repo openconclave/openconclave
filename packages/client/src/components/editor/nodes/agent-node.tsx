@@ -83,25 +83,6 @@ export function AgentNode(props: NodeProps) {
         data={data}
         icon={User}
         subtitle={`${engine} · ${model}`}
-        subtitleOptions={[
-          { value: "haiku", label: "claude · haiku" },
-          { value: "sonnet", label: "claude · sonnet" },
-          { value: "opus", label: "claude · opus" },
-          { value: "ollama", label: "ollama" },
-          { value: "openai", label: "openai" },
-          { value: "debug", label: "static" },
-        ]}
-        onSubtitleChange={(value) => {
-          if (value === "ollama") {
-            updateNodeConfig(props.id, { engine: "ollama", model: undefined });
-          } else if (value === "openai") {
-            updateNodeConfig(props.id, { engine: "openai", model: undefined });
-          } else if (value === "debug") {
-            updateNodeConfig(props.id, { engine: "debug", model: undefined });
-          } else {
-            updateNodeConfig(props.id, { engine: "claude", model: value });
-          }
-        }}
       >
         {config.systemPrompt && (
           <p className="truncate text-[10px]">{config.systemPrompt}</p>
