@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, desc } from "drizzle-orm";
 
 import { db } from "../db/client";
 import { runs, checkpoints } from "../db/schema";
@@ -12,16 +12,16 @@ import type { WorkflowDefinition, WorkflowNode, WorkflowEdge } from "@openconcla
 import type { QueueEntry, RunEvent } from "./types";
 import { Workspace } from "./workspace";
 
-// Persistent session store for chat workflows — survives across runs
-// Key: "workflowId:nodeId" → session ID (Claude SDK session or JSONL file path)
+// Persistent session store for chat workflows — in-memory cache keyed by runId:nodeId.
+// Falls back to DB checkpoint on miss (survives server restarts).
 const persistentSessions = new Map<string, string>();
 
-export function getPersistentSession(workflowId: string, nodeId: string): string | undefined {
-  return persistentSessions.get(`${workflowId}:${nodeId}`);
+export function getPersistentSession(runId: number, nodeId: string): string | undefined {
+  return persistentSessions.get(`${runId}:${nodeId}`);
 }
 
-export function setPersistentSession(workflowId: string, nodeId: string, sessionId: string): void {
-  persistentSessions.set(`${workflowId}:${nodeId}`, sessionId);
+export function setPersistentSession(runId: number, nodeId: string, sessionId: string): void {
+  persistentSessions.set(`${runId}:${nodeId}`, sessionId);
 }
 
 // ── Graph Walker ────────────────────────────────────────────
@@ -75,15 +75,37 @@ export async function executeGraph(
     const cfg = n.data.config as Record<string, unknown>;
     return n.data.type === "trigger" && cfg.type === "chat";
   });
-  const workflowId = String(workflow.id);
   if (isChatWorkflow) {
+    // Restore Claude SDK sessions for chat continuation (same runId).
+    // First try in-memory cache, then fall back to latest checkpoint in DB
+    // (survives server restarts).
+    let checkpointSessions: Record<string, string> | null = null;
+
     for (const node of nodes) {
       if (node.data.type === "agent") {
         const agentCfg = node.data.config as Record<string, unknown>;
         // Only Claude agents need SDK session resume — Ollama/OpenAI use JSONL files
         if ((agentCfg.engine ?? "claude") !== "claude") continue;
-        const existing = getPersistentSession(workflowId, node.id);
-        if (existing) agentSessions.set(node.id, existing);
+        const existing = getPersistentSession(runId, node.id);
+        if (existing) {
+          agentSessions.set(node.id, existing);
+        } else {
+          // Lazy-load checkpoint sessions on first miss
+          if (checkpointSessions === null) {
+            const [latestCp] = await db
+              .select()
+              .from(checkpoints)
+              .where(eq(checkpoints.runId, runId))
+              .orderBy(desc(checkpoints.id))
+              .limit(1);
+            checkpointSessions = (latestCp?.agentSessions as Record<string, string>) ?? {};
+          }
+          const fromCheckpoint = checkpointSessions[node.id];
+          if (fromCheckpoint) {
+            agentSessions.set(node.id, fromCheckpoint);
+            setPersistentSession(runId, node.id, fromCheckpoint);
+          }
+        }
       }
     }
   }
@@ -280,7 +302,7 @@ export async function executeGraph(
         if (node?.data.type === "agent") {
           const agentCfg = node.data.config as Record<string, unknown>;
           if ((agentCfg.engine ?? "claude") === "claude") {
-            setPersistentSession(workflowId, nodeId, sessionId);
+            setPersistentSession(runId, nodeId, sessionId);
           }
         }
       }
