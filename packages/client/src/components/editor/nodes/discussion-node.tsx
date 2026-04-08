@@ -126,64 +126,72 @@ export function DiscussionNode(props: NodeProps) {
   ).length;
 
   const [dragOver, setDragOver] = useState(false);
+  const dropRef = useRef<HTMLDivElement>(null);
+  const dragCountRef = useRef(0);
 
   const clearModerator = useCallback(() => {
-    // store.ts:145 does `{ ...n.data.config, ...configUpdate }` — a one-level spread.
-    // That spread already preserves every existing config field not present in configUpdate.
-    // Passing only `{ moderator: undefined }` is exactly what we need; no re-spreading required.
     updateNodeConfig(props.id, { moderator: undefined });
   }, [props.id, updateNodeConfig]);
 
-  const onDragOver = useCallback((e: React.DragEvent) => {
-    if (e.dataTransfer.types.includes("application/openconclave-node")) {
-      e.preventDefault();
-      e.stopPropagation();
-      e.dataTransfer.dropEffect = "copy";
-      setDragOver(true);
-    }
-  }, []);
+  // Native DOM event listeners bypass React Flow's synthetic event interception.
+  // React Flow v12 registers pane-level handlers via native listeners, so React's
+  // e.stopPropagation() on synthetic events doesn't prevent the canvas onDrop from
+  // also firing. Native stopImmediatePropagation() does.
+  //
+  // Counter-based dragenter/dragleave eliminates flicker caused by child elements:
+  // each child enter increments, each leave decrements — only reset at zero.
+  useEffect(() => {
+    const el = dropRef.current;
+    if (!el) return;
 
-  const onDragLeave = useCallback(() => {
-    setDragOver(false);
-  }, []);
+    const getNodeId = () => props.id;
+    const getUpdateFn = () => updateNodeConfig;
 
-  const onDrop = useCallback(
-    (e: React.DragEvent) => {
+    const isNodeDrag = (dt: DataTransfer | null) =>
+      dt?.types.includes("application/openconclave-node") ?? false;
+
+    const handleDragOver = (e: DragEvent) => {
+      if (!isNodeDrag(e.dataTransfer)) return;
       e.preventDefault();
-      e.stopPropagation();
+      e.stopImmediatePropagation();
+      e.dataTransfer!.dropEffect = "move";
+    };
+
+    const handleDragEnter = (e: DragEvent) => {
+      if (!isNodeDrag(e.dataTransfer)) return;
+      e.preventDefault();
+      dragCountRef.current++;
+      if (dragCountRef.current === 1) setDragOver(true);
+    };
+
+    const handleDragLeave = (_e: DragEvent) => {
+      dragCountRef.current--;
+      if (dragCountRef.current <= 0) {
+        dragCountRef.current = 0;
+        setDragOver(false);
+      }
+    };
+
+    const handleDrop = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      dragCountRef.current = 0;
       setDragOver(false);
 
-      const raw = e.dataTransfer.getData("application/openconclave-node");
+      const raw = e.dataTransfer?.getData("application/openconclave-node");
       if (!raw) return;
 
-      // VETO-2 type guard: validate shape before touching state.
-      // Synthetic DragEvents from DevTools cannot inject arbitrary config this way.
       let parsed: unknown;
-      try {
-        parsed = JSON.parse(raw);
-      } catch {
-        return;
-      }
+      try { parsed = JSON.parse(raw); } catch { return; }
 
       if (
-        typeof parsed !== "object" ||
-        parsed === null ||
-        !("type" in parsed) ||
-        !("label" in parsed) ||
-        !("config" in parsed) ||
-        // config must be an object — null config would crash inspector on every render
-        typeof parsed.config !== "object" ||
-        parsed.config === null ||
-        // Only agent and code nodes are valid moderators (also accept legacy "transform" type)
+        typeof parsed !== "object" || parsed === null ||
+        !("type" in parsed) || !("label" in parsed) || !("config" in parsed) ||
+        typeof parsed.config !== "object" || parsed.config === null ||
         (parsed.type !== "agent" && parsed.type !== "transform" && parsed.type !== "code") ||
-        typeof parsed.label !== "string" ||
-        !parsed.label.trim()
-      ) {
-        return;
-      }
+        typeof parsed.label !== "string" || !parsed.label.trim()
+      ) return;
 
-      // nodeType is read from node.data.type (the authoritative property used by executors).
-      // Server normalization keeps node.type and node.data.type synchronized.
       const { type: nodeType, label, config: dropConfig } = parsed as {
         type: "agent" | "transform" | "code";
         label: string;
@@ -192,16 +200,25 @@ export function DiscussionNode(props: NodeProps) {
 
       const moderatorType: "code" | "agent" = (nodeType === "transform" || nodeType === "code") ? "code" : "agent";
 
-      // store.ts:145 shallow merge preserves prompt/maxRounds/tool automatically.
-      updateNodeConfig(props.id, {
+      getUpdateFn()(getNodeId(), {
         moderator: {
           type: moderatorType,
           node: { label, type: nodeType, config: dropConfig },
         },
       });
-    },
-    [props.id, updateNodeConfig]
-  );
+    };
+
+    el.addEventListener("dragover", handleDragOver);
+    el.addEventListener("dragenter", handleDragEnter);
+    el.addEventListener("dragleave", handleDragLeave);
+    el.addEventListener("drop", handleDrop);
+    return () => {
+      el.removeEventListener("dragover", handleDragOver);
+      el.removeEventListener("dragenter", handleDragEnter);
+      el.removeEventListener("dragleave", handleDragLeave);
+      el.removeEventListener("drop", handleDrop);
+    };
+  }, [props.id, updateNodeConfig]);
 
   const nodeRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -213,14 +230,7 @@ export function DiscussionNode(props: NodeProps) {
   });
 
   return (
-    <div
-      // [&>*]:pointer-events-none during drag prevents dragleave flicker:
-      // without it, moving the cursor onto a child element fires dragleave on the parent.
-      className={cn(dragOver && "[&>*]:pointer-events-none")}
-      onDragOver={onDragOver}
-      onDragLeave={onDragLeave}
-      onDrop={onDrop}
-    >
+    <div ref={dropRef}>
       <div
         ref={nodeRef}
         className={cn(
