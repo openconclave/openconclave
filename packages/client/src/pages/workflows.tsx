@@ -5,17 +5,25 @@ import { cn } from "@/lib/utils";
 import type { WorkflowDefinition } from "@openconclave/shared";
 
 type WorkflowRow = { id: string; name: string; description?: string; enabled: boolean; definition: WorkflowDefinition };
-import { GitBranch, Play, Clock, Trash2, Square, Loader2, Power, MessageSquare } from "lucide-react";
+import { GitBranch, Play, Clock, Trash2, Square, Loader2, Power, MessageSquare, ChevronDown, LayoutGrid, List } from "lucide-react";
 import { confirm } from "@/components/ui/confirm";
 import { toast } from "@/components/ui/toast";
 
 type ScheduleEntry = { workflowId: string; cron: string; nextRun: string; enabled: boolean };
 type ActiveRun = { id: number; workflowId: number; status: string };
 
+type SortBy = "name" | "created" | "modified";
+type SortOrder = "asc" | "desc";
+type ViewMode = "grid" | "list";
+
 export function WorkflowsPage() {
   const [workflows, setWorkflows] = useState<WorkflowDefinition[]>([]);
   const [schedule, setSchedule] = useState<Map<string, ScheduleEntry>>(new Map());
   const [activeRuns, setActiveRuns] = useState<Map<string, ActiveRun>>(new Map());
+  const [sortBy, setSortBy] = useState<SortBy>("modified");
+  const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
+  const [viewMode, setViewMode] = useState<ViewMode>("grid");
+  const [sortOpen, setSortOpen] = useState(false);
 
   const load = () => {
     api
@@ -111,19 +119,107 @@ export function WorkflowsPage() {
       .catch((err: Error) => toast(`Failed: ${err.message}`, "error"));
   };
 
+  const sortLabels: Record<SortBy, string> = { name: "Alphabetical", created: "Date created", modified: "Last modified" };
+
+  const sortedWorkflows = [...workflows].sort((a, b) => {
+    let cmp = 0;
+    if (sortBy === "name") cmp = (a.name ?? "").localeCompare(b.name ?? "");
+    else if (sortBy === "created") cmp = (a.createdAt ?? "").localeCompare(b.createdAt ?? "");
+    else cmp = (a.updatedAt ?? "").localeCompare(b.updatedAt ?? "");
+    return sortOrder === "asc" ? cmp : -cmp;
+  });
+
   return (
     <>
       <Header
         title="Workflows"
         actions={
-          <NewButton
-            label="New Workflow"
-            onClick={() => (window.location.href = "/workflows/new")}
-          />
+          <div className="flex items-center gap-2">
+            {/* Sort dropdown */}
+            <div className="relative">
+              <button
+                onClick={() => setSortOpen(!sortOpen)}
+                className="flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {sortLabels[sortBy]}
+                <ChevronDown className="h-3.5 w-3.5" />
+              </button>
+              {sortOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setSortOpen(false)} />
+                  <div className="absolute right-0 top-full mt-1 z-50 w-48 rounded-lg border border-border bg-card shadow-lg py-1">
+                    <p className="px-3 py-1.5 text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider">Sort by</p>
+                    {(["name", "created", "modified"] as SortBy[]).map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => { setSortBy(s); setSortOpen(false); }}
+                        className={cn(
+                          "flex w-full items-center gap-2 px-3 py-1.5 text-sm hover:bg-accent transition-colors",
+                          sortBy === s ? "text-foreground" : "text-muted-foreground"
+                        )}
+                      >
+                        <span className="w-4 text-xs">{sortBy === s ? "✓" : ""}</span>
+                        {sortLabels[s]}
+                      </button>
+                    ))}
+                    <div className="border-t border-border/50 my-1" />
+                    <p className="px-3 py-1.5 text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider">Order</p>
+                    <button
+                      onClick={() => { setSortOrder("asc"); setSortOpen(false); }}
+                      className={cn(
+                        "flex w-full items-center gap-2 px-3 py-1.5 text-sm hover:bg-accent transition-colors",
+                        sortOrder === "asc" ? "text-foreground" : "text-muted-foreground"
+                      )}
+                    >
+                      <span className="w-4 text-xs">{sortOrder === "asc" ? "✓" : ""}</span>
+                      Oldest first
+                    </button>
+                    <button
+                      onClick={() => { setSortOrder("desc"); setSortOpen(false); }}
+                      className={cn(
+                        "flex w-full items-center gap-2 px-3 py-1.5 text-sm hover:bg-accent transition-colors",
+                        sortOrder === "desc" ? "text-foreground" : "text-muted-foreground"
+                      )}
+                    >
+                      <span className="w-4 text-xs">{sortOrder === "desc" ? "✓" : ""}</span>
+                      Newest first
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* View mode toggle */}
+            <div className="flex rounded-md border border-border overflow-hidden">
+              <button
+                onClick={() => setViewMode("grid")}
+                className={cn(
+                  "p-1.5 transition-colors",
+                  viewMode === "grid" ? "bg-accent text-foreground" : "bg-card text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <LayoutGrid className="h-4 w-4" />
+              </button>
+              <button
+                onClick={() => setViewMode("list")}
+                className={cn(
+                  "p-1.5 transition-colors",
+                  viewMode === "list" ? "bg-accent text-foreground" : "bg-card text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <List className="h-4 w-4" />
+              </button>
+            </div>
+
+            <NewButton
+              label="New Workflow"
+              onClick={() => (window.location.href = "/workflows/new")}
+            />
+          </div>
         }
       />
       <div className="flex-1 overflow-y-auto p-6">
-        {workflows.length === 0 ? (
+        {sortedWorkflows.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
             <GitBranch className="h-12 w-12 mb-4 opacity-30" />
             <p className="text-lg font-medium">No workflows yet</p>
@@ -132,8 +228,8 @@ export function WorkflowsPage() {
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-3 gap-4">
-            {workflows.map((wf) => {
+          <div className={viewMode === "grid" ? "grid grid-cols-3 gap-4" : "flex flex-col gap-2"}>
+            {sortedWorkflows.map((wf) => {
               const sched = schedule.get(wf.id);
               const activeRun = activeRuns.get(String(wf.id));
               const triggerNode = wf.nodes?.find((n) => n.data?.type === "trigger");

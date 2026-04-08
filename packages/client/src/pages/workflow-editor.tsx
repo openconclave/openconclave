@@ -295,14 +295,14 @@ export function WorkflowEditorPage() {
   return (
     <>
       <Header
+        breadcrumb={[{ label: "Workflows", href: "/workflows" }]}
         title={
-          <div className="flex flex-col gap-0.5">
+          <div className="flex flex-col">
             <input
               type="text"
               value={workflowName}
               onChange={(e) => {
                 setWorkflowMeta(e.target.value, workflowDescription);
-                // Auto-generate tool_name from workflow name if not manually set
                 const current = useWorkflowStore.getState().toolName;
                 if (!current || current === toSnakeCase(workflowName)) {
                   useWorkflowStore.setState({ toolName: toSnakeCase(e.target.value) || undefined });
@@ -311,19 +311,13 @@ export function WorkflowEditorPage() {
               className="bg-transparent text-lg font-semibold border-none outline-none focus:ring-0 w-80"
               placeholder="Workflow name..."
             />
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-mono text-muted-foreground/50">
-                {useWorkflowStore.getState().toolName || toSnakeCase(workflowName) || "tool_name"}
-              </span>
-              <span className="text-[10px] text-muted-foreground/30">·</span>
-              <input
-                type="text"
-                value={workflowDescription}
-                onChange={(e) => setWorkflowMeta(workflowName, e.target.value)}
-                className="bg-transparent text-[11px] text-muted-foreground border-none outline-none focus:ring-0 flex-1 min-w-0"
-                placeholder="Description for Claude..."
-              />
-            </div>
+            <input
+              type="text"
+              value={workflowDescription}
+              onChange={(e) => setWorkflowMeta(workflowName, e.target.value)}
+              className="bg-transparent text-xs text-muted-foreground border-none outline-none focus:ring-0 w-80 -mt-0.5"
+              placeholder="Description for Claude..."
+            />
           </div>
         }
         actions={

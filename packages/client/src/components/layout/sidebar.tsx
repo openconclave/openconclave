@@ -57,6 +57,9 @@ export function Sidebar() {
           <div className="h-2 w-2 rounded-full bg-success" />
           Server connected
         </div>
+        <div className="px-3 py-1 text-[10px] text-muted-foreground/50">
+          Version 1.0.2
+        </div>
       </div>
     </aside>
   );
