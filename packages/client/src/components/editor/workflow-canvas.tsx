@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useState, useEffect } from "react";
 import {
   ReactFlow,
   Background,
@@ -7,14 +7,63 @@ import {
   Panel,
   BackgroundVariant,
   ConnectionMode,
+
+  SelectionMode,
+  reconnectEdge,
   type ReactFlowInstance,
   type Node,
+  type Edge,
+  type Connection,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import dagre from "@dagrejs/dagre";
 import { LayoutGrid } from "lucide-react";
 
 import { useWorkflowStore } from "@/stores/workflow-store";
+import { RoundedEdge, CustomConnectionLine } from "./rounded-edge";
+import type { MiniMapNodeProps } from "@xyflow/react";
+
+// Group colors for minimap
+const miniMapColors: Record<string, string> = {
+  trigger: "oklch(0.65 0.18 170)",
+  output: "oklch(0.65 0.18 170)",
+  agent: "oklch(0.68 0.14 65)",
+  discussion: "oklch(0.68 0.14 65)",
+  condition: "oklch(0.65 0.18 290)",
+  code: "oklch(0.65 0.18 290)",
+  merge: "oklch(0.65 0.18 290)",
+  file: "oklch(0.65 0.18 290)",
+  prompt: "oklch(0.65 0.18 170)",
+};
+
+function MiniMapNode({ x, y, width, height, id }: MiniMapNodeProps) {
+  const nodeType = useWorkflowStore.getState().nodes.find((n) => n.id === id)?.data?.type;
+  const color = miniMapColors[nodeType ?? ""] ?? "oklch(0.65 0.18 260)";
+  const cx = x + width / 2;
+  const cy = y + height / 2;
+  const sw = 1.5;
+
+  const fill = color;
+  const op = 0.7;
+
+  // Flow (Trigger, Channel Loop, Output) — oval
+  if (nodeType === "trigger" || nodeType === "output" || nodeType === "prompt") {
+    return <ellipse cx={cx} cy={cy} rx={width / 2} ry={height / 2} fill={fill} opacity={op} />;
+  }
+  // Logic (Condition, Code, Merge, File) — diamond
+  if (nodeType === "condition" || nodeType === "code" || nodeType === "merge" || nodeType === "file") {
+    return (
+      <polygon
+        points={`${cx},${y} ${x + width},${cy} ${cx},${y + height} ${x},${cy}`}
+        fill={fill}
+        opacity={op}
+      />
+    );
+  }
+  // AI (Agent, Discussion) — rounded rect
+  const rx = Math.min(width, height) * 0.2;
+  return <rect x={x} y={y} width={width} height={height} rx={rx} ry={rx} fill={fill} opacity={op} />;
+}
 import { TriggerNode } from "./nodes/trigger-node";
 import { AgentNode } from "./nodes/agent-node";
 import { ConditionNode } from "./nodes/condition-node";
@@ -26,6 +75,10 @@ import { FileNode } from "./nodes/file-node";
 import { DiscussionNode } from "./nodes/discussion-node";
 import type { WorkflowNodeData, NodeType, TriggerConfig } from "@openconclave/shared";
 
+const edgeTypes = {
+  rounded: RoundedEdge,
+};
+
 const nodeTypes = {
   trigger: TriggerNode,
   agent: AgentNode,
@@ -33,7 +86,7 @@ const nodeTypes = {
   code: TransformNode,
   merge: MergeNode,
   prompt: PromptNode,
-  output: OutputNode,
+  sink: OutputNode,
   file: FileNode,
   discussion: DiscussionNode,
 };
@@ -49,12 +102,12 @@ function autoLayout() {
   g.setGraph({ rankdir: "TB", nodesep: 60, ranksep: 100 });
 
   for (const node of nodes) {
-    // Discussion nodes are 260×200px; all others are 220×100px.
-    // Dagre returns node center — subtract half-dimensions to get top-left.
+    // Discussion nodes are 280×200px; all others are 240×80px.
+    // Heights must be multiples of 40 so handles align with grid.
     const isDiscussion = node.data.type === "discussion";
     g.setNode(node.id, {
-      width: isDiscussion ? 260 : 220,
-      height: isDiscussion ? 200 : 100,
+      width: isDiscussion ? 280 : 240,
+      height: isDiscussion ? 200 : 80,
     });
   }
   for (const edge of edges) {
@@ -66,8 +119,8 @@ function autoLayout() {
   const layoutedNodes = nodes.map((node) => {
     const pos = g.node(node.id);
     const isDiscussion = node.data.type === "discussion";
-    const halfW = isDiscussion ? 130 : 110;
-    const halfH = isDiscussion ? 100 : 50;
+    const halfW = isDiscussion ? 140 : 120;
+    const halfH = isDiscussion ? 100 : 40;
     return {
       ...node,
       position: {
@@ -83,14 +136,134 @@ function autoLayout() {
 export function WorkflowCanvas() {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const reactFlowInstance = useRef<ReactFlowInstance<Node<WorkflowNodeData>> | null>(null);
+  const lastClickedNode = useRef<string | null>(null);
+  const lastClickedEdge = useRef<string | null>(null);
+  const selStart = useRef<{ x: number; y: number } | null>(null);
 
   const nodes = useWorkflowStore((s) => s.nodes);
   const edges = useWorkflowStore((s) => s.edges);
   const onNodesChange = useWorkflowStore((s) => s.onNodesChange);
   const onEdgesChange = useWorkflowStore((s) => s.onEdgesChange);
   const onConnect = useWorkflowStore((s) => s.onConnect);
+  const pushHistory = useWorkflowStore((s) => s.pushHistory);
   const addNode = useWorkflowStore((s) => s.addNode);
+
+  const reconnectSucceeded = useRef(false);
+
+  const onReconnectStart = useCallback(() => {
+    reconnectSucceeded.current = false;
+  }, []);
+
+  const onReconnect = useCallback((oldEdge: Edge, newConnection: Connection) => {
+    reconnectSucceeded.current = true;
+    pushHistory();
+    const updated = reconnectEdge(oldEdge, newConnection, useWorkflowStore.getState().edges);
+    useWorkflowStore.setState({ edges: updated, isDirty: true });
+  }, [pushHistory]);
+
+  const onReconnectEnd = useCallback((event: MouseEvent | TouchEvent, edge: Edge, handleType: string) => {
+    if (reconnectSucceeded.current) return;
+
+    // React Flow's onReconnect doesn't fire with custom edges —
+    // manually check if cursor is over a handle and reconnect
+    const clientX = "clientX" in event ? event.clientX : event.changedTouches[0].clientX;
+    const clientY = "clientY" in event ? event.clientY : event.changedTouches[0].clientY;
+    const els = document.elementsFromPoint(clientX, clientY);
+    const handleEl = els.find((e) => e.classList.contains("react-flow__handle")) as HTMLElement | null;
+
+    if (handleEl) {
+      const nodeEl = handleEl.closest(".react-flow__node");
+      const nodeId = nodeEl?.getAttribute("data-id");
+      const handleId = handleEl.dataset.handleid ?? null;
+
+      if (nodeId) {
+        const newSource = handleType === "source" ? nodeId : edge.source;
+        const newTarget = handleType === "target" ? nodeId : edge.target;
+        const newSourceHandle = handleType === "source" ? handleId : edge.sourceHandle;
+        const newTargetHandle = handleType === "target" ? handleId : edge.targetHandle;
+
+        // Block self-connections and duplicates
+        if (newSource !== newTarget) {
+          const currentEdges = useWorkflowStore.getState().edges;
+          const isDuplicate = currentEdges.some(
+            (e) => e.id !== edge.id && e.source === newSource && e.target === newTarget,
+          );
+          if (!isDuplicate) {
+            pushHistory();
+            useWorkflowStore.setState({
+              edges: currentEdges.map((e) =>
+                e.id === edge.id
+                  ? { ...e, source: newSource, target: newTarget, sourceHandle: newSourceHandle, targetHandle: newTargetHandle }
+                  : e,
+              ),
+              isDirty: true,
+            });
+            return;
+          }
+        }
+      }
+    }
+
+    // Dropped in empty space → delete edge
+    setTimeout(() => {
+      pushHistory();
+      useWorkflowStore.setState({
+        edges: useWorkflowStore.getState().edges.filter((e) => e.id !== edge.id),
+        isDirty: true,
+      });
+    }, 0);
+  }, [pushHistory]);
   const setSelectedNode = useWorkflowStore((s) => s.setSelectedNode);
+  const zCounterRef = useRef(1);
+
+  const onNodeDragStart = useCallback((_: any, node: Node) => {
+    const z = ++zCounterRef.current;
+    useWorkflowStore.setState({
+      nodes: useWorkflowStore.getState().nodes.map(n =>
+        n.id === node.id ? { ...n, zIndex: z } : n
+      ),
+    });
+  }, []);
+
+  const [spaceHeld, setSpaceHeld] = useState(false);
+  const [shiftHeld, setShiftHeld] = useState(false);
+  const undo = useWorkflowStore((s) => s.undo);
+  const redo = useWorkflowStore((s) => s.redo);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.code === "Space" && !e.repeat) setSpaceHeld(true);
+      if (e.key === "Shift") setShiftHeld(true);
+
+      // Cmd+Z / Ctrl+Z — undo; Cmd+Shift+Z / Ctrl+Shift+Z — redo
+      if ((e.metaKey || e.ctrlKey) && e.key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === "z" && e.shiftKey) {
+        e.preventDefault();
+        redo();
+      }
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code === "Space") setSpaceHeld(false);
+      if (e.key === "Shift") setShiftHeld(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+    };
+  }, [undo, redo]);
+
+  const setDraggingTool = useWorkflowStore((s) => s.setDraggingTool);
+
+  useEffect(() => {
+    const onDragEnd = () => setDraggingTool(false);
+    window.addEventListener("dragend", onDragEnd);
+    return () => window.removeEventListener("dragend", onDragEnd);
+  }, [setDraggingTool]);
 
   const onDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -109,12 +282,11 @@ export function WorkflowCanvas() {
         config: unknown;
       };
 
-      const bounds = reactFlowWrapper.current?.getBoundingClientRect();
-      if (!bounds || !reactFlowInstance.current) return;
+      if (!reactFlowInstance.current) return;
 
       const position = reactFlowInstance.current.screenToFlowPosition({
-        x: e.clientX - bounds.left,
-        y: e.clientY - bounds.top,
+        x: e.clientX,
+        y: e.clientY,
       });
 
       // Snap to grid
@@ -132,9 +304,11 @@ export function WorkflowCanvas() {
       }
 
       const id = `${type}_${++nodeId}`;
+      // React Flow has built-in "output" node type with forced styles — use "sink" instead
+      const rfType = type === "output" ? "sink" : type;
       const newNode = {
         id,
-        type,
+        type: rfType,
         position,
         data: { label: uniqueLabel, type, config } as WorkflowNodeData,
       };
@@ -152,14 +326,21 @@ export function WorkflowCanvas() {
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        onReconnectStart={onReconnectStart}
+        onReconnect={onReconnect}
+        onReconnectEnd={onReconnectEnd}
+        onNodeDragStart={onNodeDragStart}
+        connectionLineComponent={CustomConnectionLine}
         isValidConnection={(connection) => {
           const { edges: currentEdges, nodes: currentNodes } = useWorkflowStore.getState();
-          // Prevent duplicate edges between same source and target nodes
+          // Prevent self-connections
+          if (connection.source === connection.target) return false;
+          // Prevent duplicate edges (same source+target AND same handles)
           const exists = currentEdges.some(
             (e) => e.source === connection.source && e.target === connection.target
+              && e.sourceHandle === connection.sourceHandle && e.targetHandle === connection.targetHandle
           );
-          // Prevent self-connections
-          if (exists || connection.source === connection.target) return false;
+          if (exists) return false;
 
           // Block Agent → Chat when Chat → Agent already exists (bidirectional covers it)
           const targetNode = currentNodes.find((n) => n.id === connection.target);
@@ -177,21 +358,104 @@ export function WorkflowCanvas() {
         onInit={(instance) => {
           reactFlowInstance.current = instance;
         }}
-        onPaneClick={() => setSelectedNode(null)}
+        onNodeClick={(_event, node) => {
+          const prev = lastClickedNode.current;
+          if (prev === node.id) {
+            // Second click on same node — deselect
+            setSelectedNode(null);
+            setTimeout(() => {
+              onNodesChange([{ id: node.id, type: "select", selected: false }]);
+            }, 0);
+            lastClickedNode.current = null;
+          } else {
+            setSelectedNode(node.id);
+            lastClickedNode.current = node.id;
+          }
+        }}
+        onEdgeClick={(_event, edge) => {
+          const prev = lastClickedEdge.current;
+          if (prev === edge.id) {
+            setTimeout(() => {
+              onEdgesChange([{ id: edge.id, type: "select", selected: false }]);
+            }, 0);
+            lastClickedEdge.current = null;
+          } else {
+            lastClickedEdge.current = edge.id;
+          }
+        }}
+        onSelectionStart={useCallback((e: React.MouseEvent) => {
+          selStart.current = { x: e.clientX, y: e.clientY };
+        }, [])}
+        onSelectionEnd={useCallback((e: React.MouseEvent) => {
+          const start = selStart.current;
+          if (!start || !reactFlowWrapper.current) {
+            selStart.current = null;
+            return;
+          }
+
+          const left = Math.min(start.x, e.clientX);
+          const top = Math.min(start.y, e.clientY);
+          const right = Math.max(start.x, e.clientX);
+          const bottom = Math.max(start.y, e.clientY);
+
+          // Only process if it was a real drag (not a click)
+          if (right - left < 5 && bottom - top < 5) {
+            selStart.current = null;
+            return;
+          }
+
+          const edgePaths = reactFlowWrapper.current.querySelectorAll(
+            '.react-flow__edge path.react-flow__edge-path'
+          );
+          const toSelect: string[] = [];
+
+          edgePaths.forEach((pathEl) => {
+            const pathBounds = pathEl.getBoundingClientRect();
+            const overlaps =
+              pathBounds.left < right &&
+              pathBounds.right > left &&
+              pathBounds.top < bottom &&
+              pathBounds.bottom > top;
+            if (overlaps) {
+              const edgeEl = pathEl.closest('.react-flow__edge');
+              const edgeId = edgeEl?.getAttribute('data-id');
+              if (edgeId) toSelect.push(edgeId);
+            }
+          });
+
+          if (toSelect.length > 0) {
+            onEdgesChange(
+              toSelect.map((id) => ({ id, type: "select" as const, selected: true }))
+            );
+          }
+          selStart.current = null;
+        }, [onEdgesChange])}
+        onPaneClick={() => {
+          setSelectedNode(null);
+          lastClickedNode.current = null;
+          lastClickedEdge.current = null;
+        }}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         connectionMode={ConnectionMode.Loose}
         fitView
+        panOnDrag={spaceHeld}
+        selectionOnDrag={!spaceHeld}
+        selectionMode={SelectionMode.Partial}
+        edgesFocusable
+        edgesReconnectable
+        elevateEdgesOnSelect
+        multiSelectionKeyCode="Shift"
         snapToGrid
         snapGrid={[20, 20]}
         proOptions={{ hideAttribution: true }}
         className="bg-background"
         deleteKeyCode={["Backspace", "Delete"]}
         defaultEdgeOptions={{
-          type: "default",
+          type: "rounded",
           animated: false,
           selectable: true,
-          style: { stroke: "oklch(0.65 0.18 260)", strokeWidth: 2 },
-          markerEnd: { type: "arrowclosed" as any, width: 16, height: 16 },
+          style: { stroke: "oklch(0.65 0.18 260)", strokeWidth: 1.5 },
         }}
       >
         <Panel position="top-right" className="flex gap-2">
@@ -210,12 +474,13 @@ export function WorkflowCanvas() {
           variant={BackgroundVariant.Dots}
           gap={20}
           size={1}
+          offset={0.5}
           color="oklch(0.25 0.01 260)"
         />
         <Controls className="!bg-card !border-border !shadow-lg [&>button]:!bg-card [&>button]:!border-border [&>button]:!text-foreground" />
         <MiniMap
           className="!bg-card !border-border"
-          nodeColor="oklch(0.65 0.18 260)"
+          nodeComponent={MiniMapNode}
           maskColor="oklch(0.13 0.01 260 / 0.7)"
         />
       </ReactFlow>
