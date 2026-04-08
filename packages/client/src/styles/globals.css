@@ -105,3 +105,11 @@ body {
   cursor: crosshair;
 }
 
+/* Default arrow cursor, grabbing hand only while panning */
+.react-flow__pane {
+  cursor: default !important;
+}
+.react-flow__pane.dragging {
+  cursor: grabbing !important;
+}
+
