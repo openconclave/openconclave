@@ -402,6 +402,7 @@ const port = Number(process.env.PORT ?? API_PORT);
 
 server = Bun.serve({
   port,
+  idleTimeout: 120, // seconds — default 10s is too short for external registry fetches
   fetch(req, srv) {
     if (srv.upgrade(req, { data: { topics: new Set() } })) {
       return;
