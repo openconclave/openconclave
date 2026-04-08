@@ -39,7 +39,7 @@ function getDefaultConfig(type: NodeType) {
     case "file": return { path: "" };
     case "discussion":
       return {
-        prompt: "{{transcript}}\n\nYou are {{agentName}}. Share your perspective.",
+        prompt: "Topic: {{input}}\n\n{{transcript}}\n\nYou are {{agentName}}. Share your perspective.",
         maxRounds: 3,
       };
   }

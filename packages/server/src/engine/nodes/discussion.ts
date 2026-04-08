@@ -101,6 +101,53 @@ export async function executeDiscussion(
   exitReason = "max_rounds";
   let currentParticipantIndex = 0;
 
+  // Moderator opening turn — runs before any participant speaks so the moderator
+  // can set the stage (e.g. assign tasks, give instructions, pick who goes first).
+  if (config.moderator) {
+    const openingResult = await runModerator(
+      config.moderator,
+      responses,
+      transcript,
+      0,
+      input,
+      runId,
+      nodeId,
+      emit,
+    );
+
+    if (openingResult.summary) {
+      moderatorSummary = openingResult.summary;
+      transcript += `[Moderator] ${openingResult.summary}\n`;
+    }
+
+    emit({
+      type: "discussion:moderator",
+      runId,
+      nodeId,
+      data: {
+        action: openingResult.action,
+        nextAgent: openingResult.nextAgent,
+        summary: openingResult.summary,
+      },
+    });
+
+    if (openingResult.action === "end_discussion") {
+      exitReason = "end_discussion";
+      emit({
+        type: "discussion:completed",
+        runId,
+        nodeId,
+        data: { rounds: 0, exitReason, responseCount: 0 },
+      });
+      return { responses, transcript, moderatorSummary, rounds: 0, exitReason, input };
+    } else if (openingResult.action === "call_specific" && openingResult.nextAgent) {
+      const idx = participants.findIndex(
+        (p) => p.id === openingResult.nextAgent || p.data.label === openingResult.nextAgent,
+      );
+      if (idx >= 0) currentParticipantIndex = idx;
+    }
+  }
+
   outer: for (round = 1; round <= config.maxRounds; round++) {
     // Cancellation check — graph-walker only checks between queue iterations, not
     // inside long-running executors. At maxRounds=100 with slow agents this matters.
@@ -342,16 +389,18 @@ async function runAgentModerator(
     emit,
   });
 
-  // llm-call.ts:325 explicitly returns { output: "..." } without tool_call when the agent
-  // responds with text instead of calling a tool. Treat as "call_next" — safe default.
   if (!moderatorResult.tool_call) {
-    return { action: "call_next" };
+    throw new Error(
+      `Moderator did not call the "moderate" tool. It responded with text instead: "${String(moderatorResult.output).slice(0, 200)}"`
+    );
   }
 
   const toolInput = moderatorResult.tool_call.input;
   const action = toolInput.action as string;
   if (!VALID_ACTIONS.has(action)) {
-    return { action: "call_next" };
+    throw new Error(
+      `Moderator called "moderate" with invalid action "${action}". Valid actions: ${[...VALID_ACTIONS].join(", ")}`
+    );
   }
 
   return {

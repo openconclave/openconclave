@@ -18,11 +18,12 @@ const CODE_PLACEHOLDERS: Record<string, string> = {
 interface CodeFieldsProps {
   nodeId: string;
   config: CodeConfig;
+  onUpdate?: (patch: Partial<CodeConfig>) => void;
 }
 
-export function CodeFields({ nodeId, config }: CodeFieldsProps) {
+export function CodeFields({ nodeId, config, onUpdate }: CodeFieldsProps) {
   const updateNodeConfig = useWorkflowStore((s) => s.updateNodeConfig);
-  const update = (c: Partial<CodeConfig>) => updateNodeConfig(nodeId, c);
+  const update = onUpdate ?? ((c: Partial<CodeConfig>) => updateNodeConfig(nodeId, c));
 
   const [claudeAvailable, setClaudeAvailable] = useState(false);
   const [improving, setImproving] = useState(false);

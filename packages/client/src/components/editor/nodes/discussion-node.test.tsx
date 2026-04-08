@@ -105,12 +105,14 @@ describe("DiscussionNode", () => {
     expect(screen.getByText("Discussion")).toBeInTheDocument();
   });
 
-  it("renders all three handles (top, participants, bottom)", () => {
+  it("renders all five handles (top, participants, full, last, summary)", () => {
     seedStore();
     render(<DiscussionNode {...makeProps()} />);
     expect(screen.getByTestId("handle-top")).toBeInTheDocument();
     expect(screen.getByTestId("handle-participants")).toBeInTheDocument();
-    expect(screen.getByTestId("handle-bottom")).toBeInTheDocument();
+    expect(screen.getByTestId("handle-full")).toBeInTheDocument();
+    expect(screen.getByTestId("handle-last")).toBeInTheDocument();
+    expect(screen.getByTestId("handle-summary")).toBeInTheDocument();
   });
 
   it("renders the max-rounds badge with the configured value", () => {
@@ -145,28 +147,29 @@ describe("DiscussionNode", () => {
     expect(screen.getByText("1 participant")).toBeInTheDocument();
   });
 
-  it("shows '1 participant' when this node is the source with sourceHandle=participants (BUG-1 fix)", () => {
+  it("shows 'no participants' when discussion node is the source (outgoing edge)", () => {
     seedStore([
       { id: "e1", source: NODE_ID, sourceHandle: "participants", target: "agent-1", targetHandle: "top" },
     ]);
     render(<DiscussionNode {...makeProps()} />);
-    expect(screen.getByText("1 participant")).toBeInTheDocument();
+    // Only incoming edges to targetHandle="participants" are counted
+    expect(screen.getByText("no participants")).toBeInTheDocument();
   });
 
-  it("shows '2 participants' for edges in both directions", () => {
+  it("shows '2 participants' for two incoming participant edges", () => {
     seedStore([
       { id: "e1", source: "agent-1", target: NODE_ID, targetHandle: "participants" },
-      { id: "e2", source: NODE_ID, sourceHandle: "participants", target: "agent-2" },
+      { id: "e2", source: "agent-2", target: NODE_ID, targetHandle: "participants" },
     ]);
     render(<DiscussionNode {...makeProps()} />);
     expect(screen.getByText("2 participants")).toBeInTheDocument();
   });
 
-  it("shows '3 participants' for three edges on the participants handle", () => {
+  it("shows '3 participants' for three incoming participant edges", () => {
     seedStore([
       { id: "e1", source: "a1", target: NODE_ID, targetHandle: "participants" },
       { id: "e2", source: "a2", target: NODE_ID, targetHandle: "participants" },
-      { id: "e3", source: NODE_ID, sourceHandle: "participants", target: "a3" },
+      { id: "e3", source: "a3", target: NODE_ID, targetHandle: "participants" },
     ]);
     render(<DiscussionNode {...makeProps()} />);
     expect(screen.getByText("3 participants")).toBeInTheDocument();
@@ -282,7 +285,7 @@ describe("DiscussionNode", () => {
     seedStore();
     render(<DiscussionNode {...makeProps()} />);
 
-    fireEvent.dragOver(getDragRoot(), {
+    fireEvent.dragEnter(getDragRoot(), {
       dataTransfer: { types: ["application/openconclave-node"] },
     });
 
@@ -294,7 +297,7 @@ describe("DiscussionNode", () => {
     render(<DiscussionNode {...makeProps()} />);
     const root = getDragRoot();
 
-    fireEvent.dragOver(root, {
+    fireEvent.dragEnter(root, {
       dataTransfer: { types: ["application/openconclave-node"] },
     });
     fireEvent.dragLeave(root);
@@ -306,7 +309,7 @@ describe("DiscussionNode", () => {
     seedStore();
     render(<DiscussionNode {...makeProps()} />);
 
-    fireEvent.dragOver(getDragRoot(), {
+    fireEvent.dragEnter(getDragRoot(), {
       dataTransfer: { types: ["text/plain"] },
     });
 
@@ -499,17 +502,20 @@ describe("DiscussionNode", () => {
     expect(useWorkflowStore.getState().selectedNodeId).toBe(NODE_ID);
   });
 
-  // ── pointer-events-none during drag ───────────────────────
+  // ── drag counter prevents flicker ──────────────────────────
 
-  it("adds [&>*]:pointer-events-none class to outer div during dragOver", () => {
+  it("stays in dragOver state when dragEnter fires on a child (counter-based)", () => {
     seedStore();
-    const { container } = render(<DiscussionNode {...makeProps()} />);
-    const outer = container.firstChild as HTMLElement;
+    render(<DiscussionNode {...makeProps()} />);
+    const root = getDragRoot();
+    const dt = { types: ["application/openconclave-node"] };
 
-    fireEvent.dragOver(outer, {
-      dataTransfer: { types: ["application/openconclave-node"] },
-    });
+    // Two nested dragEnter events (parent + child)
+    fireEvent.dragEnter(root, { dataTransfer: dt });
+    fireEvent.dragEnter(root, { dataTransfer: dt });
+    // One dragLeave (child → parent) — counter decrements but doesn't reach 0
+    fireEvent.dragLeave(root);
 
-    expect(outer.className).toContain("pointer-events-none");
+    expect(screen.getByText("Drop to set moderator")).toBeInTheDocument();
   });
 });

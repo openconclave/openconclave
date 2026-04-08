@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { Users, Code, Cpu, X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -91,38 +91,65 @@ export function DiscussionNode(props: NodeProps) {
   ).length;
 
   const [dragOver, setDragOver] = useState(false);
+  const dropRef = useRef<HTMLDivElement>(null);
+  const dragCountRef = useRef(0);
 
   const clearModerator = useCallback(() => {
-    // store.ts:145 does `{ ...n.data.config, ...configUpdate }` — a one-level spread.
-    // That spread already preserves every existing config field not present in configUpdate.
-    // Passing only `{ moderator: undefined }` is exactly what we need; no re-spreading required.
     updateNodeConfig(props.id, { moderator: undefined });
   }, [props.id, updateNodeConfig]);
 
-  const onDragOver = useCallback((e: React.DragEvent) => {
-    if (e.dataTransfer.types.includes("application/openconclave-node")) {
+  // Native DOM event listeners bypass React Flow's synthetic event interception.
+  // React Flow v12 registers pane-level handlers via native listeners, so React's
+  // e.stopPropagation() on synthetic events doesn't prevent the canvas onDrop from
+  // also firing.  Native stopImmediatePropagation() does.
+  //
+  // Counter-based dragenter/dragleave eliminates flicker caused by child elements:
+  // each child enter increments, each leave decrements — only reset at zero.
+  useEffect(() => {
+    const el = dropRef.current;
+    if (!el) return;
+
+    // Use a stable ref for updateNodeConfig and props.id so we can read
+    // current values inside the native listener without re-attaching.
+    const getNodeId = () => props.id;
+    const getUpdateFn = () => updateNodeConfig;
+
+    const isNodeDrag = (dt: DataTransfer | null) =>
+      dt?.types.includes("application/openconclave-node") ?? false;
+
+    const handleDragOver = (e: DragEvent) => {
+      if (!isNodeDrag(e.dataTransfer)) return;
       e.preventDefault();
       e.stopPropagation();
-      e.dataTransfer.dropEffect = "copy";
-      setDragOver(true);
-    }
-  }, []);
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+    };
 
-  const onDragLeave = useCallback(() => {
-    setDragOver(false);
-  }, []);
+    const handleDragEnter = (e: DragEvent) => {
+      if (!isNodeDrag(e.dataTransfer)) return;
+      e.preventDefault();
+      dragCountRef.current++;
+      if (dragCountRef.current === 1) setDragOver(true);
+    };
 
-  const onDrop = useCallback(
-    (e: React.DragEvent) => {
+    const handleDragLeave = () => {
+      dragCountRef.current--;
+      if (dragCountRef.current <= 0) {
+        dragCountRef.current = 0;
+        setDragOver(false);
+      }
+    };
+
+    const handleDrop = (e: DragEvent) => {
       e.preventDefault();
       e.stopPropagation();
+      e.stopImmediatePropagation(); // prevent React Flow's pane handler
+      dragCountRef.current = 0;
       setDragOver(false);
 
-      const raw = e.dataTransfer.getData("application/openconclave-node");
+      const raw = e.dataTransfer?.getData("application/openconclave-node");
       if (!raw) return;
 
       // VETO-2 type guard: validate shape before touching state.
-      // Synthetic DragEvents from DevTools cannot inject arbitrary config this way.
       let parsed: unknown;
       try {
         parsed = JSON.parse(raw);
@@ -136,10 +163,8 @@ export function DiscussionNode(props: NodeProps) {
         !("type" in parsed) ||
         !("label" in parsed) ||
         !("config" in parsed) ||
-        // config must be an object — null config would crash inspector on every render
         typeof parsed.config !== "object" ||
         parsed.config === null ||
-        // Only agent and code nodes are valid moderators (also accept legacy "transform" type)
         (parsed.type !== "agent" && parsed.type !== "transform" && parsed.type !== "code") ||
         typeof parsed.label !== "string" ||
         !parsed.label.trim()
@@ -147,36 +172,39 @@ export function DiscussionNode(props: NodeProps) {
         return;
       }
 
-      // nodeType is read from node.data.type (the authoritative property used by executors).
-      // Server normalization keeps node.type and node.data.type synchronized.
       const { type: nodeType, label, config: dropConfig } = parsed as {
         type: "agent" | "transform" | "code";
         label: string;
         config: AgentConfig | CodeConfig;
       };
 
-      const moderatorType: "code" | "agent" = (nodeType === "transform" || nodeType === "code") ? "code" : "agent";
+      const moderatorType: "code" | "agent" =
+        (nodeType === "transform" || nodeType === "code") ? "code" : "agent";
 
-      // store.ts:145 shallow merge preserves prompt/maxRounds/tool automatically.
-      updateNodeConfig(props.id, {
+      getUpdateFn()(getNodeId(), {
         moderator: {
           type: moderatorType,
           node: { label, type: nodeType, config: dropConfig },
         },
       });
-    },
-    [props.id, updateNodeConfig]
-  );
+    };
+
+    el.addEventListener("dragover", handleDragOver);
+    el.addEventListener("dragenter", handleDragEnter);
+    el.addEventListener("dragleave", handleDragLeave);
+    el.addEventListener("drop", handleDrop);
+
+    return () => {
+      el.removeEventListener("dragover", handleDragOver);
+      el.removeEventListener("dragenter", handleDragEnter);
+      el.removeEventListener("dragleave", handleDragLeave);
+      el.removeEventListener("drop", handleDrop);
+      dragCountRef.current = 0;
+    };
+  }, [props.id, updateNodeConfig]);
 
   return (
-    <div
-      // [&>*]:pointer-events-none during drag prevents dragleave flicker:
-      // without it, moving the cursor onto a child element fires dragleave on the parent.
-      className={cn(dragOver && "[&>*]:pointer-events-none")}
-      onDragOver={onDragOver}
-      onDragLeave={onDragLeave}
-      onDrop={onDrop}
-    >
+    <div ref={dropRef}>
       <div
         className={cn(
           "w-[260px] rounded-xl border bg-gradient-to-b from-card to-card/80 transition-all duration-200 cursor-pointer",

@@ -24,11 +24,12 @@ interface OllamaStatus {
 interface AgentFieldsProps {
   nodeId: string;
   config: AgentConfig;
+  onUpdate?: (patch: Partial<AgentConfig>) => void;
 }
 
-export function AgentFields({ nodeId, config }: AgentFieldsProps) {
+export function AgentFields({ nodeId, config, onUpdate }: AgentFieldsProps) {
   const updateNodeConfig = useWorkflowStore((s) => s.updateNodeConfig);
-  const update = (c: Partial<AgentConfig>) => updateNodeConfig(nodeId, c);
+  const update = onUpdate ?? ((c: Partial<AgentConfig>) => updateNodeConfig(nodeId, c));
 
   const [ollamaStatus, setOllamaStatus] = useState<OllamaStatus | null>(null);
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
