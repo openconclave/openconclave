@@ -24,6 +24,13 @@ export function setPersistentSession(runId: number, nodeId: string, sessionId: s
   persistentSessions.set(`${runId}:${nodeId}`, sessionId);
 }
 
+// Active run workspaces — allows the API to update cwd dynamically (e.g. from a code node).
+const activeWorkspaces = new Map<number, Workspace>();
+
+export function getRunWorkspace(runId: number): Workspace | undefined {
+  return activeWorkspaces.get(runId);
+}
+
 // ── Graph Walker ────────────────────────────────────────────
 
 /**
@@ -139,6 +146,7 @@ export async function executeGraph(
     triggerPayload,
     triggerCfg?.workingDirectory as string | undefined,
   );
+  activeWorkspaces.set(runId, workspace);
   // Workflow context from trigger — injected into every agent's system prompt
   const workflowContext = cleanPayload
     ? (typeof cleanPayload === "string" ? cleanPayload : JSON.stringify(cleanPayload))
@@ -330,6 +338,8 @@ export async function executeGraph(
       .set({ status: "failure", completedAt: now, error: message })
       .where(eq(runs.id, runId));
     emit({ type: "run:completed", runId, data: { status: "failure", error: message } });
+  } finally {
+    activeWorkspaces.delete(runId);
   }
 }
 
@@ -407,13 +417,10 @@ function resolveNextEntries(
       }
     }
   } else if (node.data.type === "agent" && outgoing.length >= 2) {
-    // Filter out bidirectional prompt connections — these are ask_user tool connections,
-    // not forward routes. A prompt node with a return edge back to this agent is a tool.
+    // Filter out prompt connections — these are ask_user tool connections, not forward routes.
     const forwardEdges = outgoing.filter((e) => {
       const target = nodeMap.get(e.target);
-      if (target?.data.type !== "prompt") return true;
-      const hasReturn = edges.some((re) => re.source === e.target && re.target === entry.nodeId);
-      return !hasReturn;
+      return target?.data.type !== "prompt";
     });
 
     // If filtering reduced to <2 edges, treat as simple forward (no routing needed)

@@ -19,6 +19,7 @@ import { setServer, broadcastRunEvent, broadcastToTopic } from "./ws/broadcast";
 import { createMcpServer } from "./mcp/server";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { WorkflowExecutor } from "./engine/executor";
+import { getRunWorkspace } from "./engine/graph-walker";
 import { CronScheduler } from "./engine/scheduler";
 import { agentPool } from "./agent/pool";
 import { checkOllama } from "./agent/ollama";
@@ -323,6 +324,41 @@ app.post("/api/runs/:runId/message", async (c) => {
   );
 
   return c.json({ runId, status: "running" });
+});
+
+// ── Set working directory for a running workflow ─────────────
+app.post("/api/runs/:runId/cwd", async (c) => {
+  const runId = Number(c.req.param("runId"));
+  const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
+  const cwd = body.cwd as string | undefined;
+  const nodeId = body.nodeId as string | undefined;
+
+  if (!cwd || typeof cwd !== "string") {
+    return c.json({ error: { code: "BAD_REQUEST", message: "cwd is required" } }, 400);
+  }
+
+  // Validate the calling node is a code node in this workflow
+  if (nodeId) {
+    const run = await db.select().from(runs).where(eq(runs.id, runId)).get();
+    if (run) {
+      const wf = await db.select().from(workflows).where(eq(workflows.id, run.workflowId)).get();
+      if (wf) {
+        const def = wf.definition as { nodes?: Array<{ id: string; data?: { type?: string } }> };
+        const callingNode = (def.nodes ?? []).find((n) => n.id === nodeId);
+        if (!callingNode || callingNode.data?.type !== "code") {
+          return c.json({ error: { code: "FORBIDDEN", message: "Only code nodes can set the working directory" } }, 403);
+        }
+      }
+    }
+  }
+
+  const workspace = getRunWorkspace(runId);
+  if (!workspace) {
+    return c.json({ error: { code: "NOT_FOUND", message: "No active workspace for this run" } }, 404);
+  }
+
+  workspace.setCwd(cwd);
+  return c.json({ ok: true, cwd: workspace.cwd });
 });
 
 // ── Workflow by toolName (for chat UI) ──────────────────────

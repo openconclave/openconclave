@@ -462,13 +462,20 @@ export function WorkflowCanvas() {
           );
           if (exists) return false;
 
-          // Block Agent → Chat when Chat → Agent already exists (bidirectional covers it)
+          // Block reverse edges when bidirectional single-edge already covers it
+          const sourceNode = currentNodes.find((n) => n.id === connection.source);
           const targetNode = currentNodes.find((n) => n.id === connection.target);
-          if (targetNode && targetNode.data.type === "trigger" && (targetNode.data.config as TriggerConfig).type === "chat") {
+          if (sourceNode && targetNode) {
             const reverseExists = currentEdges.some(
               (e) => e.source === connection.target && e.target === connection.source
             );
-            if (reverseExists) return false;
+            if (reverseExists) {
+              // Chat Trigger ↔ Agent
+              if (targetNode.data.type === "trigger" && (targetNode.data.config as TriggerConfig)?.type === "chat") return false;
+              // Agent ↔ Channel Loop (prompt)
+              if (sourceNode.data.type === "agent" && targetNode.data.type === "prompt") return false;
+              if (sourceNode.data.type === "prompt" && targetNode.data.type === "agent") return false;
+            }
           }
 
           return true;

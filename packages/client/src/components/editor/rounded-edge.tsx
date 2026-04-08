@@ -174,7 +174,7 @@ function buildPath(
 
 export function RoundedEdge({
   id, sourceX, sourceY, targetX, targetY,
-  sourcePosition, targetPosition, style, selected,
+  sourcePosition, targetPosition, style, selected, markerStart,
 }: EdgeProps) {
   const rawPath = buildPath(sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition);
 
@@ -194,6 +194,16 @@ export function RoundedEdge({
     [adx, ady] = dirVec(targetPosition);
   }
 
+  // Source arrow direction (points away from source, into the line)
+  let sadx: number, sady: number;
+  if (isStraight && (sxr !== rawTipX || syr !== rawTipY)) {
+    sadx = adx;  // points toward source (away from target)
+    sady = ady;
+  } else {
+    sadx = sdx;  // handle direction (away from source node)
+    sady = sdy;
+  }
+
   // Trim path to handle circle edges (so glow doesn't bleed into circles)
   // Source: for straight diagonals, offset along line direction
   let startX: number, startY: number;
@@ -211,7 +221,7 @@ export function RoundedEdge({
     .replace(/^M ([\d.-]+) ([\d.-]+)/, `M ${startX} ${startY}`)
     .replace(/([\d.-]+) ([\d.-]+)$/, `${endX} ${endY}`);
 
-  // Arrowhead tip at handle circle edge
+  // Target arrowhead tip at handle circle edge
   const tipX = endX;
   const tipY = endY;
   const baseX = tipX + adx * ARROW_SIZE;
@@ -224,6 +234,18 @@ export function RoundedEdge({
     `${baseX - (-ady) * half},${baseY - adx * half}`,
   ].join(" ");
 
+  // Source arrowhead (bidirectional) — points back toward source handle
+  const sTipX = startX;
+  const sTipY = startY;
+  const sBaseX = sTipX - sadx * ARROW_SIZE;
+  const sBaseY = sTipY - sady * ARROW_SIZE;
+
+  const sourceArrowPoints = [
+    `${sTipX},${sTipY}`,
+    `${sBaseX + (-sady) * half},${sBaseY + sadx * half}`,
+    `${sBaseX - (-sady) * half},${sBaseY - sadx * half}`,
+  ].join(" ");
+
   const baseColor = (style?.stroke as string) ?? "oklch(0.65 0.18 200)";
   const edgeColor = selected ? brighten(baseColor) : baseColor;
 
@@ -231,6 +253,9 @@ export function RoundedEdge({
     <>
       <BaseEdge id={id} path={path} style={{ ...style, stroke: edgeColor }} />
       <polygon points={arrowPoints} fill={edgeColor} stroke="none" pointerEvents="none" />
+      {markerStart && (
+        <polygon points={sourceArrowPoints} fill={edgeColor} stroke="none" pointerEvents="none" />
+      )}
     </>
   );
 }

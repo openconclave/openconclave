@@ -78,8 +78,6 @@ export async function executeAgent(
     for (const e of outEdges) {
       const target = nodeMap.get(e.target);
       if (target?.data.type === "prompt") {
-        const hasReturn = edges.some((re) => re.source === e.target && re.target === nodeId);
-        if (hasReturn) {
           promptToolNodeIds.add(e.target);
           const targetConfig = target.data.config as Record<string, unknown> | undefined;
           const agentLabel = nodeMap.get(nodeId)?.data.label ?? nodeId;
@@ -120,7 +118,6 @@ export async function executeAgent(
               return registerPrompt(runId, promptNodeId, question, null);
             },
           });
-        }
       }
     }
   }

@@ -59,13 +59,18 @@ const SERVER_CWD = process.cwd();
 
 export class Workspace {
   /** The resolved working directory (absolute, normalized path). */
-  readonly cwd: string;
+  cwd: string;
 
   /** Extra directories the workflow has been granted access to. */
   private extraAllowedDirs: string[] = [];
 
   constructor(cwd?: string) {
     this.cwd = cwd ? normalize(resolve(cwd)) : SERVER_CWD;
+  }
+
+  /** Update the working directory (e.g. from a code node creating a worktree). */
+  setCwd(newCwd: string): void {
+    this.cwd = normalize(resolve(newCwd));
   }
 
   /**

@@ -41,6 +41,16 @@ function isChatTrigger(node: Node<WorkflowNodeData>): boolean {
   return node.data.type === "trigger" && (node.data.config as TriggerConfig)?.type === "chat";
 }
 
+function isBidirectional(
+  source: Node<WorkflowNodeData>,
+  target: Node<WorkflowNodeData>,
+): boolean {
+  if (isChatTrigger(source)) return true;
+  if (source.data.type === "agent" && target.data.type === "prompt") return true;
+  if (source.data.type === "prompt" && target.data.type === "agent") return true;
+  return false;
+}
+
 // ── History (undo/redo) ──────────────────────────────────────
 
 interface Snapshot {
@@ -183,8 +193,10 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => {
 
   onConnect: (connection) => {
     pushHistory();
-    const sourceNode = get().nodes.find((n) => n.id === connection.source);
-    const bidirectional = sourceNode ? isChatTrigger(sourceNode) : false;
+    const nodes = get().nodes;
+    const sourceNode = nodes.find((n) => n.id === connection.source);
+    const targetNode = nodes.find((n) => n.id === connection.target);
+    const bidirectional = (sourceNode && targetNode) ? isBidirectional(sourceNode, targetNode) : false;
     const { style, markerEnd, markerStart } = edgeStyle(connection.sourceHandle, bidirectional);
     set({
       edges: addEdge(
@@ -239,8 +251,11 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => {
     });
     const updatedNode = updatedNodes.find((n) => n.id === id);
     const updatedEdges = get().edges.map((e) => {
-      if (e.source !== id || !updatedNode) return e;
-      const bidirectional = isChatTrigger(updatedNode);
+      if (e.source !== id && e.target !== id) return e;
+      if (!updatedNode) return e;
+      const src = e.source === id ? updatedNode : updatedNodes.find((n) => n.id === e.source);
+      const tgt = e.target === id ? updatedNode : updatedNodes.find((n) => n.id === e.target);
+      const bidirectional = (src && tgt) ? isBidirectional(src, tgt) : false;
       const { style, markerEnd, markerStart } = edgeStyle(e.sourceHandle, bidirectional);
       const restyled = { ...e, style, markerEnd };
       if (markerStart) restyled.markerStart = markerStart;
@@ -268,11 +283,12 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => {
     // Cancel any pending debounce so a stale snapshot is not committed after load
     if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
     pendingSnapshot = null;
-    // Re-apply bidirectional markers for edges from chat triggers
+    // Re-apply bidirectional markers for chat triggers and agent↔prompt connections
     const nodeMap = new Map(nodes.map((n) => [n.id, n]));
     const styledEdges = edges.map((e) => {
       const sourceNode = nodeMap.get(e.source);
-      const bidirectional = sourceNode ? isChatTrigger(sourceNode) : false;
+      const targetNode = nodeMap.get(e.target);
+      const bidirectional = (sourceNode && targetNode) ? isBidirectional(sourceNode, targetNode) : false;
       const { style, markerEnd, markerStart } = edgeStyle(e.sourceHandle, bidirectional);
       return { ...e, type: "rounded", style, markerEnd, ...(markerStart && { markerStart }) };
     });
