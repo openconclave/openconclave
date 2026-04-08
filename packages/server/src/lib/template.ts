@@ -17,12 +17,15 @@ export function renderTemplate(
     for (const segment of path.split(".")) {
       if (UNSAFE_KEYS.has(segment)) return "";
       if (value && typeof value === "object") {
+        if (!Object.hasOwn(value as object, segment)) return "";
         value = (value as Record<string, unknown>)[segment];
       } else {
         return "";
       }
     }
-    if (typeof value === "object" && value !== null) return JSON.stringify(value);
+    if (typeof value === "object" && value !== null) {
+      try { return JSON.stringify(value); } catch { return ""; }
+    }
     return String(value ?? "");
   });
 }
