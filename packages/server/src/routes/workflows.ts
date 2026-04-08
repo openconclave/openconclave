@@ -3,7 +3,7 @@ import { zValidator } from "@hono/zod-validator";
 import { eq } from "drizzle-orm";
 
 import { db } from "../db/client";
-import { workflows, runs, agentTasks, runEvents } from "../db/schema";
+import { workflows, runs, agentTasks, runEvents, checkpoints } from "../db/schema";
 import {
   createWorkflowSchema,
   updateWorkflowSchema,
@@ -76,6 +76,7 @@ export const workflowRoutes = new Hono()
     // Delete related data first (cascade)
     const workflowRuns = await db.select().from(runs).where(eq(runs.workflowId, id));
     for (const run of workflowRuns) {
+      await db.delete(checkpoints).where(eq(checkpoints.runId, run.id));
       await db.delete(runEvents).where(eq(runEvents.runId, run.id));
       await db.delete(agentTasks).where(eq(agentTasks.runId, run.id));
     }

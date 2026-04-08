@@ -113,7 +113,7 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
     mcpServers: options.mcpServers ?? [],
     knowledgeBases: options.knowledgeBases ?? [],
   };
-  const agent = new AgentBase(resolvedConfig, options.cwd);
+  const agent = new AgentBase(resolvedConfig, options.workspace);
   await agent.connectMcpServers();
 
   const activeTools: OllamaTool[] = agent.toChatTools() as OllamaTool[];
@@ -140,6 +140,7 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
         messages,
         stream: false,
         think: options.thinking ?? true,
+        options: { num_ctx: 32768 },
       };
 
       if (hasTools) {

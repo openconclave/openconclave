@@ -41,7 +41,7 @@ export async function runChatCompletions(options: OpenAIRunOptions): Promise<Ope
     mcpServers: options.mcpServers ?? [],
     knowledgeBases: options.knowledgeBases ?? [],
   };
-  const agent = new AgentBase(resolvedConfig, options.cwd);
+  const agent = new AgentBase(resolvedConfig, options.workspace);
   await agent.connectMcpServers();
 
   const activeTools: OpenAITool[] = [...(options.tools ?? []), ...agent.toChatTools()];

@@ -166,6 +166,7 @@ async function invokeOllama(options: InvokeWithToolsOptions): Promise<ToolCallRe
       messages,
       tools: ollamaTools,
       stream: false,
+      options: { num_ctx: 32768 },
     }),
   });
 

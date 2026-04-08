@@ -19,6 +19,8 @@ export type TaskStatus = RunStatus;
 
 export interface TriggerConfig {
   type: TriggerType;
+  /** Absolute path to the local folder where agents and code nodes execute */
+  workingDirectory?: string;
   prompt?: string;
   cron?: string;
   webhookPath?: string;

@@ -1,6 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { spawn } from "bun";
+import { Workspace } from "../engine/workspace";
 
 type OllamaTool = {
   type: "function";
@@ -11,37 +12,23 @@ type OllamaTool = {
   };
 };
 
-type McpServerConfig = { command: string; args: string[] };
-
-// Known MCP server configs
-const mcpServerConfigs: Record<string, McpServerConfig> = {
-  playwright: {
-    command: "npx",
-    args: ["@playwright/mcp@latest"],
-  },
-  "telegram-voice": {
-    command: "npx",
-    args: ["@anthropic-ai/mcp-server-telegram-voice@latest"],
-  },
-  filesystem: {
-    command: "npx",
-    args: ["@modelcontextprotocol/server-filesystem@latest"],
-  },
-  fetch: {
-    command: "npx",
-    args: ["@modelcontextprotocol/server-fetch@latest"],
-  },
-};
-
 export class McpBridge {
   private clients = new Map<string, Client>();
   private transports = new Map<string, StdioClientTransport>();
   private toolMap = new Map<string, { serverId: string; toolName: string }>();
   private ollamaTools: OllamaTool[] = [];
 
-  async connect(serverIds: string[]): Promise<void> {
+  async connect(serverIds: string[], allowedDirs?: string[]): Promise<void> {
+    // Build server configs using Workspace (single source of truth for MCP server definitions).
+    // If allowedDirs are provided, create a temp workspace with those dirs for filesystem server.
+    const ws = new Workspace();
+    if (allowedDirs?.length) {
+      ws.setAllowedDirs(allowedDirs);
+    }
+    const serverConfigs = ws.getMcpServerConfigs(serverIds);
+
     for (const id of serverIds) {
-      const config = mcpServerConfigs[id];
+      const config = serverConfigs[id];
       if (!config) continue;
 
       try {

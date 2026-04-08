@@ -18,6 +18,7 @@ import type {
   DiscussionModeratorConfig,
 } from "@openconclave/shared";
 import type { RunEvent } from "../types";
+import type { Workspace } from "../workspace";
 
 // ── Constants ────────────────────────────────────────────────
 
@@ -55,12 +56,11 @@ export async function executeDiscussion(
   workflowContext: string | null,
   input: unknown,
   emit: (event: RunEvent) => void,
-  callerCwd?: string,
+  workspace?: Workspace,
 ): Promise<unknown> {
-  // Suppress unused param warning — retained for API consistency with other executors
+  // Suppress unused param warnings — retained for API consistency with other executors
   void agentSessions;
   void workflowContext;
-  void callerCwd;
 
   const config = node.data.config as DiscussionConfig;
 
@@ -140,7 +140,7 @@ export async function executeDiscussion(
 
     // Invoke participant — ephemeral, no session reuse inside a discussion
     // Pass edges and nodeMap so the agent can self-resolve its graph topology (route targets, etc.)
-    const agentResult = await executeAgent(runId, participant.id, resolvedConfig, prompt, emit, undefined, undefined, undefined, edges, nodeMap);
+    const agentResult = await executeAgent(runId, participant.id, resolvedConfig, prompt, emit, undefined, undefined, workspace, edges, nodeMap);
 
     const message = agentResult.output;
     const speech: SpeechRecord = {

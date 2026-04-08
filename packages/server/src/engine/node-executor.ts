@@ -11,6 +11,7 @@ import { executePrompt } from "./nodes/prompt";
 import { executeFile } from "./nodes/file";
 import { executeOutput } from "./nodes/output";
 import { executeDiscussion } from "./nodes/discussion";
+import type { Workspace } from "./workspace";
 
 export async function executeNode(
   runId: number,
@@ -24,7 +25,7 @@ export async function executeNode(
   emit: (event: RunEvent) => void,
   triggerPayload?: unknown,
   triggeredBy?: string | null,
-  callerCwd?: string
+  workspace?: Workspace
 ): Promise<unknown> {
   const node = nodeMap.get(nodeId);
   if (!node) return undefined;
@@ -84,7 +85,7 @@ export async function executeNode(
         output = executeTrigger(node, input, triggerPayload, workflow, runId, nodeId, emit);
         break;
       case "agent":
-        output = await executeAgentNode(runId, nodeId, node, nodeMap, edges, nodeOutputs, agentSessions, workflowContext, input, emit, callerCwd);
+        output = await executeAgentNode(runId, nodeId, node, nodeMap, edges, nodeOutputs, agentSessions, workflowContext, input, emit, workspace);
         break;
       case "condition":
         output = executeCondition(node, input);
@@ -94,7 +95,7 @@ export async function executeNode(
           workflowId: workflow.id!,
           runId,
           nodeId,
-        });
+        }, workspace);
         break;
       case "merge":
         output = executeMerge(nodeId, edges, nodeMap, nodeOutputs);
@@ -103,7 +104,7 @@ export async function executeNode(
         output = await executePrompt(node, input, workflow, runId, nodeId, triggeredBy, nodeMap, emit);
         break;
       case "file":
-        output = executeFile(node, input, callerCwd);
+        output = executeFile(node, input, workspace);
         break;
       case "output":
         output = await executeOutput(node, input, runId, nodeId, workflow.name, emit);
@@ -120,7 +121,7 @@ export async function executeNode(
           workflowContext,
           input,
           emit,
-          callerCwd,
+          workspace,
         );
         break;
       default: {

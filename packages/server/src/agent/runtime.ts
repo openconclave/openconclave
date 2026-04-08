@@ -4,9 +4,7 @@ import { writeFileSync, unlinkSync, mkdirSync, readFileSync, existsSync } from "
 import { join, resolve } from "path";
 import type { ResolvedAgentConfig } from "@openconclave/shared";
 import { TMP_DIR } from "../lib/workspace";
-
-// Agent working directory = where the server process was started
-const AGENT_CWD = process.cwd();
+import { Workspace } from "../engine/workspace";
 
 export interface ThinkingBlock {
   thinking: string;
@@ -35,7 +33,7 @@ export type AgentRunOptions = {
   routeTargets?: RouteTarget[];
   sessionId?: string;
   input?: unknown;
-  cwd?: string;
+  workspace?: Workspace;
   env?: Record<string, string>;
   abortSignal?: AbortSignal;
   onOutput?: (chunk: string) => void;
@@ -47,28 +45,9 @@ const modelMap: Record<string, string> = {
   haiku: "haiku",
 };
 
-// MCP server configs keyed by ID — matches the tool-picker on the client
-const mcpServerConfigs: Record<string, { command: string; args: string[] }> = {
-  playwright: {
-    command: "npx",
-    args: ["@playwright/mcp@latest"],
-  },
-  "telegram-voice": {
-    command: "npx",
-    args: ["@anthropic-ai/mcp-server-telegram-voice@latest"],
-  },
-  filesystem: {
-    command: "npx",
-    args: ["@modelcontextprotocol/server-filesystem@latest"],
-  },
-  fetch: {
-    command: "npx",
-    args: ["@modelcontextprotocol/server-fetch@latest"],
-  },
-};
-
 export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentResult> {
-  const { config, input, cwd, env, abortSignal, onOutput } = options;
+  const { config, input, env, abortSignal, onOutput } = options;
+  const ws = options.workspace ?? new Workspace();
   const startTime = Date.now();
 
   // Build the prompt
@@ -79,16 +58,11 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
     prompt = "Start";
   }
 
-  // Build MCP server config
+  // Build MCP server config from workspace (single source of truth for dirs + configs)
   const mcpServers: Record<string, { command: string; args: string[]; env?: Record<string, string> }> = {};
 
   if (config.mcpServers?.length) {
-    for (const serverId of config.mcpServers) {
-      const serverConf = mcpServerConfigs[serverId];
-      if (serverConf) {
-        mcpServers[serverId] = serverConf;
-      }
-    }
+    Object.assign(mcpServers, ws.getMcpServerConfigs(config.mcpServers));
   }
 
   // Add OpenConclave workflow MCP server for routing and knowledge tools
@@ -127,7 +101,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
     const agentQuery = query({
       prompt,
       options: {
-        cwd: cwd ?? AGENT_CWD,
+        cwd: ws.cwd,
         env: { ...process.env, ...env } as Record<string, string>,
         model: config.model && modelMap[config.model] ? modelMap[config.model] : undefined,
         systemPrompt: config.systemPrompt,

@@ -10,6 +10,7 @@ import type { ResolvedAgentConfig } from "@openconclave/shared";
 import { createBuiltinTools, TOOL_NAME_MAP, type BuiltinTool, type ToolDef } from "./builtin-tools";
 import { McpBridge } from "./mcp-bridge";
 import { logger } from "../lib/logger";
+import { Workspace } from "../engine/workspace";
 
 // ── Resolved tool (engine-agnostic) ─────────────────────────
 
@@ -26,11 +27,13 @@ export class AgentBase {
   readonly tools: ResolvedTool[] = [];
   readonly toolExecutors = new Map<string, (args: Record<string, unknown>) => Promise<string>>();
   private mcpBridge: McpBridge | null = null;
+  protected readonly workspace: Workspace;
 
   constructor(
     protected readonly config: ResolvedAgentConfig,
-    protected readonly cwd?: string,
+    workspace?: Workspace,
   ) {
+    this.workspace = workspace ?? new Workspace();
     this.resolveBuiltinTools();
     this.resolveKnowledgeTools();
   }
@@ -38,7 +41,7 @@ export class AgentBase {
   // ── Builtin tools from connected tool nodes ─────────────────
 
   private resolveBuiltinTools(): void {
-    const builtins = createBuiltinTools(this.cwd);
+    const builtins = createBuiltinTools(this.workspace);
 
     for (const toolName of this.config.allowedTools) {
       // Map Claude Code names (Bash→bash, Read→read_file) or use direct name
@@ -55,7 +58,7 @@ export class AgentBase {
   private resolveKnowledgeTools(): void {
     if (this.config.knowledgeBases.length === 0) return;
 
-    const builtins = createBuiltinTools(this.cwd);
+    const builtins = createBuiltinTools(this.workspace);
     const knowledgeToolNames = ["search_knowledge", "knowledge_fetch", "knowledge_add"];
 
     for (const name of knowledgeToolNames) {
@@ -73,7 +76,7 @@ export class AgentBase {
 
     this.mcpBridge = new McpBridge();
     try {
-      await this.mcpBridge.connect(this.config.mcpServers);
+      await this.mcpBridge.connect(this.config.mcpServers, this.workspace.getAllowedDirs());
       for (const tool of this.mcpBridge.getTools()) {
         const name = tool.function.name;
         this.tools.push({

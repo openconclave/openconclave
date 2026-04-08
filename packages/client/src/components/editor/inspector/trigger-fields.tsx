@@ -1,6 +1,7 @@
 import { useWorkflowStore } from "@/stores/workflow-store";
 import { cn } from "@/lib/utils";
 import type { TriggerConfig } from "@openconclave/shared";
+import { FolderOpen } from "lucide-react";
 import { Field, INPUT_CLASS, MONO_INPUT_CLASS } from "./shared";
 
 const CRON_PRESETS = [
@@ -37,6 +38,22 @@ export function TriggerFields({ nodeId, config }: TriggerFieldsProps) {
           <option value="telegram">Telegram</option>
           <option value="chat">Chat (Web UI)</option>
         </select>
+      </Field>
+
+      <Field label="Working Directory">
+        <div className="relative">
+          <FolderOpen className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+          <input
+            type="text"
+            value={config.workingDirectory ?? ""}
+            onChange={(e) => update({ workingDirectory: e.target.value })}
+            placeholder="/path/to/project"
+            className={`${MONO_INPUT_CLASS} pl-7`}
+          />
+        </div>
+        <p className="mt-1 text-[10px] text-muted-foreground">
+          Local folder where agents and code nodes run. Can be overridden when triggering via API.
+        </p>
       </Field>
 
       {config.type === "chat" && (

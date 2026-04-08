@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { sep } from "path";
 import { executeFile } from "./file";
 import type { WorkflowNode } from "@openconclave/shared";
+import { Workspace } from "../workspace";
 
 // Mock fs module
 vi.mock("fs", () => ({
@@ -52,11 +53,11 @@ describe("executeFile", () => {
       expect(result).toBe("file contents here");
     });
 
-    it("reads a relative path by joining with callerCwd", () => {
+    it("reads a relative path by joining with workspace cwd", () => {
       (readFileSync as ReturnType<typeof vi.fn>).mockReturnValue("relative file contents");
       const node = makeFileNode("subdir/file.txt");
 
-      const result = executeFile(node, undefined, "/some/working/dir");
+      const result = executeFile(node, undefined, new Workspace("/some/working/dir"));
 
       expect(result).toBe("relative file contents");
       // Should have been called with the joined absolute path
@@ -65,7 +66,7 @@ describe("executeFile", () => {
       expect(callArg).toContain("some");
     });
 
-    it("reads a relative path using process.cwd() when callerCwd is not provided", () => {
+    it("reads a relative path as-is when workspace is not provided", () => {
       (readFileSync as ReturnType<typeof vi.fn>).mockReturnValue("cwd file");
       const node = makeFileNode("relative/file.txt");
 
@@ -73,18 +74,21 @@ describe("executeFile", () => {
 
       expect(result).toBe("cwd file");
       const callArg = (readFileSync as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
-      expect(callArg).toContain(`relative${sep}file.txt`);
-      expect(callArg).toContain(process.cwd());
+      expect(callArg).toBe("relative/file.txt");
     });
 
-    it("uses absolute path as-is ignoring callerCwd", () => {
+    it("uses absolute path as-is ignoring workspace cwd", () => {
       (readFileSync as ReturnType<typeof vi.fn>).mockReturnValue("absolute contents");
       const node = makeFileNode("/usr/local/data.json");
 
-      executeFile(node, undefined, "/some/cwd");
+      executeFile(node, undefined, new Workspace("/some/cwd"));
 
       const callArg = (readFileSync as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
-      expect(callArg).toBe("/usr/local/data.json");
+      // Workspace.resolve normalizes separators, so compare with platform-aware path
+      expect(callArg).toContain("usr");
+      expect(callArg).toContain("local");
+      expect(callArg).toContain("data.json");
+      expect(callArg).not.toContain("some"); // should NOT include the workspace cwd
     });
 
     it("calls readFileSync with utf8 encoding", () => {
@@ -193,10 +197,10 @@ describe("executeFile", () => {
       expect(() => executeFile(node, "data")).not.toThrow();
     });
 
-    it("resolves relative write path using callerCwd", () => {
+    it("resolves relative write path using workspace", () => {
       const node = makeFileNode("output/result.txt", "write");
 
-      executeFile(node, "content", "/project/root");
+      executeFile(node, "content", new Workspace("/project/root"));
 
       const writePath = (writeFileSync as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
       expect(writePath).toContain("output");
@@ -318,22 +322,22 @@ describe("executeFile", () => {
   // ── Path resolution edge cases ────────────────────────────────
 
   describe("path resolution", () => {
-    it("a dot-relative path like './file.txt' is resolved relative to callerCwd", () => {
+    it("a dot-relative path like './file.txt' is resolved relative to workspace cwd", () => {
       (readFileSync as ReturnType<typeof vi.fn>).mockReturnValue("content");
       const node = makeFileNode("./data/config.json");
 
-      executeFile(node, undefined, "/project/root");
+      executeFile(node, undefined, new Workspace("/project/root"));
 
       const callArg = (readFileSync as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
       expect(callArg).toContain(`data${sep}config.json`);
     });
 
-    it("handles callerCwd with trailing slash", () => {
+    it("handles workspace cwd with trailing slash", () => {
       (readFileSync as ReturnType<typeof vi.fn>).mockReturnValue("content");
       const node = makeFileNode("file.txt");
 
-      // path.join handles trailing slashes correctly
-      executeFile(node, undefined, "/some/dir/");
+      // Workspace.resolve() handles trailing slashes correctly
+      executeFile(node, undefined, new Workspace("/some/dir/"));
 
       const callArg = (readFileSync as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
       expect(callArg).toContain("file.txt");

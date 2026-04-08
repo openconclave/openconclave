@@ -139,6 +139,21 @@ app.post("/api/channel/improve-prompt", async (c) => {
   return c.json({ ok: true });
 });
 
+app.post("/api/channel/improve-code", async (c) => {
+  const body = await c.req.json() as {
+    workflowId: string;
+    nodeId: string;
+    nodeLabel: string;
+    runtime: string;
+    currentCode: string;
+  };
+  broadcastToTopic("dashboard", {
+    type: "channel:improve-code",
+    data: body,
+  });
+  return c.json({ ok: true });
+});
+
 // ── Ollama ───────────────────────────────────────────────────
 app.get("/api/ollama/status", async (c) => {
   const status = await checkOllama();

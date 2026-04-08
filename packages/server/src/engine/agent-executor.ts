@@ -4,6 +4,7 @@ import { join } from "path";
 import { db } from "../db/client";
 import { agentTasks, settings } from "../db/schema";
 import { agentPool } from "../agent/pool";
+import { AgentBase } from "../agent/base";
 import { runOllamaAgent } from "../agent/ollama";
 import { runOpenAIAgent, type OpenAIProvider } from "../agent/openai";
 import type { AgentResult, ThinkingBlock } from "../agent/runtime";
@@ -14,6 +15,7 @@ import type { ResolvedAgentConfig, WorkflowNode, WorkflowEdge } from "@openconcl
 import { getOutgoingEdges } from "./graph";
 
 import type { RouteTarget, RunEvent } from "./types";
+import type { Workspace } from "./workspace";
 
 // ── Ollama tool mapping ─────────────────────────────────────
 
@@ -55,7 +57,7 @@ export async function executeAgent(
   emit: (event: RunEvent) => void,
   routeTargets?: RouteTarget[],
   sessionId?: string,
-  cwd?: string,
+  workspace?: Workspace,
   edges?: WorkflowEdge[],
   nodeMap?: Map<string, WorkflowNode>,
 ): Promise<{ output: string; thinking?: ThinkingBlock[]; sessionId?: string }> {
@@ -96,7 +98,7 @@ export async function executeAgent(
 
   // Build routing-aware config
   const augmentedConfig = { ...config };
-  if (routeTargets && routeTargets.length >= 1) {
+  if (routeTargets && routeTargets.length >= 2) {
     const routeList = routeTargets
       .map((r) => {
         const desc = r.description ? ` — ${r.description}` : "";
@@ -143,14 +145,23 @@ export async function executeAgent(
 
   for (let attempt = 0; attempt <= MAX_ROUTE_RETRIES; attempt++) {
     if (engine === "debug") {
+      // Resolve tools via AgentBase so debug output shows actual tool definitions
+      const agent = new AgentBase(augmentedConfig, workspace);
+      await agent.connectMcpServers();
+      const resolvedTools = agent.toChatTools();
+      await agent.disconnect();
+
       const debugInfo = {
         debugResponse: config.debugResponse ?? "(no debug response configured)",
         receivedInput: input,
         systemPrompt: augmentedConfig.systemPrompt,
-        allowedTools: config.allowedTools,
-        mcpServers: config.mcpServers,
+        tools: resolvedTools,
         knowledgeBases: config.knowledgeBases,
         routeTargets: routeTargets ?? [],
+        workspace: workspace ? {
+          cwd: workspace.cwd,
+          allowedDirs: workspace.getAllowedDirs(),
+        } : null,
       };
       result = {
         success: true,
@@ -172,7 +183,7 @@ export async function executeAgent(
         knowledgeBases: config.knowledgeBases,
         routeTargets,
         mcpServers: config.mcpServers,
-        cwd,
+        workspace,
         sessionFile: ollamaSessionFile,
         thinking: config.thinking ?? true,
         onOutput: (chunk) => {
@@ -204,7 +215,7 @@ export async function executeAgent(
         allowedTools: config.allowedTools,
         mcpServers: config.mcpServers,
         knowledgeBases: config.knowledgeBases,
-        cwd,
+        workspace,
         routeTargets,
         sessionFile: openaiSessionFile,
         maxTurns: config.maxTurns ?? 10,
@@ -221,7 +232,7 @@ export async function executeAgent(
       result = await agentPool.submit(String(taskId), {
         config: augmentedConfig,
         input: retryInput,
-        cwd,
+        workspace,
         routeTargets,
         sessionId: retrySessionId,
         onOutput: (chunk) => {

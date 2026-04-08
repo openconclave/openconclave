@@ -25,6 +25,8 @@ export type OllamaStatus = {
 
 // ── Runtime options ──────────────────────────────────────────
 
+import type { Workspace } from "../engine/workspace";
+
 export type OllamaRunOptions = {
   model: string;
   prompt: string;
@@ -34,7 +36,7 @@ export type OllamaRunOptions = {
   knowledgeBases?: string[];
   mcpServers?: string[];
   routeTargets?: Array<{ nodeId: string; label: string; type: string }>;
-  cwd?: string;
+  workspace?: Workspace;
   sessionFile?: string;
   thinking?: boolean;
   maxTurns?: number;

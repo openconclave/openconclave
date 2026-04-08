@@ -34,6 +34,7 @@ export interface KnowledgeSearchResult {
   content: string;
   score: number;
   metadata: Record<string, unknown>;
+  knowledgeBaseId: number;
   documentId: number;
   documentName: string;
   chunkIndex: number;

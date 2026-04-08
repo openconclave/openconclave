@@ -42,7 +42,7 @@ export async function runResponsesAPI(options: OpenAIRunOptions): Promise<OpenAI
     mcpServers: options.mcpServers ?? [],
     knowledgeBases: options.knowledgeBases ?? [],
   };
-  const agent = new AgentBase(resolvedConfig, options.cwd);
+  const agent = new AgentBase(resolvedConfig, options.workspace);
   await agent.connectMcpServers();
 
   const tools: Array<Record<string, unknown>> = [...agent.toResponsesTools()];

@@ -9,6 +9,7 @@ import {
 
 export const triggerConfigSchema = z.object({
   type: z.enum(TRIGGER_TYPES),
+  workingDirectory: z.string().optional(),
   prompt: z.string().optional(),
   cron: z.string().optional(),
   webhookPath: z.string().optional(),

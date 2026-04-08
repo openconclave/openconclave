@@ -281,6 +281,41 @@ function connectWebSocket() {
             },
           });
         }
+
+        if (eventType === "channel:improve-code") {
+          const d = data.data ?? {};
+          const content = [
+            "A user wants you to write or improve code for a Code node in OpenConclave.",
+            "",
+            `Workflow ID: ${d.workflowId}`,
+            `Node ID: ${d.nodeId}`,
+            `Node Label: ${d.nodeLabel}`,
+            `Runtime: ${d.runtime}`,
+            "",
+            "Current code:",
+            d.currentCode || "(empty — user may have typed a description of what they want)",
+            "",
+            "If the current code looks like a natural-language description, write the code from scratch.",
+            "If it's already code, improve it — make it more robust, fix bugs, and clean it up.",
+            `The runtime is ${d.runtime}. Input from the previous node is passed via stdin and $INPUT env var. Output must go to stdout as JSON.`,
+            "",
+            "Then call `update_node` to save it:",
+            `  update_node(workflowId: "${d.workflowId}", nodeId: "${d.nodeId}", config: { code: "your code here" })`,
+          ].join("\n");
+
+          await mcp.server.notification({
+            method: "notifications/claude/channel",
+            params: {
+              content,
+              meta: {
+                event_type: "channel:improve-code",
+                workflow_id: String(d.workflowId),
+                node_id: String(d.nodeId),
+                node_label: String(d.nodeLabel),
+              },
+            },
+          });
+        }
       } catch {
         // ignore parse errors
       }

@@ -21,6 +21,8 @@ export interface OpenAITool {
   };
 }
 
+import type { Workspace } from "../engine/workspace";
+
 // ── Runtime options ─────────────────────────────────────────
 
 export interface OpenAIRunOptions {
@@ -33,7 +35,7 @@ export interface OpenAIRunOptions {
   allowedTools?: string[];
   mcpServers?: string[];
   knowledgeBases?: string[];
-  cwd?: string;
+  workspace?: Workspace;
   routeTargets?: Array<{ nodeId: string; label: string; type: string }>;
   sessionFile?: string;
   maxTurns?: number;

@@ -10,6 +10,7 @@ import { AppError, ErrorCode, MAX_WORKFLOW_ITERATIONS } from "@openconclave/shar
 import type { WorkflowDefinition, WorkflowNode, WorkflowEdge } from "@openconclave/shared";
 
 import type { QueueEntry, RunEvent } from "./types";
+import { Workspace } from "./workspace";
 
 // Persistent session store for chat workflows — survives across runs
 // Key: "workflowId:nodeId" → session ID (Claude SDK session or JSONL file path)
@@ -107,14 +108,15 @@ export async function executeGraph(
     }
   }
 
-  // Extract internal fields from trigger payload
-  let callerCwd: string | undefined;
-  let cleanPayload = triggerPayload;
-  if (triggerPayload && typeof triggerPayload === "object" && "_callerCwd" in (triggerPayload as Record<string, unknown>)) {
-    const { _callerCwd, ...rest } = triggerPayload as Record<string, unknown>;
-    callerCwd = _callerCwd as string;
-    cleanPayload = Object.keys(rest).length > 0 ? rest : undefined;
-  }
+  // Resolve workspace (working directory) from trigger payload / config
+  const triggerNode = triggerNodeId
+    ? nodes.find((n) => n.id === triggerNodeId)
+    : nodes.find((n) => n.data.type === "trigger");
+  const triggerCfg = triggerNode?.data.config as Record<string, unknown> | undefined;
+  const { workspace, cleanPayload } = Workspace.fromTrigger(
+    triggerPayload,
+    triggerCfg?.workingDirectory as string | undefined,
+  );
   // Workflow context from trigger — injected into every agent's system prompt
   const workflowContext = cleanPayload
     ? (typeof cleanPayload === "string" ? cleanPayload : JSON.stringify(cleanPayload))
@@ -248,7 +250,7 @@ export async function executeGraph(
             emit,
             cleanPayload,
             entry.triggeredBy,
-            callerCwd
+            workspace
           );
 
           // ORDERING INVARIANT: checkpoint MUST come before resolveNextEntries.

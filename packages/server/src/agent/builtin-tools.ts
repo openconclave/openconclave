@@ -1,6 +1,6 @@
 import { spawn } from "bun";
-import { join } from "path";
 import { logger } from "../lib/logger";
+import type { Workspace } from "../engine/workspace";
 
 export interface ToolDef {
   type: "function";
@@ -16,8 +16,8 @@ export interface BuiltinTool {
   execute: (args: Record<string, unknown>) => Promise<string>;
 }
 
-export function createBuiltinTools(cwd?: string): Record<string, BuiltinTool> {
-  const resolvePath = (p: string) => cwd && !p.startsWith("/") && !p.match(/^[a-zA-Z]:/) ? join(cwd, p) : p;
+export function createBuiltinTools(workspace?: Workspace): Record<string, BuiltinTool> {
+  const resolvePath = (p: string) => workspace ? workspace.resolve(p) : p;
   return {
     bash: {
       tool: {
@@ -38,7 +38,7 @@ export function createBuiltinTools(cwd?: string): Record<string, BuiltinTool> {
         try {
           const proc = spawn({
             cmd: ["bash", "-c", args.command as string],
-            cwd,
+            cwd: workspace?.cwd,
             stdout: "pipe",
             stderr: "pipe",
           });
@@ -160,7 +160,7 @@ export function createBuiltinTools(cwd?: string): Record<string, BuiltinTool> {
           const formatted = results
             .map(
               (r, i) =>
-                `[${i + 1}] (score: ${r.score.toFixed(3)}) [${r.documentName} chunk ${r.chunkIndex}]\n${r.content}`,
+                `[${i + 1}] (score: ${r.score.toFixed(3)}) [kb:${r.knowledgeBaseId} doc:${r.documentId} chunk:${r.chunkIndex}] ${r.documentName}\n${r.content}`,
             )
             .join("\n\n---\n\n");
 

@@ -1,5 +1,7 @@
 import { AppError, ErrorCode } from "@openconclave/shared";
 import type { CodeConfig } from "@openconclave/shared";
+import { resolve, dirname } from "path";
+import type { Workspace } from "../workspace";
 
 export interface CodeNodeContext {
   workflowId: number;
@@ -7,9 +9,27 @@ export interface CodeNodeContext {
   nodeId: string;
 }
 
-const AGENT_CWD = process.cwd();
+/** On Windows, resolve Git Bash so we never accidentally invoke WSL bash. */
+function resolveGitBash(): string {
+  if (process.platform !== "win32") return "bash";
+  const gitExe = Bun.which("git");
+  if (!gitExe) return "bash"; // fallback
+  // git.exe is typically at <Git>/cmd/git.exe or <Git>/mingw64/bin/git.exe
+  let gitRoot = dirname(dirname(gitExe)); // up from cmd/ or bin/
+  // If we landed in mingw64, go up one more
+  if (gitRoot.endsWith("mingw64")) gitRoot = dirname(gitRoot);
+  const candidate = resolve(gitRoot, "usr", "bin", "bash.exe");
+  try {
+    Bun.file(candidate).size; // throws if not found
+    return candidate;
+  } catch {
+    return "bash"; // fallback
+  }
+}
 
-export async function executeCode(config: CodeConfig, input: unknown, context?: CodeNodeContext): Promise<unknown> {
+const GIT_BASH = resolveGitBash();
+
+export async function executeCode(config: CodeConfig, input: unknown, context?: CodeNodeContext, workspace?: Workspace): Promise<unknown> {
   const { runtime, code } = config;
   const payload = context ? { input, context } : input;
   const inputStr = typeof payload === "string" ? payload : (JSON.stringify(payload) ?? "");
@@ -17,7 +37,7 @@ export async function executeCode(config: CodeConfig, input: unknown, context?: 
   const cmdMap: Record<string, string[]> = {
     python: ["python3", "-c", code],
     node: ["node", "-e", code],
-    bash: ["bash", "-c", code],
+    bash: [GIT_BASH, "-c", code],
   };
 
   const cmd = cmdMap[runtime];
@@ -26,7 +46,7 @@ export async function executeCode(config: CodeConfig, input: unknown, context?: 
   }
 
   const proc = Bun.spawn(cmd, {
-    cwd: AGENT_CWD,
+    cwd: workspace?.cwd ?? process.cwd(),
     stdin: new Blob([inputStr]),
     stdout: "pipe",
     stderr: "pipe",

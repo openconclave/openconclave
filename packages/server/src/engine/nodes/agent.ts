@@ -1,10 +1,10 @@
 import { join } from "path";
 import { mkdirSync, existsSync, appendFileSync } from "fs";
 import type { WorkflowNode, WorkflowEdge, AgentConfig, ResolvedAgentConfig } from "@openconclave/shared";
-// getOutgoingEdges no longer needed here — agent-executor resolves its own topology
 import { executeAgent } from "../agent-executor";
 import { SESSIONS_DIR } from "../../lib/workspace";
 import type { RunEvent } from "../types";
+import type { Workspace } from "../workspace";
 
 export async function executeAgentNode(
   runId: number,
@@ -17,7 +17,7 @@ export async function executeAgentNode(
   workflowContext: string | null,
   input: unknown,
   emit: (event: RunEvent) => void,
-  callerCwd?: string
+  workspace?: Workspace
 ): Promise<unknown> {
   // Read tools directly from agent config
   const agentConfig = node.data.config as AgentConfig;
@@ -73,7 +73,7 @@ export async function executeAgentNode(
 
   if (engine === "claude") {
     const existingSessionId = agentSessions.get(nodeId);
-    const agentResult = await executeAgent(runId, nodeId, chatConfig, userMessage ?? input, emit, undefined, existingSessionId, callerCwd, edges, nodeMap);
+    const agentResult = await executeAgent(runId, nodeId, chatConfig, userMessage ?? input, emit, undefined, existingSessionId, workspace, edges, nodeMap);
     output = agentResult.output;
     if (agentResult.sessionId) {
       agentSessions.set(nodeId, agentResult.sessionId);
@@ -90,7 +90,7 @@ export async function executeAgentNode(
     const userContent = userMessage ?? workflowContext ?? "Start";
     appendFileSync(sessionFile, JSON.stringify({ role: "user", content: userContent }) + "\n");
 
-    const agentResult = await executeAgent(runId, nodeId, chatConfig, userMessage ?? input, emit, undefined, sessionFile, callerCwd, edges, nodeMap);
+    const agentResult = await executeAgent(runId, nodeId, chatConfig, userMessage ?? input, emit, undefined, sessionFile, workspace, edges, nodeMap);
     output = agentResult.output;
 
     let cleanOutput = typeof output === "string" ? output : JSON.stringify(output);
