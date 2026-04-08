@@ -1,11 +1,97 @@
 import { Header, NewButton } from "@/components/layout/header";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { Position } from "@xyflow/react";
+import { buildMiniMapPath } from "@/components/editor/rounded-edge";
 import type { WorkflowDefinition } from "@openconclave/shared";
 
 type WorkflowRow = { id: string; name: string; description?: string; enabled: boolean; definition: WorkflowDefinition };
 import { GitBranch, Play, Clock, Trash2, Square, Loader2, Power, MessageSquare, ChevronDown, LayoutGrid, List } from "lucide-react";
+
+const previewColors: Record<string, string> = {
+  trigger: "oklch(0.65 0.18 170)",
+  output: "oklch(0.65 0.18 170)",
+  agent: "oklch(0.68 0.14 65)",
+  discussion: "oklch(0.68 0.14 65)",
+  condition: "oklch(0.65 0.18 290)",
+  code: "oklch(0.65 0.18 290)",
+  merge: "oklch(0.65 0.18 290)",
+  file: "oklch(0.65 0.18 290)",
+  prompt: "oklch(0.65 0.18 170)",
+};
+
+const handlePos: Record<string, Position> = {
+  top: Position.Top, bottom: Position.Bottom,
+  left: Position.Left, right: Position.Right,
+  participants: Position.Left,
+  true: Position.Bottom, false: Position.Bottom,
+  full: Position.Bottom, last: Position.Bottom, summary: Position.Bottom,
+};
+
+function WorkflowPreview({ nodes, edges }: { nodes?: any[]; edges?: any[] }) {
+  const svg = useMemo(() => {
+    if (!nodes?.length) return null;
+    const dims = nodes.map((n) => {
+      const w = n.data?.type === "discussion" ? 280 : 240;
+      const h = n.data?.type === "discussion" ? 200 : 80;
+      return { ...n, w, h };
+    });
+    const pad = 20;
+    const minX = Math.min(...dims.map((n) => n.position.x)) - pad;
+    const minY = Math.min(...dims.map((n) => n.position.y)) - pad;
+    const maxX = Math.max(...dims.map((n) => n.position.x + n.w)) + pad;
+    const maxY = Math.max(...dims.map((n) => n.position.y + n.h)) + pad;
+    const vw = maxX - minX;
+    const vh = maxY - minY;
+
+    const nodeMap = new Map(dims.map((n) => [n.id, n]));
+
+    function getXY(nodeId: string, handleId: string | undefined): [number, number, Position] {
+      const nd = nodeMap.get(nodeId);
+      if (!nd) return [0, 0, Position.Bottom];
+      const p = handlePos[handleId ?? "bottom"] ?? Position.Bottom;
+      switch (p) {
+        case Position.Top: return [nd.position.x + nd.w / 2, nd.position.y, p];
+        case Position.Bottom: return [nd.position.x + nd.w / 2, nd.position.y + nd.h, p];
+        case Position.Left: return [nd.position.x, nd.position.y + nd.h / 2, p];
+        case Position.Right: return [nd.position.x + nd.w, nd.position.y + nd.h / 2, p];
+      }
+    }
+
+    return { dims, minX, minY, vw, vh, nodeMap, getXY, edges: edges ?? [] };
+  }, [nodes, edges]);
+
+  if (!svg) return <div className="h-[100px]" />;
+
+  return (
+    <svg
+      viewBox={`${svg.minX} ${svg.minY} ${svg.vw} ${svg.vh}`}
+      className="w-full h-[140px]"
+      preserveAspectRatio="xMidYMid meet"
+    >
+      {svg.edges.map((e: any) => {
+        const [sx, sy, sp] = svg.getXY(e.source, e.sourceHandle);
+        const [tx, ty, tp] = svg.getXY(e.target, e.targetHandle);
+        const d = buildMiniMapPath(sx, sy, sp, tx, ty, tp);
+        return <path key={e.id ?? `${e.source}-${e.target}`} d={d} fill="none" stroke="oklch(0.40 0.04 260)" strokeWidth={3} />;
+      })}
+      {svg.dims.map((n: any) => {
+        const color = previewColors[n.data?.type ?? ""] ?? "oklch(0.55 0.10 260)";
+        const rx = Math.min(n.w, n.h) * 0.12;
+        return (
+          <rect
+            key={n.id}
+            x={n.position.x} y={n.position.y}
+            width={n.w} height={n.h}
+            rx={rx} ry={rx}
+            fill="none" stroke={color} strokeWidth={3}
+          />
+        );
+      })}
+    </svg>
+  );
+}
 import { confirm } from "@/components/ui/confirm";
 import { toast } from "@/components/ui/toast";
 
@@ -228,7 +314,7 @@ export function WorkflowsPage() {
             </p>
           </div>
         ) : (
-          <div className={viewMode === "grid" ? "grid grid-cols-3 gap-4" : "flex flex-col gap-2"}>
+          <div className={viewMode === "grid" ? "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4" : "flex flex-col gap-2"}>
             {sortedWorkflows.map((wf) => {
               const sched = schedule.get(wf.id);
               const activeRun = activeRuns.get(String(wf.id));
@@ -244,6 +330,13 @@ export function WorkflowsPage() {
                     activeRun && "!border-warning/60 shadow-[0_0_12px_-2px] shadow-warning/30"
                   )}
                 >
+                  {/* Preview */}
+                  {viewMode === "grid" && wf.nodes && wf.nodes.length > 0 && (
+                    <div className="border-b border-border/30 px-4 pt-3 pb-1">
+                      <WorkflowPreview nodes={wf.nodes} edges={wf.edges} />
+                    </div>
+                  )}
+
                   {/* Content */}
                   <div className="p-4 flex-1">
                     <h3 className="font-semibold truncate">{wf.name}</h3>

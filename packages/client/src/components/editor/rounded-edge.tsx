@@ -59,6 +59,8 @@ function roundedPath(pts: Pt[]): string {
   return d;
 }
 
+export { buildPath as buildMiniMapPath };
+
 function buildPath(
   sx: number, sy: number, sp: Position,
   tx: number, ty: number, tp: Position,
@@ -149,19 +151,20 @@ function buildPath(
   // Perpendicular routing
   if (sVert) {
     // Source vertical, target horizontal
-    // L-shape OK when source is on the correct approach side of target handle
-    const correctSide = (sxr - txr) * tdx > 0;
-    if (correctSide) {
+    // L-shape OK when: source exits toward target Y AND source is on correct approach side
+    const sourceOk = (tyr - syr) * sdy > 0;
+    const targetOk = (sxr - txr) * tdx > 0;
+    if (sourceOk && targetOk) {
       return roundedPath([[sxr, syr], [sxr, tyr], [txr, tyr]]);
     }
-    // Source overlaps target node: route around to approach from correct side
     const approachX = txr + tdx * GRID;
     const escapeY = syr + sdy * GRID;
     return roundedPath([[sxr, syr], [sxr, escapeY], [approachX, escapeY], [approachX, tyr], [txr, tyr]]);
   }
   // Source horizontal, target vertical
-  const correctSide = (syr - tyr) * tdy > 0;
-  if (correctSide) {
+  const sourceOk = (txr - sxr) * sdx > 0;
+  const targetOk = (syr - tyr) * tdy > 0;
+  if (sourceOk && targetOk) {
     return roundedPath([[sxr, syr], [txr, syr], [txr, tyr]]);
   }
   const approachY = tyr + tdy * GRID;
@@ -192,8 +195,16 @@ export function RoundedEdge({
   }
 
   // Trim path to handle circle edges (so glow doesn't bleed into circles)
-  const startX = sxr + sdx * HANDLE_R;
-  const startY = syr + sdy * HANDLE_R;
+  // Source: for straight diagonals, offset along line direction
+  let startX: number, startY: number;
+  if (isStraight && (sxr !== rawTipX || syr !== rawTipY)) {
+    // adx/ady points away from target, so negate for source→target direction
+    startX = sxr - adx * HANDLE_R;
+    startY = syr - ady * HANDLE_R;
+  } else {
+    startX = sxr + sdx * HANDLE_R;
+    startY = syr + sdy * HANDLE_R;
+  }
   const endX = rawTipX + adx * HANDLE_R;
   const endY = rawTipY + ady * HANDLE_R;
   const path = rawPath

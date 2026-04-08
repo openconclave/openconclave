@@ -29,7 +29,7 @@ function ModeratorSlot({ moderator, onClear, isDragOver }: ModeratorSlotProps) {
     return (
       <div
         className={cn(
-          "rounded-lg border-2 border-dashed px-3 py-2.5 text-center transition-colors",
+          "rounded-lg border-2 border-dashed px-3 py-4 text-center transition-colors",
           isDragOver
             ? "border-node-discussion/70 bg-node-discussion/10"
             : "border-border/50 hover:border-border"
@@ -227,20 +227,19 @@ export function DiscussionNode(props: NodeProps) {
     el.style.height = "";
     const h = el.offsetHeight;
     el.style.height = `${Math.ceil(h / (GRID * 2)) * (GRID * 2)}px`;
-  });
+  }, [data.label, config.moderator]);
 
   return (
     <div ref={dropRef}>
       <div
         ref={nodeRef}
         className={cn(
-          "w-[280px] rounded-2xl border-[1.5px] bg-gradient-to-b from-card to-card/80 transition-all duration-200 cursor-pointer",
+          "w-[280px] rounded-2xl border-[1.5px] bg-gradient-to-b from-card to-card/80 transition-all duration-200 cursor-pointer flex flex-col",
           "border-node-discussion/60",
           props.selected && "!border-node-discussion shadow-[0_0_8px_0px] shadow-node-discussion/40",
           isActive && "[animation:node-running_1.5s_ease-in-out_infinite]",
           isDraggingTool && "!border-node-agent ring-2 ring-node-agent/40 shadow-[0_0_20px_-3px] shadow-node-agent/30"
         )}
-        onClick={() => setSelectedNode(props.selected ? null : props.id)}
       >
         {/* Top handle — data input from upstream */}
         <Handle
@@ -341,7 +340,8 @@ export function DiscussionNode(props: NodeProps) {
           />
         </div>
 
-        {/* Footer: max rounds badge */}
+        {/* Spacer + Footer: max rounds badge pinned to bottom */}
+        <div className="flex-1" />
         <div className="border-t border-border/40 px-3 py-3">
           <div className="flex items-center justify-between">
             <span className="text-[10px] text-muted-foreground/60">Max rounds</span>

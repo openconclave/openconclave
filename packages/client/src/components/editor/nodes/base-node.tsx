@@ -130,7 +130,8 @@ export function BaseNode({
     el.style.height = "";
     const h = el.offsetHeight;
     el.style.height = `${Math.ceil(h / SNAP) * SNAP}px`;
-  });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.label, data.type]);
 
   return (
     <div
@@ -145,7 +146,6 @@ export function BaseNode({
         toolHighlight && "!border-node-agent ring-2 ring-node-agent/40 shadow-[0_0_20px_-3px] shadow-node-agent/30",
         toolDim && "opacity-30"
       )}
-      onClick={() => setSelectedNode(selected ? null : id)}
     >
       {showTargetHandle && (
         <Handle type="target" id="top" position={Position.Top} style={{ left: "50%", transform: "translate(-50%, -50%)" }} className={cn(handleBase, handleColors[0])} />
@@ -236,12 +236,14 @@ export function BaseNode({
         </div>
       </div>
 
-      {/* Content */}
-      {children && (
-        <div className="border-t border-border/40 px-3 py-2 text-xs text-muted-foreground">
-          {children}
-        </div>
-      )}
+      {/* Divider + Content */}
+      <div className="border-t border-border/40 flex-1">
+        {children && (
+          <div className="px-3 py-2 text-xs text-muted-foreground">
+            {children}
+          </div>
+        )}
+      </div>
 
       {/* Bottom handle */}
       {showSourceHandle && !sourceHandles && (

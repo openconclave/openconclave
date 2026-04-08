@@ -92,6 +92,11 @@ body {
   }
 }
 
+.react-flow__node.dragging,
+.react-flow__node.dragging * {
+  transition: none !important;
+}
+
 .react-flow__edge {
   cursor: pointer;
 }

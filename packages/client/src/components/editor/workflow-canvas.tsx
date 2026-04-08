@@ -14,13 +14,14 @@ import {
   type Node,
   type Edge,
   type Connection,
+  Position,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import dagre from "@dagrejs/dagre";
 import { LayoutGrid } from "lucide-react";
 
 import { useWorkflowStore } from "@/stores/workflow-store";
-import { RoundedEdge, CustomConnectionLine } from "./rounded-edge";
+import { RoundedEdge, CustomConnectionLine, buildMiniMapPath } from "./rounded-edge";
 import type { MiniMapNodeProps } from "@xyflow/react";
 
 // Group colors for minimap
@@ -39,30 +40,14 @@ const miniMapColors: Record<string, string> = {
 function MiniMapNode({ x, y, width, height, id }: MiniMapNodeProps) {
   const nodeType = useWorkflowStore.getState().nodes.find((n) => n.id === id)?.data?.type;
   const color = miniMapColors[nodeType ?? ""] ?? "oklch(0.65 0.18 260)";
-  const cx = x + width / 2;
-  const cy = y + height / 2;
-  const sw = 1.5;
-
-  const fill = color;
-  const op = 0.7;
-
-  // Flow (Trigger, Channel Loop, Output) — oval
-  if (nodeType === "trigger" || nodeType === "output" || nodeType === "prompt") {
-    return <ellipse cx={cx} cy={cy} rx={width / 2} ry={height / 2} fill={fill} opacity={op} />;
-  }
-  // Logic (Condition, Code, Merge, File) — diamond
-  if (nodeType === "condition" || nodeType === "code" || nodeType === "merge" || nodeType === "file") {
-    return (
-      <polygon
-        points={`${cx},${y} ${x + width},${cy} ${cx},${y + height} ${x},${cy}`}
-        fill={fill}
-        opacity={op}
-      />
-    );
-  }
-  // AI (Agent, Discussion) — rounded rect
   const rx = Math.min(width, height) * 0.2;
-  return <rect x={x} y={y} width={width} height={height} rx={rx} ry={rx} fill={fill} opacity={op} />;
+  return (
+    <rect
+      x={x} y={y} width={width} height={height}
+      rx={rx} ry={rx}
+      fill="none" stroke={color} strokeWidth={2} opacity={1}
+    />
+  );
 }
 import { TriggerNode } from "./nodes/trigger-node";
 import { AgentNode } from "./nodes/agent-node";
@@ -131,6 +116,142 @@ function autoLayout() {
   });
 
   useWorkflowStore.setState({ nodes: layoutedNodes, isDirty: true });
+}
+
+const handleToPosition: Record<string, Position> = {
+  top: Position.Top, bottom: Position.Bottom,
+  left: Position.Left, right: Position.Right,
+  participants: Position.Left,
+  true: Position.Bottom, false: Position.Bottom,
+  full: Position.Bottom, last: Position.Bottom, summary: Position.Bottom,
+};
+
+function getHandleXY(node: Node<WorkflowNodeData>, handleId: string | null | undefined): [number, number, Position] {
+  const w = node.measured?.width ?? 240;
+  const h = node.measured?.height ?? 80;
+  const x = node.position.x;
+  const y = node.position.y;
+  const pos = handleToPosition[handleId ?? "bottom"] ?? Position.Bottom;
+  switch (pos) {
+    case Position.Top: return [x + w / 2, y, pos];
+    case Position.Bottom: return [x + w / 2, y + h, pos];
+    case Position.Left: return [x, y + h / 2, pos];
+    case Position.Right: return [x + w, y + h / 2, pos];
+  }
+}
+
+const MINIMAP_POS_KEY = "oc-minimap-pos";
+
+function DraggableMiniMap() {
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  const dragging = useRef(false);
+  const offset = useRef({ x: 0, y: 0 });
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  // Load saved position or default to bottom-right
+  useEffect(() => {
+    const saved = localStorage.getItem(MINIMAP_POS_KEY);
+    if (saved) {
+      try { setPos(JSON.parse(saved)); return; } catch {}
+    }
+    const wrapper = wrapperRef.current?.closest(".react-flow");
+    if (!wrapper) return;
+    const rect = wrapper.getBoundingClientRect();
+    setPos({ x: rect.width - 232, y: rect.height - 162 });
+  }, []);
+
+  const onPointerDown = useCallback((e: React.PointerEvent) => {
+    // Only drag from the header bar, not from the minimap content
+    if (!(e.target as HTMLElement).closest("[data-minimap-header]")) return;
+    dragging.current = true;
+    offset.current = { x: e.clientX - pos.x, y: e.clientY - pos.y };
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    e.stopPropagation();
+  }, [pos]);
+
+  const onPointerMove = useCallback((e: React.PointerEvent) => {
+    if (!dragging.current) return;
+    const wrapper = wrapperRef.current?.closest(".react-flow") as HTMLElement | null;
+    if (!wrapper) return;
+    const bounds = wrapper.getBoundingClientRect();
+    const mw = 220, mh = 162; // minimap width + header
+    let nx = e.clientX - offset.current.x;
+    let ny = e.clientY - offset.current.y;
+    nx = Math.max(0, Math.min(nx, bounds.width - mw));
+    ny = Math.max(0, Math.min(ny, bounds.height - mh));
+    setPos({ x: nx, y: ny });
+    e.stopPropagation();
+  }, []);
+
+  const onPointerUp = useCallback(() => {
+    if (dragging.current) {
+      dragging.current = false;
+      setPos((p) => { if (p) localStorage.setItem(MINIMAP_POS_KEY, JSON.stringify(p)); return p; });
+    }
+  }, []);
+
+  return (
+    <div
+      ref={wrapperRef}
+      className="absolute z-[5]"
+      style={{ left: pos?.x ?? -9999, top: pos?.y ?? -9999, visibility: pos ? "visible" : "hidden" }}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+    >
+      <div className="rounded-lg border border-border bg-card shadow-lg overflow-hidden" style={{ width: 220 }}>
+        <div
+          data-minimap-header
+          className="flex items-center justify-between px-2 py-1 border-b border-border/50 cursor-grab active:cursor-grabbing select-none"
+        >
+          <span className="text-[10px] text-muted-foreground/60 font-medium uppercase tracking-wider">Mini Map</span>
+        </div>
+        <div style={{ height: 150 }}>
+          <MiniMap
+            className="!relative !bg-transparent !border-0 !w-full !h-full !m-0 !shadow-none !rounded-none"
+            nodeComponent={MiniMapNode}
+            maskColor="transparent"
+          />
+        </div>
+      </div>
+      <MiniMapEdges />
+    </div>
+  );
+}
+
+function MiniMapEdges() {
+  const nodes = useWorkflowStore((s) => s.nodes);
+  const edges = useWorkflowStore((s) => s.edges);
+
+  useEffect(() => {
+    const svg = document.querySelector(".react-flow__minimap svg");
+    if (!svg) return;
+
+    svg.querySelectorAll(".minimap-edge").forEach((el) => el.remove());
+
+    for (const edge of edges) {
+      const sn = nodes.find((n) => n.id === edge.source);
+      const tn = nodes.find((n) => n.id === edge.target);
+      if (!sn || !tn) continue;
+
+      const [sx, sy, sp] = getHandleXY(sn, edge.sourceHandle);
+      const [tx, ty, tp] = getHandleXY(tn, edge.targetHandle);
+      const d = buildMiniMapPath(sx, sy, sp, tx, ty, tp);
+
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("class", "minimap-edge");
+      path.setAttribute("d", d);
+      path.setAttribute("fill", "none");
+      path.setAttribute("stroke", "oklch(0.55 0.10 260)");
+      path.setAttribute("stroke-width", "3");
+
+      const mask = svg.querySelector(".react-flow__minimap-mask");
+      if (mask) svg.insertBefore(path, mask);
+      else svg.appendChild(path);
+    }
+  }, [nodes, edges]);
+
+  return null;
 }
 
 export function WorkflowCanvas() {
@@ -216,14 +337,7 @@ export function WorkflowCanvas() {
   const setSelectedNode = useWorkflowStore((s) => s.setSelectedNode);
   const zCounterRef = useRef(1);
 
-  const onNodeDragStart = useCallback((_: any, node: Node) => {
-    const z = ++zCounterRef.current;
-    useWorkflowStore.setState({
-      nodes: useWorkflowStore.getState().nodes.map(n =>
-        n.id === node.id ? { ...n, zIndex: z } : n
-      ),
-    });
-  }, []);
+  const onNodeDragStart = useCallback(() => {}, []);
 
   const [spaceHeld, setSpaceHeld] = useState(false);
   const [shiftHeld, setShiftHeld] = useState(false);
@@ -249,11 +363,15 @@ export function WorkflowCanvas() {
       if (e.code === "Space") setSpaceHeld(false);
       if (e.key === "Shift") setShiftHeld(false);
     };
+    // Reset modifier keys when window loses/regains focus (keyup missed while away)
+    const onBlur = () => { setSpaceHeld(false); setShiftHeld(false); };
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", onBlur);
     return () => {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onBlur);
     };
   }, [undo, redo]);
 
@@ -478,11 +596,7 @@ export function WorkflowCanvas() {
           color="oklch(0.25 0.01 260)"
         />
         <Controls className="!bg-card !border-border !shadow-lg [&>button]:!bg-card [&>button]:!border-border [&>button]:!text-foreground" />
-        <MiniMap
-          className="!bg-card !border-border"
-          nodeComponent={MiniMapNode}
-          maskColor="oklch(0.13 0.01 260 / 0.7)"
-        />
+        <DraggableMiniMap />
       </ReactFlow>
     </div>
   );
