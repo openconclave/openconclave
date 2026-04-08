@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useState, useRef, useEffect, useLayoutEffect } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { Users, Code, Cpu, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useWorkflowStore } from "@/stores/workflow-store";
 import { useNodeData } from "@/hooks/use-node-data";
 import type { DiscussionConfig, DiscussionModeratorConfig, AgentConfig, CodeConfig } from "@openconclave/shared";
+
+const GRID = 20;
 
 // ── Shared handle/border styles matching base-node.tsx ───────
 
@@ -79,11 +81,44 @@ export function DiscussionNode(props: NodeProps) {
   const config = data.config as DiscussionConfig;
 
   const setSelectedNode = useWorkflowStore((s) => s.setSelectedNode);
+  const updateNodeData = useWorkflowStore((s) => s.updateNodeData);
   const activeNodeIds = useWorkflowStore((s) => s.activeNodeIds);
+  const isDraggingTool = useWorkflowStore((s) => s.isDraggingTool);
   const updateNodeConfig = useWorkflowStore((s) => s.updateNodeConfig);
   const edges = useWorkflowStore((s) => s.edges);
 
   const isActive = activeNodeIds.has(props.id);
+
+  const [editing, setEditing] = useState(false);
+  const labelRef = useRef<HTMLSpanElement>(null);
+
+  const startEditing = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditing(true);
+  }, []);
+
+  const commitRename = useCallback(() => {
+    const el = labelRef.current;
+    if (!el) return;
+    const trimmed = (el.textContent ?? "").trim();
+    if (trimmed && trimmed !== data.label) {
+      updateNodeData(props.id, { label: trimmed });
+    } else {
+      el.textContent = data.label;
+    }
+    setEditing(false);
+  }, [data.label, props.id, updateNodeData]);
+
+  useEffect(() => {
+    if (editing && labelRef.current) {
+      labelRef.current.focus();
+      const range = document.createRange();
+      range.selectNodeContents(labelRef.current);
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+    }
+  }, [editing]);
 
   // Participants connect TO the "participants" target handle on the left side.
   const participantCount = edges.filter(
@@ -91,65 +126,38 @@ export function DiscussionNode(props: NodeProps) {
   ).length;
 
   const [dragOver, setDragOver] = useState(false);
-  const dropRef = useRef<HTMLDivElement>(null);
-  const dragCountRef = useRef(0);
 
   const clearModerator = useCallback(() => {
+    // store.ts:145 does `{ ...n.data.config, ...configUpdate }` — a one-level spread.
+    // That spread already preserves every existing config field not present in configUpdate.
+    // Passing only `{ moderator: undefined }` is exactly what we need; no re-spreading required.
     updateNodeConfig(props.id, { moderator: undefined });
   }, [props.id, updateNodeConfig]);
 
-  // Native DOM event listeners bypass React Flow's synthetic event interception.
-  // React Flow v12 registers pane-level handlers via native listeners, so React's
-  // e.stopPropagation() on synthetic events doesn't prevent the canvas onDrop from
-  // also firing.  Native stopImmediatePropagation() does.
-  //
-  // Counter-based dragenter/dragleave eliminates flicker caused by child elements:
-  // each child enter increments, each leave decrements — only reset at zero.
-  useEffect(() => {
-    const el = dropRef.current;
-    if (!el) return;
-
-    // Use a stable ref for updateNodeConfig and props.id so we can read
-    // current values inside the native listener without re-attaching.
-    const getNodeId = () => props.id;
-    const getUpdateFn = () => updateNodeConfig;
-
-    const isNodeDrag = (dt: DataTransfer | null) =>
-      dt?.types.includes("application/openconclave-node") ?? false;
-
-    const handleDragOver = (e: DragEvent) => {
-      if (!isNodeDrag(e.dataTransfer)) return;
+  const onDragOver = useCallback((e: React.DragEvent) => {
+    if (e.dataTransfer.types.includes("application/openconclave-node")) {
       e.preventDefault();
       e.stopPropagation();
-      if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
-    };
+      e.dataTransfer.dropEffect = "copy";
+      setDragOver(true);
+    }
+  }, []);
 
-    const handleDragEnter = (e: DragEvent) => {
-      if (!isNodeDrag(e.dataTransfer)) return;
-      e.preventDefault();
-      dragCountRef.current++;
-      if (dragCountRef.current === 1) setDragOver(true);
-    };
+  const onDragLeave = useCallback(() => {
+    setDragOver(false);
+  }, []);
 
-    const handleDragLeave = () => {
-      dragCountRef.current--;
-      if (dragCountRef.current <= 0) {
-        dragCountRef.current = 0;
-        setDragOver(false);
-      }
-    };
-
-    const handleDrop = (e: DragEvent) => {
+  const onDrop = useCallback(
+    (e: React.DragEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      e.stopImmediatePropagation(); // prevent React Flow's pane handler
-      dragCountRef.current = 0;
       setDragOver(false);
 
-      const raw = e.dataTransfer?.getData("application/openconclave-node");
+      const raw = e.dataTransfer.getData("application/openconclave-node");
       if (!raw) return;
 
       // VETO-2 type guard: validate shape before touching state.
+      // Synthetic DragEvents from DevTools cannot inject arbitrary config this way.
       let parsed: unknown;
       try {
         parsed = JSON.parse(raw);
@@ -163,8 +171,10 @@ export function DiscussionNode(props: NodeProps) {
         !("type" in parsed) ||
         !("label" in parsed) ||
         !("config" in parsed) ||
+        // config must be an object — null config would crash inspector on every render
         typeof parsed.config !== "object" ||
         parsed.config === null ||
+        // Only agent and code nodes are valid moderators (also accept legacy "transform" type)
         (parsed.type !== "agent" && parsed.type !== "transform" && parsed.type !== "code") ||
         typeof parsed.label !== "string" ||
         !parsed.label.trim()
@@ -172,66 +182,70 @@ export function DiscussionNode(props: NodeProps) {
         return;
       }
 
+      // nodeType is read from node.data.type (the authoritative property used by executors).
+      // Server normalization keeps node.type and node.data.type synchronized.
       const { type: nodeType, label, config: dropConfig } = parsed as {
         type: "agent" | "transform" | "code";
         label: string;
         config: AgentConfig | CodeConfig;
       };
 
-      const moderatorType: "code" | "agent" =
-        (nodeType === "transform" || nodeType === "code") ? "code" : "agent";
+      const moderatorType: "code" | "agent" = (nodeType === "transform" || nodeType === "code") ? "code" : "agent";
 
-      getUpdateFn()(getNodeId(), {
+      // store.ts:145 shallow merge preserves prompt/maxRounds/tool automatically.
+      updateNodeConfig(props.id, {
         moderator: {
           type: moderatorType,
           node: { label, type: nodeType, config: dropConfig },
         },
       });
-    };
+    },
+    [props.id, updateNodeConfig]
+  );
 
-    el.addEventListener("dragover", handleDragOver);
-    el.addEventListener("dragenter", handleDragEnter);
-    el.addEventListener("dragleave", handleDragLeave);
-    el.addEventListener("drop", handleDrop);
-
-    return () => {
-      el.removeEventListener("dragover", handleDragOver);
-      el.removeEventListener("dragenter", handleDragEnter);
-      el.removeEventListener("dragleave", handleDragLeave);
-      el.removeEventListener("drop", handleDrop);
-      dragCountRef.current = 0;
-    };
-  }, [props.id, updateNodeConfig]);
+  const nodeRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = nodeRef.current;
+    if (!el) return;
+    el.style.height = "";
+    const h = el.offsetHeight;
+    el.style.height = `${Math.ceil(h / (GRID * 2)) * (GRID * 2)}px`;
+  });
 
   return (
-    <div ref={dropRef}>
+    <div
+      // [&>*]:pointer-events-none during drag prevents dragleave flicker:
+      // without it, moving the cursor onto a child element fires dragleave on the parent.
+      className={cn(dragOver && "[&>*]:pointer-events-none")}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
       <div
+        ref={nodeRef}
         className={cn(
-          "w-[260px] rounded-xl border bg-gradient-to-b from-card to-card/80 transition-all duration-200 cursor-pointer",
+          "w-[280px] rounded-2xl border-[1.5px] bg-gradient-to-b from-card to-card/80 transition-all duration-200 cursor-pointer",
           "border-node-discussion/60",
-          "shadow-[0_0_15px_-3px] shadow-node-discussion/20",
-          props.selected && "!border-primary ring-1 ring-primary/30 ring-offset-1 ring-offset-background",
-          isActive && "[animation:node-running_1.5s_ease-in-out_infinite] !border-warning"
+          props.selected && "!border-node-discussion shadow-[0_0_8px_0px] shadow-node-discussion/40",
+          isActive && "[animation:node-running_1.5s_ease-in-out_infinite]",
+          isDraggingTool && "!border-node-agent ring-2 ring-node-agent/40 shadow-[0_0_20px_-3px] shadow-node-agent/30"
         )}
-        onClick={() => setSelectedNode(props.id)}
+        onClick={() => setSelectedNode(props.selected ? null : props.id)}
       >
         {/* Top handle — data input from upstream */}
         <Handle
           type="target"
           id="top"
           position={Position.Top}
-          style={{ left: "50%" }}
+          style={{ left: "50%", transform: "translate(-50%, -50%)" }}
           className={cn(handleBase, handleCyan)}
         />
 
-        {/* Left handle — participant agents connect here.
-            BUG-3 fix: no children inside Handle (causes layout anomalies at non-100% zoom).
-            The participant count in the header subtitle conveys the same information. */}
         <Handle
           type="target"
           id="participants"
           position={Position.Left}
-          style={{ top: "50%" }}
+          style={{ top: "50%", transform: "translate(-50%, -50%)" }}
           className={cn(handleBase, handleBlue)}
         />
 
@@ -240,7 +254,7 @@ export function DiscussionNode(props: NodeProps) {
           type="source"
           id="full"
           position={Position.Bottom}
-          style={{ left: "20%" }}
+          style={{ left: 60, transform: "translate(-50%, 50%)" }}
           className={cn(handleBase, handleCyan)}
         >
           <span className="absolute top-4 left-1/2 -translate-x-1/2 text-[10px] text-muted-foreground/60 whitespace-nowrap font-medium">
@@ -251,7 +265,7 @@ export function DiscussionNode(props: NodeProps) {
           type="source"
           id="last"
           position={Position.Bottom}
-          style={{ left: "50%" }}
+          style={{ left: 140, transform: "translate(-50%, 50%)" }}
           className={cn(handleBase, handleCyan)}
         >
           <span className="absolute top-4 left-1/2 -translate-x-1/2 text-[10px] text-muted-foreground/60 whitespace-nowrap font-medium">
@@ -262,7 +276,7 @@ export function DiscussionNode(props: NodeProps) {
           type="source"
           id="summary"
           position={Position.Bottom}
-          style={{ left: "80%" }}
+          style={{ left: 220, transform: "translate(-50%, 50%)" }}
           className={cn(handleBase, handleCyan)}
         >
           <span className="absolute top-4 left-1/2 -translate-x-1/2 text-[10px] text-muted-foreground/60 whitespace-nowrap font-medium">
@@ -272,12 +286,30 @@ export function DiscussionNode(props: NodeProps) {
 
         {/* Header */}
         <div className="flex items-center gap-2.5 px-3 py-2.5">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-node-discussion">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-node-discussion">
             <Users className="h-4 w-4 text-white" />
           </div>
           <div className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-semibold">{data.label}</span>
-            <span className="text-[10px] text-muted-foreground/70 uppercase tracking-wider">
+            <span
+              ref={labelRef}
+              contentEditable={editing}
+              suppressContentEditableWarning
+              onDoubleClick={startEditing}
+              onBlur={commitRename}
+              onKeyDown={editing ? (e) => {
+                if (e.key === "Enter") { e.preventDefault(); commitRename(); }
+                if (e.key === "Escape") { labelRef.current!.textContent = data.label; setEditing(false); }
+                e.stopPropagation();
+              } : undefined}
+              onClick={editing ? (e) => e.stopPropagation() : undefined}
+              className={cn(
+                "block truncate text-sm font-semibold cursor-text outline-none",
+                editing && "nodrag truncate-none shadow-[0_0_0_1px_oklch(0.68_0.12_70/0.4)] rounded px-0.5 -mx-0.5"
+              )}
+            >
+              {data.label}
+            </span>
+            <span className="block text-[10px] text-muted-foreground/70 uppercase tracking-wider">
               {participantCount === 0
                 ? "no participants"
                 : participantCount === 1
@@ -300,7 +332,7 @@ export function DiscussionNode(props: NodeProps) {
         </div>
 
         {/* Footer: max rounds badge */}
-        <div className="border-t border-border/40 px-3 py-2">
+        <div className="border-t border-border/40 px-3 py-3">
           <div className="flex items-center justify-between">
             <span className="text-[10px] text-muted-foreground/60">Max rounds</span>
             <span className="rounded-full bg-node-discussion/15 px-2 py-0.5 text-[10px] font-semibold text-node-discussion">

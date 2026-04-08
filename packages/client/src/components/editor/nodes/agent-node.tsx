@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import { type NodeProps } from "@xyflow/react";
-import { Cpu, X, Terminal, Server, BookOpen } from "lucide-react";
+import { User, X, Terminal, Server, BookOpen } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { BaseNode } from "./base-node";
 import { useNodeData } from "@/hooks/use-node-data";
@@ -78,7 +78,31 @@ export function AgentNode(props: NodeProps) {
 
   return (
     <div onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
-      <BaseNode {...props} data={data} icon={Cpu} subtitle={`${engine} · ${model}`}>
+      <BaseNode
+        {...props}
+        data={data}
+        icon={User}
+        subtitle={`${engine} · ${model}`}
+        subtitleOptions={[
+          { value: "haiku", label: "claude · haiku" },
+          { value: "sonnet", label: "claude · sonnet" },
+          { value: "opus", label: "claude · opus" },
+          { value: "ollama", label: "ollama" },
+          { value: "openai", label: "openai" },
+          { value: "debug", label: "static" },
+        ]}
+        onSubtitleChange={(value) => {
+          if (value === "ollama") {
+            updateNodeConfig(props.id, { engine: "ollama", model: undefined });
+          } else if (value === "openai") {
+            updateNodeConfig(props.id, { engine: "openai", model: undefined });
+          } else if (value === "debug") {
+            updateNodeConfig(props.id, { engine: "debug", model: undefined });
+          } else {
+            updateNodeConfig(props.id, { engine: "claude", model: value });
+          }
+        }}
+      >
         {config.systemPrompt && (
           <p className="truncate text-[10px]">{config.systemPrompt}</p>
         )}

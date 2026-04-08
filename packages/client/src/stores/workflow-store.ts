@@ -41,6 +41,15 @@ function isChatTrigger(node: Node<WorkflowNodeData>): boolean {
   return node.data.type === "trigger" && (node.data.config as TriggerConfig).type === "chat";
 }
 
+// ── History (undo/redo) ──────────────────────────────────────
+
+interface Snapshot {
+  nodes: Node<WorkflowNodeData>[];
+  edges: Edge[];
+}
+
+const MAX_HISTORY = 50;
+
 // ── Store Types ──────────────────────────────────────────────
 
 interface WorkflowState {
@@ -53,6 +62,12 @@ interface WorkflowState {
   workflowDescription: string;
   toolName?: string;
   isDirty: boolean;
+  isDraggingTool: boolean;
+  openDropdownId: string | null;
+  setOpenDropdown: (id: string | null) => void;
+
+  _past: Snapshot[];
+  _future: Snapshot[];
 
   onNodesChange: OnNodesChange<Node<WorkflowNodeData>>;
   onEdgesChange: OnEdgesChange;
@@ -60,6 +75,8 @@ interface WorkflowState {
   setSelectedNode: (id: string | null) => void;
   setActiveNodes: (ids: Set<string>) => void;
   setSkippedNodes: (ids: Set<string>) => void;
+  setDraggingTool: (v: boolean) => void;
+  pushHistory: () => void;
   addNode: (node: Node<WorkflowNodeData>) => void;
   updateNodeData: (id: string, data: Partial<WorkflowNodeData>) => void;
   updateNodeConfig: (id: string, config: Partial<WorkflowNodeConfig>) => void;
@@ -73,11 +90,42 @@ interface WorkflowState {
     toolName?: string
   ) => void;
   reset: () => void;
+  undo: () => void;
+  redo: () => void;
 }
 
 // ── Store ────────────────────────────────────────────────────
 
-export const useWorkflowStore = create<WorkflowState>((set, get) => ({
+export const useWorkflowStore = create<WorkflowState>((set, get) => {
+
+  /** Push current nodes/edges onto the undo stack.
+   *  Debounced: rapid calls within 50ms batch into one entry. */
+  let pendingSnapshot: Snapshot | null = null;
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function pushHistory() {
+    // Capture the earliest state before any mutations in this batch
+    if (!pendingSnapshot) {
+      const { nodes, edges } = get();
+      pendingSnapshot = { nodes: structuredClone(nodes), edges: structuredClone(edges) };
+    }
+
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      if (!pendingSnapshot) return;
+      const { _past } = get();
+      const past = _past.length >= MAX_HISTORY ? _past.slice(1) : [..._past];
+      past.push(pendingSnapshot);
+      set({ _past: past, _future: [] });
+      pendingSnapshot = null;
+      debounceTimer = null;
+    }, 50);
+  }
+
+  /** Snapshot captured at drag start, committed at drag end */
+  let dragSnapshot: Snapshot | null = null;
+
+  return {
   nodes: [],
   edges: [],
   selectedNodeId: null,
@@ -86,8 +134,37 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   workflowName: "Untitled Workflow",
   workflowDescription: "",
   isDirty: false,
+  isDraggingTool: false,
+  openDropdownId: null,
+  _past: [],
+  _future: [],
 
   onNodesChange: (changes) => {
+    const hasDragStart = changes.some(
+      (c) => c.type === "position" && (c as any).dragging
+    );
+    const hasDragEnd = changes.some(
+      (c) => c.type === "position" && !(c as any).dragging
+    );
+    const hasRemove = changes.some((c) => c.type === "remove");
+
+    // Capture state at drag start
+    if (hasDragStart && !dragSnapshot) {
+      const { nodes, edges } = get();
+      dragSnapshot = { nodes: structuredClone(nodes), edges: structuredClone(edges) };
+    }
+
+    // Commit drag snapshot at drag end
+    if (hasDragEnd && dragSnapshot) {
+      const { _past } = get();
+      const past = _past.length >= MAX_HISTORY ? _past.slice(1) : [..._past];
+      past.push(dragSnapshot);
+      set({ _past: past, _future: [] });
+      dragSnapshot = null;
+    }
+
+    if (hasRemove) pushHistory();
+
     set({
       nodes: applyNodeChanges(changes, get().nodes),
       isDirty: true,
@@ -95,6 +172,9 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   },
 
   onEdgesChange: (changes) => {
+    const hasRemove = changes.some((c) => c.type === "remove");
+    if (hasRemove) pushHistory();
+
     set({
       edges: applyEdgeChanges(changes, get().edges),
       isDirty: true,
@@ -102,6 +182,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   },
 
   onConnect: (connection) => {
+    pushHistory();
     const sourceNode = get().nodes.find((n) => n.id === connection.source);
     const bidirectional = sourceNode ? isChatTrigger(sourceNode) : false;
     const { style, markerEnd, markerStart } = edgeStyle(connection.sourceHandle, bidirectional);
@@ -109,7 +190,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       edges: addEdge(
         {
           ...connection,
-          type: "default",
+          type: "rounded",
           animated: false,
           style,
           markerEnd,
@@ -124,12 +205,18 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   setSelectedNode: (id) => set({ selectedNodeId: id }),
   setActiveNodes: (ids) => set({ activeNodeIds: ids }),
   setSkippedNodes: (ids) => set({ skippedNodeIds: ids }),
+  setDraggingTool: (v) => set({ isDraggingTool: v }),
+  setOpenDropdown: (id) => set({ openDropdownId: id }),
+
+  pushHistory: () => pushHistory(),
 
   addNode: (node) => {
+    pushHistory();
     set({ nodes: [...get().nodes, node], isDirty: true });
   },
 
   updateNodeData: (id, data) => {
+    pushHistory();
     set({
       nodes: get().nodes.map((n) =>
         n.id === id ? { ...n, data: { ...n.data, ...data } } : n
@@ -139,6 +226,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   },
 
   updateNodeConfig: (id, configUpdate) => {
+    pushHistory();
     set({
       nodes: get().nodes.map((n) => {
         if (n.id !== id) return n;
@@ -155,6 +243,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   },
 
   removeNode: (id) => {
+    pushHistory();
     set({
       nodes: get().nodes.filter((n) => n.id !== id),
       edges: get().edges.filter((e) => e.source !== id && e.target !== id),
@@ -174,10 +263,14 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       const sourceNode = nodeMap.get(e.source);
       const bidirectional = sourceNode ? isChatTrigger(sourceNode) : false;
       const { style, markerEnd, markerStart } = edgeStyle(e.sourceHandle, bidirectional);
-      return { ...e, style, markerEnd, ...(markerStart && { markerStart }) };
+      return { ...e, type: "rounded", style, markerEnd, ...(markerStart && { markerStart }) };
     });
+    // Remap "output" RF type to "sink" to avoid React Flow built-in styles
+    const remappedNodes = nodes.map((n) =>
+      n.type === "output" ? { ...n, type: "sink" } : n
+    );
     set({
-      nodes,
+      nodes: remappedNodes,
       edges: styledEdges,
       workflowName: name,
       workflowDescription: description,
@@ -199,6 +292,34 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       workflowName: "Untitled Workflow",
       workflowDescription: "",
       isDirty: false,
+      _past: [],
+      _future: [],
     });
   },
-}));
+
+  undo: () => {
+    const { _past, nodes, edges } = get();
+    if (_past.length === 0) return;
+    const prev = _past[_past.length - 1];
+    set({
+      nodes: prev.nodes,
+      edges: prev.edges,
+      _past: _past.slice(0, -1),
+      _future: [...get()._future, { nodes: structuredClone(nodes), edges: structuredClone(edges) }],
+      isDirty: true,
+    });
+  },
+
+  redo: () => {
+    const { _future, nodes, edges } = get();
+    if (_future.length === 0) return;
+    const next = _future[_future.length - 1];
+    set({
+      nodes: next.nodes,
+      edges: next.edges,
+      _future: _future.slice(0, -1),
+      _past: [...get()._past, { nodes: structuredClone(nodes), edges: structuredClone(edges) }],
+      isDirty: true,
+    });
+  },
+}});
