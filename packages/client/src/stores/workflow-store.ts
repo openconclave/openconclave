@@ -38,7 +38,7 @@ export function edgeStyle(sourceHandle?: string | null, bidirectional = false) {
 }
 
 function isChatTrigger(node: Node<WorkflowNodeData>): boolean {
-  return node.data.type === "trigger" && (node.data.config as TriggerConfig).type === "chat";
+  return node.data.type === "trigger" && (node.data.config as TriggerConfig)?.type === "chat";
 }
 
 // ── History (undo/redo) ──────────────────────────────────────
@@ -227,19 +227,27 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => {
 
   updateNodeConfig: (id, configUpdate) => {
     pushHistory();
-    set({
-      nodes: get().nodes.map((n) => {
-        if (n.id !== id) return n;
-        return {
-          ...n,
-          data: {
-            ...n.data,
-            config: { ...n.data.config, ...configUpdate },
-          },
-        };
-      }),
-      isDirty: true,
+    const updatedNodes = get().nodes.map((n) => {
+      if (n.id !== id) return n;
+      return {
+        ...n,
+        data: {
+          ...n.data,
+          config: { ...n.data.config, ...configUpdate },
+        },
+      };
     });
+    const updatedNode = updatedNodes.find((n) => n.id === id);
+    const updatedEdges = get().edges.map((e) => {
+      if (e.source !== id || !updatedNode) return e;
+      const bidirectional = isChatTrigger(updatedNode);
+      const { style, markerEnd, markerStart } = edgeStyle(e.sourceHandle, bidirectional);
+      const restyled = { ...e, style, markerEnd };
+      if (markerStart) restyled.markerStart = markerStart;
+      else delete restyled.markerStart;
+      return restyled;
+    });
+    set({ nodes: updatedNodes, edges: updatedEdges, isDirty: true });
   },
 
   removeNode: (id) => {
@@ -257,6 +265,9 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => {
   },
 
   loadWorkflow: (nodes, edges, name, description, toolName) => {
+    // Cancel any pending debounce so a stale snapshot is not committed after load
+    if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
+    pendingSnapshot = null;
     // Re-apply bidirectional markers for edges from chat triggers
     const nodeMap = new Map(nodes.map((n) => [n.id, n]));
     const styledEdges = edges.map((e) => {
@@ -283,6 +294,9 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => {
   },
 
   reset: () => {
+    // Cancel any pending debounce so a stale snapshot is not committed after reset
+    if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
+    pendingSnapshot = null;
     set({
       nodes: [],
       edges: [],
