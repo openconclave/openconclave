@@ -582,6 +582,7 @@ export function WorkflowCanvas() {
         edgeTypes={edgeTypes}
         connectionMode={ConnectionMode.Loose}
         fitView
+        nodeDragThreshold={0}
         panOnDrag={spaceHeld ? [0, 1] : [1]}
         selectionOnDrag={!spaceHeld}
         selectionMode={SelectionMode.Partial}

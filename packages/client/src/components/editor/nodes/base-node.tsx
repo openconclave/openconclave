@@ -137,7 +137,7 @@ export function BaseNode({
     <div
       ref={nodeRef}
       className={cn(
-        "w-[240px] border-[1.5px] bg-gradient-to-b from-card to-card/80 transition-all duration-200 cursor-pointer",
+        "w-[240px] border-[1.5px] bg-gradient-to-b from-card to-card/80 transition-[border-color,box-shadow,opacity,filter] duration-200 cursor-pointer",
         nodeRounding,
         nodeBorderColors[data.type],
         selected && (nodeSelectedStyles[data.type] ?? "!border-primary ring-1 ring-primary/30"),

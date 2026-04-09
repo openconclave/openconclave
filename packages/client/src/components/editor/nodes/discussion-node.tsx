@@ -234,7 +234,7 @@ export function DiscussionNode(props: NodeProps) {
       <div
         ref={nodeRef}
         className={cn(
-          "w-[280px] rounded-2xl border-[1.5px] bg-gradient-to-b from-card to-card/80 transition-all duration-200 cursor-pointer flex flex-col",
+          "w-[280px] rounded-2xl border-[1.5px] bg-gradient-to-b from-card to-card/80 transition-[border-color,box-shadow,opacity,filter] duration-200 cursor-pointer flex flex-col",
           "border-node-discussion/60",
           props.selected && "!border-node-discussion shadow-[0_0_8px_0px] shadow-node-discussion/40",
           isActive && "[animation:node-running_1.5s_ease-in-out_infinite]",
