@@ -15,13 +15,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { WorkflowDefinition, WorkflowNode, WorkflowEdge } from "@openconclave/shared";
 
-// ── Mock function references ────────────────────────────────────
+// ── Mock function references (vi.hoisted so vitest hoists them alongside vi.mock) ──
 
-const mockDbSelect = vi.fn();
-const mockDbInsert = vi.fn();
-const mockDbUpdate = vi.fn();
-const mockLoggerError = vi.fn();
-const mockExecuteNode = vi.fn();
+const { mockDbSelect, mockDbInsert, mockDbUpdate, mockLoggerError, mockExecuteNode } = vi.hoisted(() => ({
+  mockDbSelect: vi.fn(),
+  mockDbInsert: vi.fn(),
+  mockDbUpdate: vi.fn(),
+  mockLoggerError: vi.fn(),
+  mockExecuteNode: vi.fn(),
+}));
 
 vi.mock("bun:sqlite", () => {
   class MockDatabase {
