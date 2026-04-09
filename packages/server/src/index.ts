@@ -69,17 +69,28 @@ const executor = new WorkflowExecutor((event) => {
 // ── Workflow Run Trigger ─────────────────────────────────────
 app.post("/api/workflows/:id/run", async (c) => {
   const id = Number(c.req.param("id"));
+  if (isNaN(id)) throw AppError.validation("Invalid workflow ID");
   const wf = await db.select().from(workflows).where(eq(workflows.id, id));
   if (!wf[0]) throw AppError.notFound("Workflow", String(id));
 
-  const body = await c.req.json().catch(() => ({}));
+  // Body is optional — an empty body means no payload. Malformed JSON is rejected.
+  const rawBody = await c.req.text();
+  let body: Record<string, unknown> = {};
+  if (rawBody.trim()) {
+    try {
+      body = JSON.parse(rawBody) as Record<string, unknown>;
+    } catch {
+      throw AppError.validation("Invalid JSON in request body");
+    }
+  }
+
   const definition = wf[0].definition as Record<string, unknown>;
   const nodes = (definition.nodes ?? []) as Array<{ id: string; data?: { type?: string } }>;
   const triggerNode = nodes.find((n) => n.data?.type === "trigger");
 
   const runId = await executor.execute(
     definition as never,
-    (body as Record<string, unknown>).payload,
+    body.payload,
     triggerNode?.id
   );
 
@@ -89,6 +100,7 @@ app.post("/api/workflows/:id/run", async (c) => {
 // ── Resume Failed / Interrupted Run ─────────────────────────
 app.post("/api/runs/:id/resume", async (c) => {
   const id = Number(c.req.param("id"));
+  if (isNaN(id)) throw AppError.validation("Invalid run ID");
 
   const updated = await db
     .update(runs)
@@ -119,14 +131,26 @@ app.post("/api/runs/:id/resume", async (c) => {
 // ── Chat Message (continue existing run) ─────────────────────
 app.post("/api/runs/:runId/message", async (c) => {
   const runId = Number(c.req.param("runId"));
+  if (isNaN(runId)) throw AppError.validation("Invalid run ID");
+
   const run = await db.select().from(runs).where(eq(runs.id, runId)).get();
-  if (!run) return c.json({ error: { code: "NOT_FOUND", message: "Run not found" } }, 404);
+  if (!run) throw AppError.notFound("Run", String(runId));
 
   const wf = await db.select().from(workflows).where(eq(workflows.id, run.workflowId)).get();
-  if (!wf) return c.json({ error: { code: "NOT_FOUND", message: "Workflow not found" } }, 404);
+  if (!wf) throw AppError.notFound("Workflow", String(run.workflowId));
 
-  const body = await c.req.json().catch(() => ({}));
-  const message = (body as Record<string, unknown>).message as string;
+  let body: Record<string, unknown>;
+  try {
+    body = await c.req.json() as Record<string, unknown>;
+  } catch {
+    throw AppError.validation("Invalid JSON in request body");
+  }
+
+  const message = body.message;
+  if (typeof message !== "string" || !message.trim()) {
+    throw AppError.validation("message is required and must be a non-empty string");
+  }
+
   const definition = wf.definition as Record<string, unknown>;
   const nodes = (definition.nodes ?? []) as Array<{ id: string; data?: { type?: string } }>;
   const triggerNode = nodes.find((n) => n.data?.type === "trigger");
@@ -159,7 +183,15 @@ app.post("/api/runs/:runId/message", async (c) => {
 // ── Set working directory for a running workflow ─────────────
 app.post("/api/runs/:runId/cwd", async (c) => {
   const runId = Number(c.req.param("runId"));
-  const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
+  if (isNaN(runId)) throw AppError.validation("Invalid run ID");
+
+  let body: Record<string, unknown>;
+  try {
+    body = await c.req.json() as Record<string, unknown>;
+  } catch {
+    throw AppError.validation("Invalid JSON in request body");
+  }
+
   const cwd = body.cwd as string | undefined;
   const nodeId = body.nodeId as string | undefined;
 
@@ -206,7 +238,11 @@ app.get("/api/agents/pool", (c) => c.json(agentPool.stats));
 
 // ── Telegram Trigger API ─────────────────────────────────────
 app.post("/api/triggers/telegram", async (c) => {
-  const body = (await c.req.json()) as { chatId: string; message: string };
+  const rawBody = await c.req.json() as Record<string, unknown>;
+  if (typeof rawBody.chatId !== "string" || typeof rawBody.message !== "string") {
+    throw AppError.validation("chatId and message are required strings");
+  }
+  const body = rawBody as { chatId: string; message: string };
   const allWorkflows = await db.select().from(workflows);
 
   const triggered: string[] = [];

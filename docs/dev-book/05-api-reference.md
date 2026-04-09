@@ -115,3 +115,23 @@ Connect to `ws://localhost:4000`. Subscribe to topics by sending:
 ```json
 { "type": "node:started", "runId": 123, "nodeId": "agent_1", "data": { ... } }
 ```
+
+## Error Handling Conventions
+
+All route handlers use `AppError` (from `@openconclave/shared`) for error responses. The central `errorHandler` middleware in `lib/errors.ts` catches thrown `AppError` instances and formats them as `{ error: { code, message } }` with the appropriate HTTP status.
+
+**Rules:**
+- **Always `throw AppError.*()` instead of manual `return c.json({ error: ... }, status)`.** Throwing ensures consistent JSON shape and goes through the error middleware.
+- **Validate numeric ID params** after `Number(c.req.param(...))` — add `if (isNaN(id)) throw AppError.validation(...)` since `Number("abc")` silently returns `NaN`.
+- **Do not use `.catch(() => ({}))` on `c.req.json()`** — this silently swallows malformed JSON. Instead:
+  - If the body is **required**: let the parse error propagate, or wrap in try/catch and `throw AppError.validation("Invalid JSON")`.
+  - If the body is **optional** (e.g., workflow trigger with optional payload): read raw text first, only parse if non-empty.
+- **Required fields must be runtime-validated** — never trust `as Type` casts on user input. Check `typeof` and throw `AppError.validation(...)` if missing or wrong type.
+
+**Available factories:**
+```typescript
+AppError.notFound(entity, id)      // 404
+AppError.validation(message)       // 400
+AppError.unauthorized(message)     // 401
+// No built-in conflict() — use manual return c.json(..., 409) for CONFLICT cases
+```
