@@ -191,9 +191,9 @@ export function RunDetailPage() {
     const workflowId = data?.run.workflowId;
     if (!workflowId || labelsLoadedFor.current === workflowId) return;
 
-    labelsLoadedFor.current = workflowId;
     api.get<{ definition: { nodes: Array<{ id: string; data?: { label?: string; type?: string; config?: Record<string, unknown> } }>; toolName?: string } }>(`/workflows/${workflowId}`)
       .then((wf) => {
+        labelsLoadedFor.current = workflowId;
         const def = ((wf as Record<string, unknown>).definition ?? wf) as Record<string, unknown>;
         const nodes = (def.nodes as Array<{ id: string; data?: { label?: string; type?: string; config?: Record<string, unknown> } }>) ?? [];
         const labels = new Map<string, string>();
@@ -266,7 +266,9 @@ export function RunDetailPage() {
     try {
       await api.post(`/runs/${runId}/cancel`, {});
       api.get<RunDetailResponse>(`/runs/${runId}`).then(setData);
-    } catch {}
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Failed to cancel run", "error");
+    }
   };
 
   const [isResuming, startResumeTransition] = useTransition();
