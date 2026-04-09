@@ -89,7 +89,7 @@ export function OnboardingPage({ onComplete }: { onComplete: () => void }) {
   const [copiedCmd, setCopiedCmd] = useState<string | null>(null);
 
   const loadProviders = () => {
-    api.get<{ providers: ProviderInfo[] }>("/providers").then((d) => setProviders(d.providers)).catch(() => {});
+    api.get<{ providers: ProviderInfo[] }>("/providers").then((d) => setProviders(d.providers)).catch((err) => console.error("Failed to load providers:", err));
   };
 
   useEffect(() => { loadProviders(); checkClaudeCode(); }, []);
@@ -120,8 +120,8 @@ export function OnboardingPage({ onComplete }: { onComplete: () => void }) {
         modelDetails?: OllamaModelInfo[];
       }>("/ollama/status");
       setOllamaStatus(data.running ? "online" : "offline");
-      setOllamaModels(data.models ?? []);
-      setModelDetails(data.modelDetails ?? []);
+      setOllamaModels(Array.isArray(data.models) ? data.models : []);
+      setModelDetails(Array.isArray(data.modelDetails) ? data.modelDetails : []);
     } catch {
       setOllamaStatus("offline");
       setOllamaModels([]);
@@ -157,7 +157,7 @@ export function OnboardingPage({ onComplete }: { onComplete: () => void }) {
   };
 
   const handleSaveOllamaUrl = async () => {
-    await api.put("/settings", { ollama_url: ollamaUrl }).catch(() => {});
+    await api.put("/settings", { ollama_url: ollamaUrl }).catch((err) => console.error("Failed to save Ollama URL:", err));
   };
 
   const handleFinish = async () => {
@@ -174,7 +174,7 @@ export function OnboardingPage({ onComplete }: { onComplete: () => void }) {
     navigator.clipboard.writeText(cmd).then(() => {
       setCopiedCmd(cmd);
       setTimeout(() => setCopiedCmd(null), 2000);
-    }).catch(() => {});
+    }).catch((err) => console.error("Clipboard write failed:", err));
   };
 
   const canProceedFromProvider = providers.length > 0;
