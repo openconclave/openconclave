@@ -463,10 +463,13 @@ function KbDetailPanel({ kb, onDelete, onEdit, onRefresh }: KbDetailPanelProps) 
 
   const loadDocuments = () => {
     setLoadingDocs(true);
-    fetch(`/api/knowledge/${kb.id}/documents`)
-      .then((r) => r.json())
-      .then((data: { data: KnowledgeDocument[] }) => setDocuments(data.data ?? []))
-      .catch(() => setDocuments([]))
+    api.get<{ data: KnowledgeDocument[] }>(`/knowledge/${kb.id}/documents`)
+      .then((data) => setDocuments(data.data ?? []))
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        toast(`Failed to load documents: ${message}`, "error");
+        setDocuments([]);
+      })
       .finally(() => setLoadingDocs(false));
   };
 
@@ -719,9 +722,8 @@ export function KnowledgePage() {
   const [editingKb, setEditingKb] = useState<KnowledgeBase | null>(null);
 
   const loadKbs = () => {
-    fetch("/api/knowledge")
-      .then((r) => r.json())
-      .then((data: { data: KnowledgeBase[] }) => setKbs(data.data ?? []))
+    api.get<{ data: KnowledgeBase[] }>("/knowledge")
+      .then((data) => setKbs(data.data ?? []))
       .catch(() => setKbs([]))
       .finally(() => setLoading(false));
   };
