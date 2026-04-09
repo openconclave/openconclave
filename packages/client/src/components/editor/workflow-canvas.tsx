@@ -161,8 +161,6 @@ function DraggableMiniMap() {
   }, []);
 
   const onPointerDown = useCallback((e: React.PointerEvent) => {
-    // Only drag from the header bar, not from the minimap content
-    if (!(e.target as HTMLElement).closest("[data-minimap-header]")) return;
     dragging.current = true;
     offset.current = { x: e.clientX - pos.x, y: e.clientY - pos.y };
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
@@ -199,12 +197,9 @@ function DraggableMiniMap() {
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
     >
-      <div className="rounded-lg border border-border bg-card shadow-lg overflow-hidden" style={{ width: 220 }}>
-        <div
-          data-minimap-header
-          className="flex items-center justify-between px-2 py-1 border-b border-border/50 cursor-grab active:cursor-grabbing select-none"
-        >
-          <span className="text-[10px] text-muted-foreground/60 font-medium uppercase tracking-wider">Mini Map</span>
+      <div className="rounded-lg border border-border bg-card shadow-lg overflow-hidden cursor-grab active:cursor-grabbing select-none" style={{ width: 220 }}>
+        <div className="flex items-center justify-between px-2 py-1 border-b border-border/50 cursor-grab active:cursor-grabbing select-none">
+          <span className="text-[10px] text-muted-foreground/60 font-medium uppercase tracking-wider">Overview</span>
         </div>
         <div style={{ height: 150 }}>
           <MiniMap
