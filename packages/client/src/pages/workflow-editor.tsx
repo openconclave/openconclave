@@ -297,28 +297,19 @@ export function WorkflowEditorPage() {
       <Header
         breadcrumb={[{ label: "Workflows", href: "/workflows" }]}
         title={
-          <div className="flex flex-col">
-            <input
-              type="text"
-              value={workflowName}
-              onChange={(e) => {
-                setWorkflowMeta(e.target.value, workflowDescription);
-                const current = useWorkflowStore.getState().toolName;
-                if (!current || current === toSnakeCase(workflowName)) {
-                  useWorkflowStore.setState({ toolName: toSnakeCase(e.target.value) || undefined });
-                }
-              }}
-              className="bg-transparent text-lg font-semibold border-none outline-none focus:ring-0 w-80"
-              placeholder="Workflow name..."
-            />
-            <input
-              type="text"
-              value={workflowDescription}
-              onChange={(e) => setWorkflowMeta(workflowName, e.target.value)}
-              className="bg-transparent text-xs text-muted-foreground border-none outline-none focus:ring-0 w-80 -mt-0.5"
-              placeholder="Description for Claude..."
-            />
-          </div>
+          <input
+            type="text"
+            value={workflowName}
+            onChange={(e) => {
+              setWorkflowMeta(e.target.value, workflowDescription);
+              const current = useWorkflowStore.getState().toolName;
+              if (!current || current === toSnakeCase(workflowName)) {
+                useWorkflowStore.setState({ toolName: toSnakeCase(e.target.value) || undefined });
+              }
+            }}
+            className="bg-transparent text-lg font-semibold border-none outline-none focus:ring-0 w-80"
+            placeholder="Workflow name..."
+          />
         }
         actions={
           <div className="flex items-center gap-2">
