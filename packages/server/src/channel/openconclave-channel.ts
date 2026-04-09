@@ -147,6 +147,9 @@ async function syncWorkflowTools() {
     const data = await ocApi("/workflows") as { workflows: Array<Record<string, unknown>> };
     const seen = new Set<string>();
 
+    // Snapshot the current registered set BEFORE any mutations
+    const oldRegistered = new Set(registeredWorkflowTools);
+
     for (const wf of data.workflows) {
       if (!wf.enabled) continue;
       const def = (wf.definition ?? {}) as Record<string, unknown>;
@@ -175,9 +178,15 @@ async function syncWorkflowTools() {
       }
     }
 
-    // Notify client if tools changed
-    if (seen.size !== registeredWorkflowTools.size ||
-        [...seen].some((t) => !registeredWorkflowTools.has(t))) {
+    // Remove stale entries for disabled/deleted workflows
+    for (const t of registeredWorkflowTools) {
+      if (!seen.has(t)) registeredWorkflowTools.delete(t);
+    }
+
+    // Notify client if tools changed — compare against PRE-MUTATION snapshot
+    if (seen.size !== oldRegistered.size ||
+        [...seen].some((t) => !oldRegistered.has(t)) ||
+        [...oldRegistered].some((t) => !seen.has(t))) {
       try {
         await mcp.server.sendNotification({ method: "notifications/tools/list_changed" });
       } catch { /* client may not support */ }
@@ -220,7 +229,7 @@ function connectWebSocket() {
           if (data.data?.taskId) meta.task_id = data.data.taskId;
           if (data.data?.status) meta.status = data.data.status;
           if (data.data?.success !== undefined) meta.success = String(data.data.success);
-          if (data.data?.durationMs) meta.duration_ms = String(data.data.durationMs);
+          if (data.data?.durationMs !== undefined) meta.duration_ms = String(data.data.durationMs);
           if (data.data?.workflowName) meta.workflow_name = data.data.workflowName;
           if (data.data?.nodeLabel) meta.node_label = data.data.nodeLabel;
           if (data.data?.senderNode) meta.sender_node = data.data.senderNode;
