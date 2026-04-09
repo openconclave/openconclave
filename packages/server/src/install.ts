@@ -100,7 +100,6 @@ function showPluginInstructions() {
   log(`  ${d}1.${r} /plugin marketplace add ${a}openconclave/openconclave${r}`);
   log(`  ${d}2.${r} /plugin install ${a}openconclave-channel@openconclave${r}`);
   log(`  ${d}3.${r} /plugin install ${a}openconclave-dev@openconclave${r}`);
-  log(`  ${d}4.${r} /plugin install ${a}openconclave-run@openconclave${r}`);
 }
 
 export async function runInstall() {

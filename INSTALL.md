@@ -36,7 +36,6 @@ In Claude Code, run these commands:
 /plugin marketplace add openconclave/openconclave
 /plugin install openconclave-channel@openconclave
 /plugin install openconclave-dev@openconclave
-/plugin install openconclave-run@openconclave
 ```
 
 Then `/reload-plugins`.
@@ -47,7 +46,6 @@ Then `/reload-plugins`.
 |--------|-------------|
 | `openconclave-channel` | Workflow events + each workflow as a callable tool |
 | `openconclave-dev` | Workflow management tools (list, create, update, delete) |
-| `openconclave-run` | Same as dev (workflow execution tools) |
 
 ### Start Claude Code with channel events
 
