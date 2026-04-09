@@ -1,5 +1,6 @@
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useWorkflowStore } from "@/stores/workflow-store";
-import { X, Trash2, Sparkles } from "lucide-react";
+import { X, Trash2, Sparkles, Loader2 } from "lucide-react";
 import type {
   WorkflowNodeData,
   AgentConfig,
@@ -10,6 +11,9 @@ import type {
   OutputConfig,
   DiscussionConfig,
 } from "@openconclave/shared";
+import { cn } from "@/lib/utils";
+import { api } from "@/lib/api";
+import { toast } from "@/components/ui/toast";
 import { Field, INPUT_CLASS, AutoTextarea } from "./inspector/shared";
 import { TriggerFields } from "./inspector/trigger-fields";
 import { AgentFields } from "./inspector/agent-fields";
@@ -26,6 +30,62 @@ function WorkflowSettings() {
   const workflowDescription = useWorkflowStore((s) => s.workflowDescription);
   const setWorkflowMeta = useWorkflowStore((s) => s.setWorkflowMeta);
   const toolName = useWorkflowStore((s) => s.toolName);
+  const workflowId = window.location.pathname.match(/\/workflows\/(\d+)/)?.[1];
+
+  const [claudeAvailable, setClaudeAvailable] = useState(false);
+  const [improving, setImproving] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    api.get<{ installed: boolean }>("/claude-code/status")
+      .then((d) => setClaudeAvailable(d.installed))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => () => {
+    if (pollRef.current) clearInterval(pollRef.current);
+  }, []);
+
+  const handleImprove = useCallback(async () => {
+    if (!workflowId || improving) return;
+    const sent = workflowDescription;
+    setImproving(true);
+
+    try {
+      await api.post("/channel/improve-description", {
+        workflowId: String(workflowId),
+        currentDescription: sent,
+      });
+      toast("Sent to Claude Code — waiting for improved instructions...");
+    } catch {
+      toast("Failed to send to Claude Code", "error");
+      setImproving(false);
+      return;
+    }
+
+    let elapsed = 0;
+    pollRef.current = setInterval(async () => {
+      elapsed += 3000;
+      if (elapsed > 60000) {
+        if (pollRef.current) clearInterval(pollRef.current);
+        pollRef.current = null;
+        setImproving(false);
+        toast("Timed out waiting for Claude to update the instructions", "error");
+        return;
+      }
+      try {
+        const wf = await api.get<Record<string, unknown>>(`/workflows/${workflowId}`);
+        const dbDesc = (wf.description as string) ?? "";
+        if (dbDesc && dbDesc !== sent) {
+          setWorkflowMeta(workflowName, dbDesc);
+          if (pollRef.current) clearInterval(pollRef.current);
+          pollRef.current = null;
+          setImproving(false);
+          toast("Instructions improved by Claude");
+        }
+      } catch { /* ignore poll errors */ }
+    }, 3000);
+  }, [workflowId, workflowDescription, workflowName, improving, setWorkflowMeta]);
 
   return (
     <div className="w-72 border-l border-border bg-card overflow-y-auto">
@@ -58,6 +118,32 @@ function WorkflowSettings() {
             placeholder="Describe the workflow's purpose, context, and any rules Claude should follow when executing this workflow..."
           />
         </div>
+        <div className="flex items-center gap-2 px-1">
+          <p className="text-[10px] text-muted-foreground flex-1">
+            Instructions help Claude understand the workflow's purpose and constraints.
+            Be specific about the expected behavior, tone, and any rules to follow.
+          </p>
+          {claudeAvailable && workflowId && (
+            <button
+              onClick={handleImprove}
+              disabled={improving}
+              className={cn(
+                "flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-medium transition-colors shrink-0",
+                improving
+                  ? "text-muted-foreground cursor-wait"
+                  : "text-primary hover:bg-primary/10"
+              )}
+              title="Ask Claude Code to improve these instructions"
+            >
+              {improving ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <Sparkles className="h-3 w-3" />
+              )}
+              {improving ? "Improving..." : "Improve"}
+            </button>
+          )}
+        </div>
 
         {toolName && (
           <Field label="Tool Name">
@@ -70,11 +156,6 @@ function WorkflowSettings() {
             />
           </Field>
         )}
-
-        <p className="text-[10px] text-muted-foreground leading-snug px-1">
-          Instructions help Claude understand the workflow's purpose and constraints.
-          Be specific about the expected behavior, tone, and any rules to follow.
-        </p>
       </div>
     </div>
   );

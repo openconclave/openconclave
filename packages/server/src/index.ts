@@ -141,6 +141,18 @@ app.post("/api/channel/improve-prompt", async (c) => {
   return c.json({ ok: true });
 });
 
+app.post("/api/channel/improve-description", async (c) => {
+  const body = await c.req.json() as {
+    workflowId: string;
+    currentDescription: string;
+  };
+  broadcastToTopic("dashboard", {
+    type: "channel:improve-description",
+    data: body,
+  });
+  return c.json({ ok: true });
+});
+
 app.post("/api/channel/improve-code", async (c) => {
   const body = await c.req.json() as {
     workflowId: string;

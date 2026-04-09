@@ -282,6 +282,33 @@ function connectWebSocket() {
           });
         }
 
+        if (eventType === "channel:improve-description") {
+          const d = data.data ?? {};
+          const content = [
+            "A user wants you to improve the workflow-level Instructions for Claude in OpenConclave.",
+            "",
+            `Workflow ID: ${d.workflowId}`,
+            "",
+            "Current instructions:",
+            d.currentDescription || "(empty)",
+            "",
+            "Please write an improved version — make it clearer, more effective, and well-structured.",
+            "Then call `update_workflow` to save it:",
+            `  update_workflow(workflowId: "${d.workflowId}", description: "your improved instructions")`,
+          ].join("\n");
+
+          await mcp.server.notification({
+            method: "notifications/claude/channel",
+            params: {
+              content,
+              meta: {
+                event_type: "channel:improve-description",
+                workflow_id: String(d.workflowId),
+              },
+            },
+          });
+        }
+
         if (eventType === "channel:improve-code") {
           const d = data.data ?? {};
           const content = [
