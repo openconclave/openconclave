@@ -180,10 +180,15 @@ export async function executeDiscussion(
     };
 
     // Render the prompt template for this turn
+    // Truncate transcript to avoid context window overflow — same ceiling as moderator
+    const safeParticipantTranscript =
+      transcript.length > TRANSCRIPT_MAX_BYTES
+        ? transcript.slice(-TRANSCRIPT_MAX_BYTES)
+        : transcript;
     const promptContext: Record<string, unknown> = {
       agentName: participant.data.label,
       input,
-      transcript,
+      transcript: safeParticipantTranscript,
       round,
     };
     const prompt = renderTemplate(config.prompt, promptContext);
@@ -396,7 +401,7 @@ async function runAgentModerator(
   }
 
   const toolInput = moderatorResult.tool_call.input;
-  const action = toolInput.action as string;
+  const action = typeof toolInput.action === "string" ? toolInput.action : "";
   if (!VALID_ACTIONS.has(action)) {
     throw new Error(
       `Moderator called "moderate" with invalid action "${action}". Valid actions: ${[...VALID_ACTIONS].join(", ")}`
