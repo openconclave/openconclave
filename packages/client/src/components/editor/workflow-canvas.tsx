@@ -115,6 +115,7 @@ function autoLayout() {
     };
   });
 
+  useWorkflowStore.getState().pushHistory();
   useWorkflowStore.setState({ nodes: layoutedNodes, isDirty: true });
 }
 
@@ -161,6 +162,7 @@ function DraggableMiniMap() {
   }, []);
 
   const onPointerDown = useCallback((e: React.PointerEvent) => {
+    if (!pos) return;
     dragging.current = true;
     offset.current = { x: e.clientX - pos.x, y: e.clientY - pos.y };
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
@@ -302,7 +304,12 @@ export function WorkflowCanvas() {
         if (newSource !== newTarget) {
           const currentEdges = useWorkflowStore.getState().edges;
           const isDuplicate = currentEdges.some(
-            (e) => e.id !== edge.id && e.source === newSource && e.target === newTarget,
+            (e) =>
+              e.id !== edge.id &&
+              e.source === newSource &&
+              e.target === newTarget &&
+              e.sourceHandle === newSourceHandle &&
+              e.targetHandle === newTargetHandle,
           );
           if (!isDuplicate) {
             pushHistory();
@@ -403,13 +410,13 @@ export function WorkflowCanvas() {
       const raw = e.dataTransfer.getData("application/openconclave-node");
       if (!raw) return;
 
-      const { type, label, config, offsetX = 0, offsetY = 0 } = JSON.parse(raw) as {
-        type: NodeType;
-        label: string;
-        config: unknown;
-        offsetX?: number;
-        offsetY?: number;
-      };
+      let parsed: { type: NodeType; label: string; config: unknown; offsetX?: number; offsetY?: number };
+      try {
+        parsed = JSON.parse(raw) as typeof parsed;
+      } catch {
+        return;
+      }
+      const { type, label, config, offsetX = 0, offsetY = 0 } = parsed;
 
       if (!reactFlowInstance.current) return;
 
