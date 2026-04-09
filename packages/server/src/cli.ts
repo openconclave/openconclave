@@ -17,9 +17,11 @@ switch (command) {
     await runInstall();
     break;
   }
-  case "mcp":
-    await import("./mcp/server");
+  case "mcp": {
+    const { startStdio } = await import("./mcp/server");
+    await startStdio();
     break;
+  }
   case "channel":
     await import("./channel/openconclave-channel");
     break;

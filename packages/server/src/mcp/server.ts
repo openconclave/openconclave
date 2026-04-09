@@ -328,8 +328,8 @@ export function createMcpServer() {
   return server;
 }
 
-// Run as standalone stdio MCP server when executed directly
-if (import.meta.main) {
+// Run as standalone stdio MCP server when imported with ?stdio flag or executed directly
+export async function startStdio() {
   const server = createMcpServer();
   const transport = new StdioServerTransport();
   await server.connect(transport);
