@@ -5,7 +5,7 @@ echo ""
 echo "  ◆  O P E N C O N C L A V E  Installer"
 echo ""
 
-REPO="openconclave/openconclave"
+REPO="openconclave/oc"
 VERSION="${1:-latest}"
 
 # ── Detect OS and architecture ───────────────────────────────

@@ -20,7 +20,7 @@ $platform = "windows-x64"
 
 # ── Resolve version ──────────────────────────────────────────
 
-$REPO = "openconclave/openconclave"
+$REPO = "openconclave/oc"
 $DOWNLOAD_DIR = "$env:USERPROFILE\.openconclave\downloads"
 New-Item -ItemType Directory -Force -Path $DOWNLOAD_DIR | Out-Null
 

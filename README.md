@@ -14,7 +14,7 @@ Workflows can pause to ask you questions, send results to Claude Code, trigger o
 
 **Manual:**
 ```bash
-git clone https://github.com/openconclave/openconclave.git
+git clone https://github.com/openconclave/oc.git
 cd openconclave && bun install && bun start
 ```
 
