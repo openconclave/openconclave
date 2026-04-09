@@ -87,7 +87,7 @@ for (const target of targets) {
   const targetDir = join(DIST, target);
   mkdirSync(targetDir, { recursive: true });
 
-  const outfile = join(targetDir, `openconclave${ext(target)}`);
+  const outfile = join(targetDir, `oc${ext(target)}`);
   const bunTarget = `bun-${target === "windows-x64" ? "windows-x64-baseline" : target}`;
   if (target.startsWith("windows")) {
     await $`cd ${ROOT} && bun build --compile ${CLI_ENTRY} --outfile ${outfile} --target ${bunTarget} --windows-icon ${ICON} --windows-title OpenConclave`.quiet();
@@ -97,7 +97,7 @@ for (const target of targets) {
 
   const file = Bun.file(outfile);
   const sizeMB = (file.size / 1024 / 1024).toFixed(1);
-  console.log(`    ✓ ${target}/openconclave${ext(target)}  ${sizeMB} MB`);
+  console.log(`    ✓ ${target}/oc${ext(target)}  ${sizeMB} MB`);
 }
 
 console.log("\n  [3/4] Binaries compiled\n");
@@ -115,6 +115,6 @@ console.log("  [4/4] Restored dev stub for embedded-assets.ts\n");
 // ── Summary ─────────────────────────────────────────────────
 console.log("  Done! Single binary per platform — no external files needed.\n");
 console.log("  Usage:");
-console.log("    ./openconclave              # start server (API + UI on :4000)");
-console.log("    ./openconclave mcp          # MCP server for Claude Code");
-console.log("    ./openconclave channel      # channel bridge for Claude Code\n");
+console.log("    ./oc              # start server (API + UI on :4000)");
+console.log("    ./oc mcp          # MCP server for Claude Code");
+console.log("    ./oc channel      # channel bridge for Claude Code\n");

@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "openconclave-channel": {
-      "command": "openconclave",
+      "command": "oc",
       "args": ["channel"]
     }
   }

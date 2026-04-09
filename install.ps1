@@ -48,9 +48,9 @@ Write-Output "  Version: $Version"
 
 # ── Download binary ──────────────────────────────────────────
 
-$assetName = "openconclave-$platform.exe"
+$assetName = "oc-$platform.exe"
 $downloadUrl = "https://github.com/$REPO/releases/download/v$Version/$assetName"
-$binaryPath = "$DOWNLOAD_DIR\openconclave.exe"
+$binaryPath = "$DOWNLOAD_DIR\oc.exe"
 
 Write-Output "  Downloading $assetName..."
 try {

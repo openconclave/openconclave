@@ -7,23 +7,23 @@ cd C:\Users\beine\source\repos\openconclave
 bun run build:release
 ```
 
-Output: `dist/windows-x64/openconclave.exe` (single file, ~113 MB, includes server + UI + MCP)
+Output: `dist/windows-x64/oc.exe` (single file, ~113 MB, includes server + UI + MCP)
 
 ## 2. Install
 
 ```powershell
-.\dist\windows-x64\openconclave.exe install
+.\dist\windows-x64\oc.exe install
 ```
 
 This does:
-- Copies binary to `~/.openconclave/bin/openconclave.exe`
+- Copies binary to `~/.openconclave/bin/oc.exe`
 - Adds `~/.openconclave/bin` to your PATH
 - **Restart your terminal** after this step
 
 ## 3. Start the server
 
 ```powershell
-openconclave
+oc
 ```
 
 Open http://localhost:4000 in your browser. That's the full app (API + UI).
@@ -58,17 +58,17 @@ This enables real-time `prompt:question` and `channel:output` events from workfl
 ## Subcommands
 
 ```
-openconclave              # Start server (API + UI on :4000)
-openconclave install      # Install binary + PATH
-openconclave mcp          # MCP server (Claude Code spawns this via plugin)
-openconclave channel      # Channel bridge (Claude Code spawns this via plugin)
+oc              # Start server (API + UI on :4000)
+oc install      # Install binary + PATH
+oc mcp          # MCP server (Claude Code spawns this via plugin)
+oc channel      # Channel bridge (Claude Code spawns this via plugin)
 ```
 
 ## File locations
 
 | What | Where |
 |------|-------|
-| Binary | `~/.openconclave/bin/openconclave.exe` |
+| Binary | `~/.openconclave/bin/oc.exe` |
 | Database | `~/.openconclave/openconclave.db` (auto-created) |
 | Plugins cache | `~/.claude/plugins/cache/openconclave/` |
 | Plugin marketplace | `.claude-plugin/marketplace.json` in the repo |

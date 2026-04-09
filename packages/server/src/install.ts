@@ -15,7 +15,7 @@ const HOME = homedir();
 const INSTALL_DIR = join(HOME, ".openconclave");
 const BIN_DIR = join(INSTALL_DIR, "bin");
 const isWindows = process.platform === "win32";
-const EXE = isWindows ? "openconclave.exe" : "openconclave";
+const EXE = isWindows ? "oc.exe" : "oc";
 const BINARY_PATH = join(BIN_DIR, EXE);
 
 function log(msg: string) {
@@ -125,7 +125,7 @@ export async function runInstall() {
   console.log(`
   ${a}◆${r}  Installed!
 
-  ${d}Run:${r}   openconclave
+  ${d}Run:${r}   oc
   ${d}Open:${r}  ${a}http://localhost:4000${r}
 `);
 

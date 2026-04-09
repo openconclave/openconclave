@@ -45,9 +45,9 @@ echo "  Version: $VERSION"
 
 # ── Download binary ──────────────────────────────────────────
 
-ASSET_NAME="openconclave-${PLATFORM}"
+ASSET_NAME="oc-${PLATFORM}"
 DOWNLOAD_URL="https://github.com/$REPO/releases/download/v${VERSION}/${ASSET_NAME}"
-BINARY_PATH="$DOWNLOAD_DIR/openconclave"
+BINARY_PATH="$DOWNLOAD_DIR/oc"
 
 echo "  Downloading $ASSET_NAME..."
 curl -fsSL "$DOWNLOAD_URL" -o "$BINARY_PATH"

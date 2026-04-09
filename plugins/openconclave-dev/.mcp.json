@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "openconclave-dev": {
-      "command": "openconclave",
+      "command": "oc",
       "args": ["mcp"]
     }
   }
