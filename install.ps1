@@ -27,7 +27,15 @@ New-Item -ItemType Directory -Force -Path $DOWNLOAD_DIR | Out-Null
 if ($Version -eq "latest") {
     Write-Output "  Fetching latest release..."
     try {
-        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$REPO/releases/latest" -ErrorAction Stop
+        # Try stable release first, fall back to pre-release
+        try {
+            $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$REPO/releases/latest" -ErrorAction Stop
+        }
+        catch {
+            $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/$REPO/releases?per_page=1" -ErrorAction Stop
+            if ($releases.Count -eq 0) { throw "No releases found" }
+            $release = $releases[0]
+        }
         $Version = $release.tag_name -replace '^v', ''
     }
     catch {
