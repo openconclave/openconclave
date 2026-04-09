@@ -1,5 +1,5 @@
 import { useWorkflowStore } from "@/stores/workflow-store";
-import { X, Trash2 } from "lucide-react";
+import { X, Trash2, Sparkles } from "lucide-react";
 import type {
   WorkflowNodeData,
   AgentConfig,
@@ -10,7 +10,7 @@ import type {
   OutputConfig,
   DiscussionConfig,
 } from "@openconclave/shared";
-import { Field, INPUT_CLASS } from "./inspector/shared";
+import { Field, INPUT_CLASS, AutoTextarea } from "./inspector/shared";
 import { TriggerFields } from "./inspector/trigger-fields";
 import { AgentFields } from "./inspector/agent-fields";
 import { ConditionFields } from "./inspector/condition-fields";
@@ -18,6 +18,69 @@ import { CodeFields } from "./inspector/code-fields";
 import { OutputFields, PromptFields } from "./inspector/output-fields";
 import { FileFields } from "./inspector/file-fields";
 import { DiscussionFields } from "./inspector/discussion-fields";
+
+// ── Workflow-level settings (shown when no node selected) ────
+
+function WorkflowSettings() {
+  const workflowName = useWorkflowStore((s) => s.workflowName);
+  const workflowDescription = useWorkflowStore((s) => s.workflowDescription);
+  const setWorkflowMeta = useWorkflowStore((s) => s.setWorkflowMeta);
+  const toolName = useWorkflowStore((s) => s.toolName);
+
+  return (
+    <div className="w-72 border-l border-border bg-card overflow-y-auto">
+      <div className="flex items-center gap-2 border-b border-border px-4 py-3">
+        <h3 className="text-sm font-semibold">Workflow Settings</h3>
+      </div>
+
+      <div className="space-y-4 p-4">
+        <Field label="Name">
+          <input
+            type="text"
+            value={workflowName}
+            onChange={(e) => setWorkflowMeta(e.target.value, workflowDescription)}
+            className={INPUT_CLASS}
+            placeholder="Workflow name..."
+          />
+        </Field>
+
+        <div>
+          <label className="mb-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Sparkles className="h-3 w-3 text-primary" />
+            Instructions for Claude
+          </label>
+          <AutoTextarea
+            value={workflowDescription}
+            onChange={(e) => setWorkflowMeta(workflowName, e.target.value)}
+            minRows={6}
+            label="Instructions for Claude"
+            className={INPUT_CLASS}
+            placeholder="Describe the workflow's purpose, context, and any rules Claude should follow when executing this workflow..."
+          />
+        </div>
+
+        {toolName && (
+          <Field label="Tool Name">
+            <input
+              type="text"
+              value={toolName}
+              onChange={(e) => useWorkflowStore.setState({ toolName: e.target.value || undefined, isDirty: true })}
+              className={`${INPUT_CLASS} font-mono text-xs`}
+              placeholder="my_workflow_tool"
+            />
+          </Field>
+        )}
+
+        <p className="text-[10px] text-muted-foreground leading-snug px-1">
+          Instructions help Claude understand the workflow's purpose and constraints.
+          Be specific about the expected behavior, tone, and any rules to follow.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ── Node inspector ───────────────────────────────────────────
 
 export function NodeInspector() {
   const nodes = useWorkflowStore((s) => s.nodes);
@@ -27,7 +90,7 @@ export function NodeInspector() {
   const removeNode = useWorkflowStore((s) => s.removeNode);
 
   const selectedNode = nodes.find((n) => n.id === selectedNodeId);
-  if (!selectedNode) return null;
+  if (!selectedNode) return <WorkflowSettings />;
 
   const data = selectedNode.data as WorkflowNodeData;
 
