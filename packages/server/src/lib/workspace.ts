@@ -1,11 +1,24 @@
 import { mkdirSync } from "fs";
-import { join } from "path";
+import { join, dirname } from "path";
+import { homedir } from "os";
 
 /**
- * All OpenConclave data lives under .openconclave/ in the project root.
- * This keeps the project directory clean and consolidates data in one place.
+ * All OpenConclave data lives under .openconclave/.
+ *
+ * When running from ~/.openconclave/bin/ (installed), data goes in ~/.openconclave/.
+ * Otherwise (dev mode), data goes in <cwd>/.openconclave/.
  */
-export const WORKSPACE = join(process.cwd(), ".openconclave");
+function resolveWorkspace(): string {
+  const homeOc = join(homedir(), ".openconclave");
+  const execDir = dirname(process.execPath);
+  // If the binary lives inside ~/.openconclave/bin/, use ~/.openconclave/ for data
+  if (execDir === join(homeOc, "bin")) {
+    return homeOc;
+  }
+  return join(process.cwd(), ".openconclave");
+}
+
+export const WORKSPACE = resolveWorkspace();
 export const OUTPUTS_DIR = join(WORKSPACE, "outputs");
 export const SESSIONS_DIR = join(WORKSPACE, "sessions");
 export const TMP_DIR = join(WORKSPACE, "tmp");

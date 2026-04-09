@@ -1,140 +1,71 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 echo ""
-echo "  ╔═══════════════════════════════════════╗"
-echo "  ║      OpenConclave Installer           ║"
-echo "  ║  AI Agent Orchestration Platform      ║"
-echo "  ╚═══════════════════════════════════════╝"
+echo "  ◆  O P E N C O N C L A V E  Installer"
 echo ""
 
-INSTALL_DIR="${OPENCONCLAVE_DIR:-$HOME/.openconclave-app}"
-REPO="https://github.com/openconclave/openconclave.git"
+REPO="openconclave/openconclave"
+VERSION="${1:-latest}"
 
-# ── Check prerequisites ──────────────────────────────────────
+# ── Detect OS and architecture ───────────────────────────────
 
-if ! command -v git &> /dev/null; then
-  echo "  [!] Git is required. Install from https://git-scm.com"
-  exit 1
-fi
+OS=$(uname -s)
+ARCH=$(uname -m)
 
-if ! command -v bun &> /dev/null; then
-  echo "  >> Installing Bun..."
-  curl -fsSL https://bun.sh/install | bash
-  export BUN_INSTALL="$HOME/.bun"
-  export PATH="$BUN_INSTALL/bin:$PATH"
-fi
+case "$OS" in
+  Darwin) PLATFORM_OS="darwin" ;;
+  Linux)  PLATFORM_OS="linux" ;;
+  *)      echo "  Unsupported OS: $OS"; exit 1 ;;
+esac
 
-echo "  >> Bun $(bun --version) found"
+case "$ARCH" in
+  arm64|aarch64) PLATFORM_ARCH="arm64" ;;
+  x86_64)        PLATFORM_ARCH="x64" ;;
+  *)             echo "  Unsupported architecture: $ARCH"; exit 1 ;;
+esac
 
-# ── Clone or update ──────────────────────────────────────────
+PLATFORM="${PLATFORM_OS}-${PLATFORM_ARCH}"
 
-if [ -d "$INSTALL_DIR/.git" ]; then
-  echo "  >> Updating existing installation..."
-  cd "$INSTALL_DIR"
-  git fetch --quiet origin
-  git reset --hard origin/master --quiet
-else
-  if [ -d "$INSTALL_DIR" ]; then
-    echo "  >> Removing old installation..."
-    rm -rf "$INSTALL_DIR"
+# ── Resolve version ──────────────────────────────────────────
+
+DOWNLOAD_DIR="$HOME/.openconclave/downloads"
+mkdir -p "$DOWNLOAD_DIR"
+
+if [ "$VERSION" = "latest" ]; then
+  echo "  Fetching latest release..."
+  VERSION=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name"' | sed 's/.*"v\(.*\)".*/\1/')
+  if [ -z "$VERSION" ]; then
+    echo "  Failed to fetch latest version"
+    exit 1
   fi
-  echo "  >> Cloning OpenConclave..."
-  git clone --depth 1 "$REPO" "$INSTALL_DIR"
-  cd "$INSTALL_DIR"
 fi
 
-# ── Install dependencies ─────────────────────────────────────
+echo "  Version: $VERSION"
 
-echo "  >> Installing dependencies..."
-cd "$INSTALL_DIR"
-bun install --silent
+# ── Download binary ──────────────────────────────────────────
 
-# ── Create start command ─────────────────────────────────────
+ASSET_NAME="openconclave-${PLATFORM}"
+DOWNLOAD_URL="https://github.com/$REPO/releases/download/v${VERSION}/${ASSET_NAME}"
+BINARY_PATH="$DOWNLOAD_DIR/openconclave"
 
-mkdir -p "$HOME/.local/bin"
-cat > "$HOME/.local/bin/openconclave" << SCRIPT
-#!/bin/bash
-cd "$INSTALL_DIR"
-exec bun start "\$@"
-SCRIPT
-chmod +x "$HOME/.local/bin/openconclave"
+echo "  Downloading $ASSET_NAME..."
+curl -fsSL "$DOWNLOAD_URL" -o "$BINARY_PATH"
+chmod +x "$BINARY_PATH"
 
-# Add to PATH if needed
-if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
-  SHELL_RC="$HOME/.bashrc"
-  [ -f "$HOME/.zshrc" ] && SHELL_RC="$HOME/.zshrc"
-  echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$SHELL_RC"
-  export PATH="$HOME/.local/bin:$PATH"
-  echo "  >> Added ~/.local/bin to PATH (restart shell to apply)"
+# macOS: remove quarantine attribute
+if [ "$PLATFORM_OS" = "darwin" ]; then
+  xattr -cr "$BINARY_PATH" 2>/dev/null || true
 fi
 
-# ── Configure Claude Code MCP ────────────────────────────────
+# ── Run installer ────────────────────────────────────────────
 
-CLAUDE_CONFIGURED=false
-if command -v claude &> /dev/null; then
-  echo "  >> Configuring Claude Code integration..."
+echo "  Running installer..."
+"$BINARY_PATH" install
 
-  CLAUDE_DIR="$HOME/.claude"
-  mkdir -p "$CLAUDE_DIR"
-  MCP_CONFIG="$CLAUDE_DIR/.mcp.json"
-
-  if [ -f "$MCP_CONFIG" ]; then
-    # Merge into existing config
-    bun -e "
-      const fs = require('fs');
-      const config = JSON.parse(fs.readFileSync('$MCP_CONFIG', 'utf8'));
-      config.mcpServers = config.mcpServers || {};
-      config.mcpServers['openconclave'] = {
-        command: 'bun',
-        args: ['run', '$INSTALL_DIR/packages/server/src/mcp/server.ts'],
-        cwd: '$INSTALL_DIR'
-      };
-      config.mcpServers['openconclave-channel'] = {
-        command: 'bun',
-        args: ['run', '$INSTALL_DIR/packages/server/src/channel/openconclave-channel.ts'],
-        cwd: '$INSTALL_DIR'
-      };
-      fs.writeFileSync('$MCP_CONFIG', JSON.stringify(config, null, 2));
-    "
-  else
-    cat > "$MCP_CONFIG" << MCPEOF
-{
-  "mcpServers": {
-    "openconclave": {
-      "command": "bun",
-      "args": ["run", "$INSTALL_DIR/packages/server/src/mcp/server.ts"],
-      "cwd": "$INSTALL_DIR"
-    },
-    "openconclave-channel": {
-      "command": "bun",
-      "args": ["run", "$INSTALL_DIR/packages/server/src/channel/openconclave-channel.ts"],
-      "cwd": "$INSTALL_DIR"
-    }
-  }
-}
-MCPEOF
-  fi
-  CLAUDE_CONFIGURED=true
-fi
-
-# ── Done ─────────────────────────────────────────────────────
+# Cleanup
+rm -f "$BINARY_PATH"
 
 echo ""
-echo "  ╔═══════════════════════════════════════╗"
-echo "  ║      ✅ OpenConclave installed!       ║"
-echo "  ╚═══════════════════════════════════════╝"
-echo ""
-echo "  Start:     openconclave"
-echo "  Or:        cd $INSTALL_DIR && bun start"
-echo ""
-echo "  UI:        http://localhost:5173"
-echo "  API:       http://localhost:4000"
-echo ""
-if [ "$CLAUDE_CONFIGURED" = true ]; then
-echo "  Claude Code MCP: configured in ~/.claude/.mcp.json"
-echo "  With channel:    claude --dangerously-load-development-channels server:openconclave-channel"
-else
-echo "  Claude Code: not found. Install it, then re-run this script."
-fi
+echo "  Installation complete!"
 echo ""

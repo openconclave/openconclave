@@ -8,6 +8,8 @@
     "dev:client": "bun run --filter client dev",
     "start": "bun run start.ts",
     "build": "bun run --filter '*' build",
+    "build:release": "bun run scripts/build-release.ts",
+    "build:release:all": "bun run scripts/build-release.ts --all",
     "test": "vitest run",
     "test:watch": "vitest"
   },

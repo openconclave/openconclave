@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "openconclave-run": {
+      "command": "openconclave",
+      "args": ["mcp"]
+    }
+  }
+}

@@ -1,9 +1,13 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { serveStatic } from "hono/bun";
 import { eq, and, inArray } from "drizzle-orm";
+import { existsSync } from "fs";
+import { join, dirname } from "path";
 
 import { logger } from "./lib/logger";
 import { errorHandler } from "./lib/errors";
+import { getAsset, hasEmbeddedAssets } from "./embedded-assets";
 import { db } from "./db/client";
 import { runMigrations } from "./db/migrate";
 import { recoverStaleRuns } from "./engine/recovery";
@@ -327,5 +331,58 @@ app.post("/api/telegram/restart", async (c) => {
   return c.json({ ok: true });
 });
 
+// ── Static Files (production/compiled mode) ─────────────────
+// Must be registered AFTER all API routes so the catch-all doesn't shadow them.
+// Supports two modes: embedded assets (single binary) or external public/ folder.
+const publicDir = join(dirname(process.execPath), "public");
+if (hasEmbeddedAssets) {
+  logger.debug("Serving embedded client assets");
+  app.get("*", (c) => {
+    const path = c.req.path;
+    if (path.startsWith("/api") || path.startsWith("/mcp") || path.startsWith("/ws")) {
+      return c.notFound();
+    }
+    const asset = getAsset(path) ?? getAsset("/index.html");
+    if (!asset) return c.notFound();
+    return c.body(asset.body, { headers: { "Content-Type": asset.type } });
+  });
+} else if (existsSync(publicDir)) {
+  logger.debug(`Serving static files from ${publicDir}`);
+  app.use("*", serveStatic({ root: publicDir, rewriteRequestPath: (p) => p }));
+  app.get("*", (c) => {
+    const path = c.req.path;
+    if (path.startsWith("/api") || path.startsWith("/mcp") || path.startsWith("/ws")) {
+      return c.notFound();
+    }
+    return c.body(Bun.file(join(publicDir, "index.html")).stream(), {
+      headers: { "Content-Type": "text/html; charset=utf-8" },
+    });
+  });
+}
+
+// ── Graceful Shutdown ────────────────────────────────────────
+let shuttingDown = false;
+function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  logger.info("Shutting down...");
+  scheduler.stop();
+  telegramTrigger?.stop();
+  server.stop();
+  logger.info("Shutdown complete");
+  process.exit(0);
+}
+
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
+
 // ── Ready ────────────────────────────────────────────────────
-logger.info(`OpenConclave server running at http://localhost:${port}`);
+const a = "\x1b[38;5;214m";
+const r = "\x1b[0m";
+const d = "\x1b[2m";
+
+console.log(`
+  ${a}◆${r}  O P E N C O N C L A V E  ${d}v0.1.0${r}
+
+  ${d}Open:${r}  ${a}http://localhost:${port}${r}
+`);

@@ -1,3 +1,4 @@
+import { logger } from "../lib/logger";
 import { db } from "../db/client";
 import { workflows } from "../db/schema";
 import { eq } from "drizzle-orm";
@@ -80,7 +81,7 @@ export class CronScheduler {
   }
 
   async start() {
-    console.log("⏰ Cron scheduler started");
+    logger.debug("Cron scheduler started");
     await this.sync();
 
     // Check for due jobs every N seconds
@@ -95,7 +96,7 @@ export class CronScheduler {
       clearInterval(this.timer);
       this.timer = null;
     }
-    console.log("⏰ Cron scheduler stopped");
+    logger.debug("Cron scheduler stopped");
   }
 
   async sync() {

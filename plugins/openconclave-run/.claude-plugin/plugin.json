@@ -1,0 +1,8 @@
+{
+  "name": "openconclave-run",
+  "description": "Run OpenConclave workflows — each enabled workflow appears as a callable tool.",
+  "version": "1.0.0",
+  "author": {
+    "name": "OpenConclave"
+  }
+}

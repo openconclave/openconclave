@@ -1,0 +1,8 @@
+{
+  "name": "openconclave-dev",
+  "description": "OpenConclave workflow development — create, edit, and manage workflows, nodes, and connections.",
+  "version": "1.0.0",
+  "author": {
+    "name": "OpenConclave"
+  }
+}

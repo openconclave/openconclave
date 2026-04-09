@@ -1,3 +1,4 @@
+import { logger } from "../lib/logger";
 import { db } from "../db/client";
 import { workflows, settings, runEvents } from "../db/schema";
 import { eq } from "drizzle-orm";
@@ -36,11 +37,11 @@ export class TelegramTrigger {
   async start() {
     const token = await getBotToken();
     if (!token) {
-      console.log("⚡ Telegram trigger disabled (set token in Settings)");
+      logger.debug("Telegram trigger disabled (no token)");
       return;
     }
 
-    console.log("⚡ Telegram trigger started");
+    logger.debug("Telegram trigger started");
     this.running = true;
     this.poll();
   }

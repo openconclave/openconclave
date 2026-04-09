@@ -25,8 +25,12 @@ function formatLog(entry: LogEntry): string {
   return `${color}[${level.toUpperCase()}]${RESET} ${timestamp} ${msg}${extraStr}`;
 }
 
+const LOG_LEVELS: Record<LogLevel, number> = { debug: 0, info: 1, warn: 2, error: 3 };
+const MIN_LEVEL: LogLevel = (process.env.LOG_LEVEL as LogLevel) ?? "info";
+
 function createLogFn(level: LogLevel) {
   return (msg: string, extra?: Record<string, unknown>) => {
+    if (LOG_LEVELS[level] < LOG_LEVELS[MIN_LEVEL]) return;
     const entry: LogEntry = {
       level,
       msg,

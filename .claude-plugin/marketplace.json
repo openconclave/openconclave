@@ -1,0 +1,24 @@
+{
+  "name": "openconclave",
+  "version": "1.2.0",
+  "owner": {
+    "name": "OpenConclave"
+  },
+  "plugins": [
+    {
+      "name": "openconclave-channel",
+      "source": "./plugins/openconclave-channel/",
+      "description": "OpenConclave channel — delivers workflow events and prompt questions to Claude Code sessions."
+    },
+    {
+      "name": "openconclave-dev",
+      "source": "./plugins/openconclave-dev/",
+      "description": "OpenConclave workflow development — create, edit, and manage workflows, nodes, and connections."
+    },
+    {
+      "name": "openconclave-run",
+      "source": "./plugins/openconclave-run/",
+      "description": "Run OpenConclave workflows — each enabled workflow appears as a callable tool."
+    }
+  ]
+}

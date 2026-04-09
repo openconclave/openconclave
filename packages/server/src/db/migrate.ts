@@ -7,7 +7,7 @@ import { logger } from "../lib/logger";
  * Safe to call multiple times — uses IF NOT EXISTS.
  */
 export function runMigrations(): void {
-  logger.info("Running database migrations");
+  logger.debug("Running database migrations");
 
   db.run(sql`CREATE TABLE IF NOT EXISTS workflows (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -133,5 +133,5 @@ export function runMigrations(): void {
   db.run(sql`CREATE INDEX IF NOT EXISTS idx_chunks_kb_id ON chunks(knowledge_base_id)`);
   db.run(sql`CREATE INDEX IF NOT EXISTS idx_checkpoints_run_id ON checkpoints(run_id)`);
 
-  logger.info("Database migrations complete");
+  logger.debug("Database migrations complete");
 }
