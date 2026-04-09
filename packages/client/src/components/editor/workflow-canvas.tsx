@@ -408,17 +408,19 @@ export function WorkflowCanvas() {
       const raw = e.dataTransfer.getData("application/openconclave-node");
       if (!raw) return;
 
-      const { type, label, config } = JSON.parse(raw) as {
+      const { type, label, config, offsetX = 0, offsetY = 0 } = JSON.parse(raw) as {
         type: NodeType;
         label: string;
         config: unknown;
+        offsetX?: number;
+        offsetY?: number;
       };
 
       if (!reactFlowInstance.current) return;
 
       const position = reactFlowInstance.current.screenToFlowPosition({
-        x: e.clientX,
-        y: e.clientY,
+        x: e.clientX - offsetX,
+        y: e.clientY - offsetY,
       });
 
       // Snap to grid
