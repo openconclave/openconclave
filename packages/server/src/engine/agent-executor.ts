@@ -227,7 +227,9 @@ export async function executeAgent(
   let result: AgentResult;
   let routedTo: string | null = null;
   let retrySessionId = sessionId; // Track session across retries so the agent can resume
+  let taskCompleted = false;
 
+  try {
   for (let attempt = 0; attempt <= MAX_ROUTE_RETRIES; attempt++) {
     if (engine === "debug") {
       // Resolve tools via AgentBase so debug output shows actual tool definitions
@@ -375,6 +377,8 @@ export async function executeAgent(
     })
     .where(eq(agentTasks.id, taskId));
 
+  taskCompleted = true;
+
   // Emit thinking blocks as separate events for observability
   if (result!.thinking && result!.thinking.length > 0) {
     emit({
@@ -401,4 +405,22 @@ export async function executeAgent(
     thinking: result!.thinking,
     sessionId: result!.sessionId,
   };
+  } finally {
+    if (!taskCompleted) {
+      await db
+        .update(agentTasks)
+        .set({
+          status: "failure",
+          error: "Agent execution failed unexpectedly",
+          completedAt: new Date().toISOString(),
+        })
+        .where(eq(agentTasks.id, taskId));
+      emit({
+        type: "agent:completed",
+        runId,
+        nodeId,
+        data: { taskId, success: false, durationMs: 0 },
+      });
+    }
+  }
 }
