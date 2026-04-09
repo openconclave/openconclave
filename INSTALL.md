@@ -33,7 +33,7 @@ Open http://localhost:4000 in your browser. That's the full app (API + UI).
 In Claude Code, run these commands:
 
 ```
-/plugin marketplace add openconclave/oc
+/plugin marketplace add openconclave/claude-plugin
 /plugin install openconclave-channel@openconclave
 /plugin install openconclave-dev@openconclave
 ```

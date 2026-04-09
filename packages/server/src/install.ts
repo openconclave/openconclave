@@ -97,7 +97,7 @@ function showPluginInstructions() {
   const d = "\x1b[2m";
 
   log(`${d}Claude Code plugins:${r}`);
-  log(`  ${d}1.${r} /plugin marketplace add ${a}openconclave/oc${r}`);
+  log(`  ${d}1.${r} /plugin marketplace add ${a}openconclave/claude-plugin${r}`);
   log(`  ${d}2.${r} /plugin install ${a}openconclave-channel@openconclave${r}`);
   log(`  ${d}3.${r} /plugin install ${a}openconclave-dev@openconclave${r}`);
 }
