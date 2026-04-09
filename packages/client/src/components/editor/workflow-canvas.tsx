@@ -358,6 +358,20 @@ export function WorkflowCanvas() {
         e.preventDefault();
         redo();
       }
+
+      // Cmd+=/- → canvas zoom; Cmd+0 → fitView (intercept browser zoom)
+      if ((e.metaKey || e.ctrlKey) && (e.key === "=" || e.key === "+")) {
+        e.preventDefault();
+        reactFlowInstance.current?.zoomIn();
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === "-") {
+        e.preventDefault();
+        reactFlowInstance.current?.zoomOut();
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === "0") {
+        e.preventDefault();
+        reactFlowInstance.current?.fitView({ padding: 0.2 });
+      }
     };
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.code === "Space") setSpaceHeld(false);
