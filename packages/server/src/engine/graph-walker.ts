@@ -14,6 +14,9 @@ import { Workspace } from "./workspace";
 
 // Persistent session store for chat workflows — in-memory cache keyed by runId:nodeId.
 // Falls back to DB checkpoint on miss (survives server restarts).
+// Capped at MAX_PERSISTENT_SESSIONS entries; oldest entry is evicted when the limit is
+// reached to prevent unbounded memory growth on long-running servers.
+const MAX_PERSISTENT_SESSIONS = 256;
 const persistentSessions = new Map<string, string>();
 
 export function getPersistentSession(runId: number, nodeId: string): string | undefined {
@@ -21,6 +24,11 @@ export function getPersistentSession(runId: number, nodeId: string): string | un
 }
 
 export function setPersistentSession(runId: number, nodeId: string, sessionId: string): void {
+  if (persistentSessions.size >= MAX_PERSISTENT_SESSIONS) {
+    // Map preserves insertion order — delete the oldest entry first (FIFO eviction).
+    const oldestKey = persistentSessions.keys().next().value;
+    if (oldestKey !== undefined) persistentSessions.delete(oldestKey);
+  }
   persistentSessions.set(`${runId}:${nodeId}`, sessionId);
 }
 
@@ -253,6 +261,19 @@ export async function executeGraph(
         break;
       }
 
+      // Pre-compute skip decisions synchronously before launching the async batch.
+      // Doing the delete here (single-threaded) prevents a race where the same node ID
+      // appears twice in `ready` (e.g. two parallel parents were both skipped and both
+      // route to the same child): the first async callback would delete the node from
+      // resumeSkipNodes, causing the second callback to fall through and execute it.
+      const skipDecisions = new Set<string>();
+      for (const entry of ready) {
+        if (resumeSkipNodes.has(entry.nodeId)) {
+          skipDecisions.add(entry.nodeId);
+          resumeSkipNodes.delete(entry.nodeId); // one-time skip; loops re-execute
+        }
+      }
+
       const results = await Promise.all(
         ready.map(async (entry) => {
           const node = nodeMap.get(entry.nodeId);
@@ -262,8 +283,7 @@ export async function executeGraph(
           // Only nodes loaded from the checkpoint are skipped — nodes that completed
           // earlier in THIS run are NOT skipped, allowing condition-driven loops
           // (e.g. reviewer → condition:false → developer) to re-execute correctly.
-          if (resumeSkipNodes.has(entry.nodeId)) {
-            resumeSkipNodes.delete(entry.nodeId); // one-time skip; loops re-execute
+          if (skipDecisions.has(entry.nodeId)) {
             emit({ type: "node:skipped", runId, nodeId: entry.nodeId });
             return resolveNextEntries(
               entry,

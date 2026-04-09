@@ -15,18 +15,31 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { WorkflowDefinition, WorkflowNode, WorkflowEdge } from "@openconclave/shared";
 
-// ── Hoisted mocks ────────────────────────────────────────────
+// ── Mock function references ────────────────────────────────────
 
-const { mockDbSelect, mockDbInsert, mockDbUpdate, mockLoggerError, mockExecuteNode } =
-  vi.hoisted(() => ({
-    mockDbSelect: vi.fn(),
-    mockDbInsert: vi.fn(),
-    mockDbUpdate: vi.fn(),
-    mockLoggerError: vi.fn(),
-    mockExecuteNode: vi.fn(),
-  }));
+const mockDbSelect = vi.fn();
+const mockDbInsert = vi.fn();
+const mockDbUpdate = vi.fn();
+const mockLoggerError = vi.fn();
+const mockExecuteNode = vi.fn();
 
-vi.mock("../db/client", () => ({
+vi.mock("bun:sqlite", () => {
+  class MockDatabase {
+    exec() {}
+    prepare() {}
+    transaction() {}
+    close() {}
+  }
+  return {
+    Database: MockDatabase,
+  };
+});
+
+vi.mock("drizzle-orm/bun-sqlite", () => ({
+  drizzle: vi.fn(),
+}));
+
+vi.mock("../../db/client", () => ({
   db: {
     select: mockDbSelect,
     insert: mockDbInsert,
@@ -34,11 +47,18 @@ vi.mock("../db/client", () => ({
   },
 }));
 
-vi.mock("./node-executor", () => ({
+vi.mock("../../db/schema", () => ({
+  runs: {},
+  checkpoints: {},
+}));
+
+// Paths below are relative to THIS test file (inside __tests__/), so they need
+// "../" to reach the engine/ directory where the actual modules live.
+vi.mock("../node-executor", () => ({
   executeNode: mockExecuteNode,
 }));
 
-vi.mock("../lib/logger", () => ({
+vi.mock("../../lib/logger", () => ({
   logger: {
     error: mockLoggerError,
     warn: vi.fn(),
@@ -47,11 +67,27 @@ vi.mock("../lib/logger", () => ({
   },
 }));
 
+vi.mock("../workspace", () => ({
+  Workspace: {
+    fromTrigger: vi.fn().mockReturnValue({
+      workspace: { cwd: "/tmp" },
+      cleanPayload: null,
+    }),
+  },
+}));
+
 // normalize-workflow uses a deep sub-path import (@openconclave/shared/src/constants)
 // that the Vitest Node resolver cannot find without extra config.  Mock it here so
 // the alias gap doesn't prevent loading graph-walker.ts under test.
-vi.mock("./normalize-workflow", () => ({
+vi.mock("../normalize-workflow", () => ({
   normalizeWorkflowNodeTypes: (wf: unknown) => wf,
+}));
+
+vi.mock("../graph", () => ({
+  getIncomingEdges: (nodeId: string, edges: any[]) =>
+    edges.filter((e) => e.target === nodeId),
+  getOutgoingEdges: (nodeId: string, edges: any[]) =>
+    edges.filter((e) => e.source === nodeId),
 }));
 
 // ── Subject under test ───────────────────────────────────────
