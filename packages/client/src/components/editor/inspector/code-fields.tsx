@@ -5,7 +5,7 @@ import { Sparkles, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { toast } from "@/components/ui/toast";
-import { Field, INPUT_CLASS } from "./shared";
+import { Field, INPUT_CLASS, AutoTextarea } from "./shared";
 
 const CODE_PLACEHOLDERS: Record<string, string> = {
   python:
@@ -104,12 +104,13 @@ export function CodeFields({ nodeId, config, onUpdate }: CodeFieldsProps) {
         </select>
       </Field>
       <Field label="Code">
-        <textarea
+        <AutoTextarea
           value={config.code ?? ""}
           onChange={(e) => update({ code: e.target.value })}
           placeholder={CODE_PLACEHOLDERS[config.runtime ?? "python"]}
-          rows={10}
-          className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs font-mono resize-y leading-relaxed"
+          minRows={10}
+          label="Code"
+          className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs font-mono leading-relaxed"
           spellCheck={false}
         />
       </Field>

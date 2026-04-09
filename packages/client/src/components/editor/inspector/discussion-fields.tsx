@@ -8,7 +8,7 @@ import type {
 import { X } from "lucide-react";
 import { AgentFields } from "./agent-fields";
 import { CodeFields } from "./code-fields";
-import { Field, INPUT_CLASS } from "./shared";
+import { Field, INPUT_CLASS, AutoTextarea } from "./shared";
 
 // ── Main DiscussionFields ─────────────────────────────────────
 
@@ -55,11 +55,12 @@ export function DiscussionFields({ nodeId, config }: DiscussionFieldsProps) {
     <>
       {/* ── Prompt ── */}
       <Field label="Prompt Template">
-        <textarea
+        <AutoTextarea
           value={config.prompt ?? ""}
           onChange={(e) => updateFlat({ prompt: e.target.value })}
-          rows={6}
-          className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs font-mono resize-y leading-relaxed"
+          minRows={6}
+          label="Prompt Template"
+          className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs font-mono leading-relaxed"
           spellCheck={false}
           placeholder="Topic: {{input}}\n\n{{transcript}}\n\nYou are {{agentName}}. Share your perspective."
         />
