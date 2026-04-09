@@ -1,5 +1,5 @@
 import { Header, NewButton } from "@/components/layout/header";
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Position } from "@xyflow/react";
@@ -97,6 +97,64 @@ import { toast } from "@/components/ui/toast";
 
 type ScheduleEntry = { workflowId: string; cron: string; nextRun: string; enabled: boolean };
 type ActiveRun = { id: number; workflowId: number; status: string };
+
+// ── Inline-editable workflow name ─────────────────────────────
+
+function InlineName({ name, onRename }: { name: string; onRename: (name: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const ref = useRef<HTMLHeadingElement>(null);
+
+  const startEditing = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setEditing(true);
+  }, []);
+
+  const commit = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    const trimmed = (el.textContent ?? "").trim();
+    if (trimmed && trimmed !== name) {
+      onRename(trimmed);
+    } else {
+      el.textContent = name;
+    }
+    setEditing(false);
+  }, [name, onRename]);
+
+  useEffect(() => {
+    if (editing && ref.current) {
+      ref.current.focus();
+      const range = document.createRange();
+      range.selectNodeContents(ref.current);
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+    }
+  }, [editing]);
+
+  return (
+    <h3
+      ref={ref}
+      contentEditable={editing}
+      suppressContentEditableWarning
+      onDoubleClick={startEditing}
+      onBlur={commit}
+      onClick={editing ? (e) => { e.preventDefault(); e.stopPropagation(); } : undefined}
+      onKeyDown={editing ? (e) => {
+        if (e.key === "Enter") { e.preventDefault(); commit(); }
+        if (e.key === "Escape") { ref.current!.textContent = name; setEditing(false); }
+        e.stopPropagation();
+      } : undefined}
+      className={cn(
+        "font-semibold truncate outline-none",
+        editing && "truncate-none shadow-[0_0_0_1px_oklch(0.68_0.12_70/0.4)] rounded px-1 -mx-1"
+      )}
+    >
+      {name}
+    </h3>
+  );
+}
 
 type SortBy = "name" | "created" | "modified";
 type SortOrder = "asc" | "desc";
@@ -339,7 +397,12 @@ export function WorkflowsPage() {
 
                   {/* Content */}
                   <div className="p-4 flex-1">
-                    <h3 className="font-semibold truncate">{wf.name}</h3>
+                    <InlineName
+                      name={wf.name}
+                      onRename={(newName) => {
+                        api.put(`/workflows/${wf.id}`, { name: newName }).then(() => load());
+                      }}
+                    />
                     {wf.description && (
                       <p className="mt-1 text-sm text-muted-foreground line-clamp-2">
                         {wf.description}
