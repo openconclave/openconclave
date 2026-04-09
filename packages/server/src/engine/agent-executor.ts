@@ -72,18 +72,44 @@ export async function executeAgent(
     execute: (args: Record<string, unknown>) => Promise<string>;
   }> = [];
   const promptToolNodeIds = new Set<string>();
+  let firstPromptConfig: { nodeId: string; runId: number; senderNode: string; description?: string } | undefined;
 
   if (edges && nodeMap) {
+    // Check outgoing edges (Agent→Prompt) AND incoming edges (Prompt→Agent)
+    // Both directions indicate a bidirectional Channel Loop connection
     const outEdges = getOutgoingEdges(nodeId, edges);
+    const promptConnections: { promptNodeId: string; promptNode: typeof nodeMap extends Map<string, infer V> ? V : never }[] = [];
+
     for (const e of outEdges) {
       const target = nodeMap.get(e.target);
       if (target?.data.type === "prompt") {
-          promptToolNodeIds.add(e.target);
-          const targetConfig = target.data.config as Record<string, unknown> | undefined;
+        promptConnections.push({ promptNodeId: e.target, promptNode: target });
+      }
+    }
+    // Also check incoming edges from prompt nodes (Prompt→Agent)
+    for (const e of edges) {
+      if (e.target === nodeId) {
+        const source = nodeMap.get(e.source);
+        if (source?.data.type === "prompt" && !promptConnections.some(p => p.promptNodeId === e.source)) {
+          promptConnections.push({ promptNodeId: e.source, promptNode: source });
+        }
+      }
+    }
+
+    if (promptConnections.length > 0) {
+      logger.info(`[ask_user] Agent ${nodeId} has ${promptConnections.length} prompt connection(s): ${promptConnections.map(p => p.promptNodeId).join(", ")}`);
+    }
+    for (const { promptNodeId, promptNode } of promptConnections) {
+          promptToolNodeIds.add(promptNodeId);
+          const targetConfig = promptNode.data.config as Record<string, unknown> | undefined;
           const agentLabel = nodeMap.get(nodeId)?.data.label ?? nodeId;
-          const promptNodeId = e.target;
-          const promptLabel = target.data.label;
+          const promptLabel = promptNode.data.label;
           const promptDescription = (targetConfig?.description as string) ?? undefined;
+
+          // Save first prompt config for Claude agents (MCP-based ask_user)
+          if (!firstPromptConfig) {
+            firstPromptConfig = { nodeId: promptNodeId, runId, senderNode: agentLabel, description: promptDescription };
+          }
 
           askUserExtraTools.push({
             tool: {
@@ -118,7 +144,6 @@ export async function executeAgent(
               return registerPrompt(runId, promptNodeId, question, null);
             },
           });
-      }
     }
   }
 
@@ -305,6 +330,7 @@ export async function executeAgent(
         input: retryInput,
         workspace,
         routeTargets,
+        promptConfig: firstPromptConfig,
         sessionId: retrySessionId,
         onOutput: (chunk) => {
           emit({ type: "agent:output", runId, nodeId, data: { taskId, chunk } });

@@ -20,3 +20,5 @@ dist/
 *.png
 !packages/client/public/*.png
 !docs/*.png
+
+.worktrees/

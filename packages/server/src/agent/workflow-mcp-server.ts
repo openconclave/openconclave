@@ -28,6 +28,12 @@ const CONVERSATION_HISTORY = JSON.parse(process.env.OC_CONVERSATION_HISTORY ?? "
 const KNOWLEDGE_BASE_IDS = JSON.parse(process.env.OC_KNOWLEDGE_BASE_IDS ?? "[]") as number[];
 const API_URL = process.env.OC_API_URL ?? "http://localhost:4000";
 
+// Prompt (ask_user) config — passed when agent has a Channel Loop connection
+const PROMPT_NODE_ID = process.env.OC_PROMPT_NODE_ID ?? "";
+const PROMPT_RUN_ID = process.env.OC_PROMPT_RUN_ID ?? "";
+const PROMPT_SENDER = process.env.OC_PROMPT_SENDER ?? "agent";
+const PROMPT_DESCRIPTION = process.env.OC_PROMPT_DESCRIPTION ?? "";
+
 // State that gets written back to the executor
 interface WorkflowState {
   routeTo?: string;
@@ -74,6 +80,36 @@ if (ROUTE_TARGETS.length >= 1) {
       const target = ROUTE_TARGETS.find((t) => t.nodeId === node_id);
       return {
         content: [{ type: "text", text: `Routing to: ${target?.label ?? node_id}` }],
+      };
+    }
+  );
+}
+
+// ── Ask User Tool (Channel Loop) ────────────────────────────
+
+if (PROMPT_NODE_ID && PROMPT_RUN_ID) {
+  server.tool(
+    "ask_user",
+    PROMPT_DESCRIPTION || "Ask the user a question and wait for their response. Use when you need clarification or more information.",
+    {
+      question: z.string().describe("The question to ask the user"),
+    },
+    async ({ question }) => {
+      // Call the blocking /api/prompts/ask endpoint — it registers the prompt,
+      // emits the event, and waits until the user responds.
+      const res = await fetch(`${API_URL}/api/prompts/ask`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          runId: Number(PROMPT_RUN_ID),
+          nodeId: PROMPT_NODE_ID,
+          question,
+          senderNode: PROMPT_SENDER,
+        }),
+      });
+      const data = (await res.json()) as { response?: string; error?: string };
+      return {
+        content: [{ type: "text", text: data.response ?? data.error ?? "No response received" }],
       };
     }
   );

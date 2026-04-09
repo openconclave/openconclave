@@ -31,6 +31,7 @@ export interface RouteTarget {
 export type AgentRunOptions = {
   config: ResolvedAgentConfig;
   routeTargets?: RouteTarget[];
+  promptConfig?: { nodeId: string; runId: number; senderNode: string; description?: string };
   sessionId?: string;
   input?: unknown;
   workspace?: Workspace;
@@ -80,7 +81,8 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
   const routeTargets = options.routeTargets;
   const knowledgeBaseIds = config.knowledgeBases?.map(Number).filter((n) => !isNaN(n)) ?? [];
   let stateFile: string | null = null;
-  const needsWorkflowMcp = (routeTargets && routeTargets.length >= 1) || knowledgeBaseIds.length > 0;
+  const promptConfig = options.promptConfig;
+  const needsWorkflowMcp = (routeTargets && routeTargets.length >= 1) || knowledgeBaseIds.length > 0 || !!promptConfig;
 
   if (needsWorkflowMcp) {
     const tmpDir = TMP_DIR;
@@ -88,13 +90,20 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
     stateFile = join(tmpDir, `state-${Date.now()}.json`);
 
     const workflowMcpPath = resolve(import.meta.dir, "workflow-mcp-server.ts");
+    const apiUrl = process.env.OC_API_URL ?? `http://localhost:${process.env.PORT ?? 4000}`;
     const mcpEnv: Record<string, string> = {
       OC_STATE_FILE: stateFile,
       OC_ROUTE_TARGETS: JSON.stringify(routeTargets ?? []),
+      OC_API_URL: apiUrl,
     };
     if (knowledgeBaseIds.length > 0) {
       mcpEnv.OC_KNOWLEDGE_BASE_IDS = JSON.stringify(knowledgeBaseIds);
-      mcpEnv.OC_API_URL = process.env.OC_API_URL ?? "http://localhost:4000";
+    }
+    if (promptConfig) {
+      mcpEnv.OC_PROMPT_NODE_ID = promptConfig.nodeId;
+      mcpEnv.OC_PROMPT_RUN_ID = String(promptConfig.runId);
+      mcpEnv.OC_PROMPT_SENDER = promptConfig.senderNode;
+      if (promptConfig.description) mcpEnv.OC_PROMPT_DESCRIPTION = promptConfig.description;
     }
     mcpServers["openconclave-workflow"] = {
       command: "bun",

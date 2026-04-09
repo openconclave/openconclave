@@ -8,7 +8,7 @@ import { db } from "./db/client";
 import { runMigrations } from "./db/migrate";
 import { recoverStaleRuns } from "./engine/recovery";
 import { workflows, runs, agentTasks, runEvents, settings } from "./db/schema";
-import { respondToPrompt, getPendingPrompts } from "./engine/prompt-registry";
+import { registerPrompt, respondToPrompt, getPendingPrompts } from "./engine/prompt-registry";
 import { workflowRoutes } from "./routes/workflows";
 import { runRoutes } from "./routes/runs";
 import { agentRoutes } from "./routes/agents";
@@ -385,6 +385,37 @@ app.post("/api/prompts/respond", async (c) => {
   const ok = respondToPrompt(body.runId, body.nodeId, body.response);
   if (!ok) return c.json({ error: "No pending prompt found" }, 404);
   return c.json({ ok: true });
+});
+
+// Blocking ask — used by workflow MCP server (out-of-process) for Claude agents.
+// Registers a prompt, emits the question event, and waits for the response.
+app.post("/api/prompts/ask", async (c) => {
+  const body = (await c.req.json()) as {
+    runId: number;
+    nodeId: string;
+    question: string;
+    senderNode?: string;
+  };
+  const { runId, nodeId, question, senderNode } = body;
+
+  // Emit prompt:question event so channel listeners see it
+  broadcastRunEvent({
+    type: "prompt:question",
+    runId,
+    nodeId,
+    data: {
+      question,
+      waitingForResponse: true,
+      workflowName: "",
+      nodeLabel: nodeId,
+      senderNode: senderNode ?? "agent",
+      senderType: "agent",
+    },
+  });
+
+  // Register and wait for response (blocks until respondToPrompt is called)
+  const response = await registerPrompt(runId, nodeId, question, null);
+  return c.json({ response });
 });
 
 // ── Telegram Trigger API ─────────────────────────────────────
