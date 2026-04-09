@@ -266,7 +266,7 @@ export function DiscussionNode(props: NodeProps) {
           style={{ left: 60, transform: "translate(-50%, 50%)" }}
           className={cn(handleBase, handleCyan)}
         >
-          <span className="absolute top-4 left-1/2 -translate-x-1/2 text-[10px] text-muted-foreground/60 whitespace-nowrap font-medium">
+          <span className="absolute top-4 left-1/2 -translate-x-1/2 text-[10px] text-muted-foreground/60 whitespace-nowrap font-medium bg-background/90 px-1 rounded z-10">
             Full
           </span>
         </Handle>
@@ -277,7 +277,7 @@ export function DiscussionNode(props: NodeProps) {
           style={{ left: 140, transform: "translate(-50%, 50%)" }}
           className={cn(handleBase, handleCyan)}
         >
-          <span className="absolute top-4 left-1/2 -translate-x-1/2 text-[10px] text-muted-foreground/60 whitespace-nowrap font-medium">
+          <span className="absolute top-4 left-1/2 -translate-x-1/2 text-[10px] text-muted-foreground/60 whitespace-nowrap font-medium bg-background/90 px-1 rounded z-10">
             Last
           </span>
         </Handle>
@@ -288,7 +288,7 @@ export function DiscussionNode(props: NodeProps) {
           style={{ left: 220, transform: "translate(-50%, 50%)" }}
           className={cn(handleBase, handleCyan)}
         >
-          <span className="absolute top-4 left-1/2 -translate-x-1/2 text-[10px] text-muted-foreground/60 whitespace-nowrap font-medium">
+          <span className="absolute top-4 left-1/2 -translate-x-1/2 text-[10px] text-muted-foreground/60 whitespace-nowrap font-medium bg-background/90 px-1 rounded z-10">
             Summary
           </span>
         </Handle>
