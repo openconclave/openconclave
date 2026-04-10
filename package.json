@@ -10,12 +10,12 @@
     "build": "bun run --filter '*' build",
     "build:release": "bun run scripts/build-release.ts",
     "build:release:all": "bun run scripts/build-release.ts --all",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "test": "bun test packages/shared packages/server",
+    "test:server": "bun test packages/server",
+    "test:shared": "bun test packages/shared",
+    "test:client": "bun run --filter client test"
   },
-  "devDependencies": {
-    "vitest": "^4.1.2"
-  },
+  "devDependencies": {},
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.88",
     "@dagrejs/dagre": "^3.0.0"
