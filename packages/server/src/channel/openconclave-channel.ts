@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { ListToolsRequestSchema, CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { z } from "zod";
@@ -10,10 +11,11 @@ const OC_WS_URL = process.env.OPENCONCLAVE_WS_URL ?? "ws://localhost:4000";
 
 // ── MCP Server ──────────────────────────────────────────────
 
-const mcp = new McpServer(
+const server = new Server(
   { name: "openconclave", version: "0.1.0" },
   {
     capabilities: {
+      tools: {},
       experimental: { "claude/channel": {} },
     },
     instructions: [
@@ -47,9 +49,48 @@ async function ocApi(path: string, method = "GET", body?: unknown) {
   return res.json();
 }
 
+// ── Tool definitions ────────────────────────────────────────
+
+interface ToolDef {
+  name: string;
+  description: string;
+  schema: Record<string, unknown>;
+  handler: (args: Record<string, unknown>) => Promise<{ content: Array<{ type: string; text: string }> }>;
+}
+
+const tools: Map<string, ToolDef> = new Map();
+
+function zodToSchema(params: Record<string, z.ZodType>): Record<string, unknown> {
+  const properties: Record<string, unknown> = {};
+  const required: string[] = [];
+  for (const [key, val] of Object.entries(params)) {
+    const isOptional = val instanceof z.ZodOptional;
+    const inner = isOptional ? (val as z.ZodOptional<any>)._def.innerType : val;
+    const prop: Record<string, unknown> = {};
+    if (inner instanceof z.ZodString) prop.type = "string";
+    else if (inner instanceof z.ZodNumber) prop.type = "number";
+    else if (inner instanceof z.ZodBoolean) prop.type = "boolean";
+    else if (inner instanceof z.ZodRecord) prop.type = "object";
+    else prop.type = "string";
+    if (inner._def.description) prop.description = inner._def.description;
+    properties[key] = prop;
+    if (!isOptional) required.push(key);
+  }
+  return { type: "object", properties, ...(required.length ? { required } : {}) };
+}
+
+function defineTool(name: string, description: string, params: Record<string, z.ZodType>, handler: (args: Record<string, unknown>) => Promise<{ content: Array<{ type: string; text: string }> }>) {
+  tools.set(name, {
+    name,
+    description,
+    schema: zodToSchema(params),
+    handler,
+  });
+}
+
 // ── Core tools ──────────────────────────────────────────────
 
-mcp.tool(
+defineTool(
   "oc_list_workflows",
   "List all workflows in OpenConclave",
   {},
@@ -64,7 +105,7 @@ mcp.tool(
   }
 );
 
-mcp.tool(
+defineTool(
   "oc_trigger_workflow",
   "Trigger a workflow run. Always pass your current working directory as cwd so agents run in the correct project.",
   {
@@ -73,13 +114,13 @@ mcp.tool(
     cwd: z.string().describe("Your current working directory — agents will run here"),
   },
   async ({ workflow_id, payload, cwd }) => {
-    const enrichedPayload = { ...(payload ?? {}), ...(cwd ? { _callerCwd: cwd } : {}) };
+    const enrichedPayload = { ...((payload as Record<string, unknown>) ?? {}), ...(cwd ? { _callerCwd: cwd } : {}) };
     const data = await ocApi(`/workflows/${workflow_id}/run`, "POST", { payload: enrichedPayload });
     return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
   }
 );
 
-mcp.tool(
+defineTool(
   "oc_get_run",
   "Get details of a specific workflow run including tasks and events",
   { run_id: z.string().describe("The run ID") },
@@ -98,7 +139,7 @@ mcp.tool(
   }
 );
 
-mcp.tool(
+defineTool(
   "oc_list_runs",
   "List recent workflow runs",
   { limit: z.number().optional().describe("Max results (default 10)") },
@@ -114,7 +155,7 @@ mcp.tool(
   }
 );
 
-mcp.tool(
+defineTool(
   "oc_respond",
   "Respond to a pending prompt question from a workflow. Use this to send your response so the workflow can continue.",
   {
@@ -128,7 +169,7 @@ mcp.tool(
   }
 );
 
-mcp.tool(
+defineTool(
   "oc_pending_prompts",
   "List all pending prompt questions waiting for responses",
   {},
@@ -146,8 +187,6 @@ async function syncWorkflowTools() {
   try {
     const data = await ocApi("/workflows") as { workflows: Array<Record<string, unknown>> };
     const seen = new Set<string>();
-
-    // Snapshot the current registered set BEFORE any mutations
     const oldRegistered = new Set(registeredWorkflowTools);
 
     for (const wf of data.workflows) {
@@ -161,7 +200,7 @@ async function syncWorkflowTools() {
         const description = ((def.description ?? wf.description ?? `Run workflow: ${wf.name}`) as string);
         const workflowId = String(wf.id);
 
-        mcp.tool(
+        defineTool(
           toolName,
           `${description}. Always pass your current working directory as cwd so agents run in the correct project.`,
           {
@@ -169,7 +208,7 @@ async function syncWorkflowTools() {
             cwd: z.string().describe("Your current working directory — agents will run here"),
           },
           async ({ input, cwd }) => {
-            const payload = { ...(input ? { input } : {}), ...(cwd ? { _callerCwd: cwd } : {}) };
+            const payload = { ...((input as string) ? { input } : {}), ...(cwd ? { _callerCwd: cwd } : {}) };
             const result = await ocApi(`/workflows/${workflowId}/run`, "POST", { payload });
             return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
           }
@@ -178,17 +217,18 @@ async function syncWorkflowTools() {
       }
     }
 
-    // Remove stale entries for disabled/deleted workflows
     for (const t of registeredWorkflowTools) {
-      if (!seen.has(t)) registeredWorkflowTools.delete(t);
+      if (!seen.has(t)) {
+        registeredWorkflowTools.delete(t);
+        tools.delete(t);
+      }
     }
 
-    // Notify client if tools changed — compare against PRE-MUTATION snapshot
     if (seen.size !== oldRegistered.size ||
         [...seen].some((t) => !oldRegistered.has(t)) ||
         [...oldRegistered].some((t) => !seen.has(t))) {
       try {
-        await mcp.server.sendNotification({ method: "notifications/tools/list_changed" });
+        await server.notification({ method: "notifications/tools/list_changed" });
       } catch { /* client may not support */ }
     }
   } catch (err) {
@@ -196,14 +236,55 @@ async function syncWorkflowTools() {
   }
 }
 
-// Sync before connecting so tools are available on first ListTools call
+// ── MCP request handlers ────────────────────────────────────
+
+server.setRequestHandler(ListToolsRequestSchema, async () => {
+  return {
+    tools: [...tools.values()].map((t) => ({
+      name: t.name,
+      description: t.description,
+      inputSchema: t.schema,
+    })),
+  };
+});
+
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  const { name, arguments: args } = request.params;
+  const tool = tools.get(name);
+  if (!tool) {
+    return { content: [{ type: "text", text: `Unknown tool: ${name}` }], isError: true };
+  }
+  try {
+    return await tool.handler(args ?? {});
+  } catch (err: any) {
+    return { content: [{ type: "text", text: `Error: ${err.message ?? err}` }], isError: true };
+  }
+});
+
+// ── Sync & Connect ──────────────────────────────────────────
+
 await syncWorkflowTools();
 console.error(`[channel] synced ${registeredWorkflowTools.size} workflow tools`);
 
-// ── Connect ─────────────────────────────────────────────────
+// Workaround: Bun compiled binaries on Windows buffer piped stdout.
+// Use writeSync(fd=1) to bypass Node.js stream layer entirely.
+import { writeSync } from "fs";
+
+const originalWrite = process.stdout.write.bind(process.stdout);
+process.stdout.write = function (chunk: any, encoding?: any, callback?: any) {
+  const data = typeof chunk === "string" ? chunk : chunk.toString();
+  try {
+    writeSync(1, data);
+  } catch {
+    return originalWrite(chunk, encoding, callback);
+  }
+  if (typeof encoding === "function") encoding();
+  else if (typeof callback === "function") callback();
+  return true;
+} as any;
 
 const transport = new StdioServerTransport();
-await mcp.connect(transport);
+await server.connect(transport);
 
 // ── WebSocket: subscribe to OpenConclave events ─────────────
 
@@ -212,10 +293,11 @@ function connectWebSocket() {
     const ws = new WebSocket(OC_WS_URL);
 
     ws.onopen = () => {
+      console.error("[channel] WebSocket connected to", OC_WS_URL);
       ws.send(JSON.stringify({ type: "subscribe", topics: ["dashboard"] }));
     };
 
-    ws.onmessage = async (event) => {
+    ws.onmessage = async (event: MessageEvent) => {
       try {
         const data = JSON.parse(event.data.toString());
         const eventType = data.type as string;
@@ -254,7 +336,7 @@ function connectWebSocket() {
             ? fullContent.slice(0, MAX_INLINE) + `\n\n--- truncated (${fullContent.length} chars) ---\nFull output: ${filePath}`
             : fullContent;
 
-          await mcp.server.notification({
+          await server.notification({
             method: "notifications/claude/channel",
             params: { content, meta },
           });
@@ -277,7 +359,7 @@ function connectWebSocket() {
             `  update_node(workflowId: "${d.workflowId}", nodeId: "${d.nodeId}", config: { systemPrompt: "your improved prompt" })`,
           ].join("\n");
 
-          await mcp.server.notification({
+          await server.notification({
             method: "notifications/claude/channel",
             params: {
               content,
@@ -306,7 +388,7 @@ function connectWebSocket() {
             `  update_workflow(workflowId: "${d.workflowId}", description: "your improved instructions")`,
           ].join("\n");
 
-          await mcp.server.notification({
+          await server.notification({
             method: "notifications/claude/channel",
             params: {
               content,
@@ -339,7 +421,7 @@ function connectWebSocket() {
             `  update_node(workflowId: "${d.workflowId}", nodeId: "${d.nodeId}", config: { code: "your code here" })`,
           ].join("\n");
 
-          await mcp.server.notification({
+          await server.notification({
             method: "notifications/claude/channel",
             params: {
               content,
@@ -357,8 +439,13 @@ function connectWebSocket() {
       }
     };
 
-    ws.onclose = () => setTimeout(connectWebSocket, 5000);
-    ws.onerror = () => {};
+    ws.onclose = () => {
+      console.error("[channel] WebSocket closed, reconnecting in 5s...");
+      setTimeout(connectWebSocket, 5000);
+    };
+    ws.onerror = (e: Event) => {
+      console.error("[channel] WebSocket error:", e);
+    };
   } catch {
     setTimeout(connectWebSocket, 5000);
   }
