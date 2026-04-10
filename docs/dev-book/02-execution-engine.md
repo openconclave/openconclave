@@ -37,7 +37,9 @@ The core execution loop. This is the largest non-test file in the engine (~20KB)
 
 **Persistent sessions** — For chat workflows, agent session IDs survive across separate run continuations via `persistentSessions` (module-level Map with FIFO eviction at 256 entries).
 
-**Active workspaces** — `activeWorkspaces: Map<number, Workspace>` tracks each run's workspace, allowing code nodes to update the CWD mid-run (e.g., after creating a git worktree).
+**Active workspaces** — `activeWorkspaces: Map<number, Workspace>` tracks each run's workspace, allowing code nodes to update the CWD mid-run (e.g., after creating a git worktree via `POST /api/runs/:runId/cwd`).
+
+⚠️ **The `activeWorkspaces` map is in-memory and does not survive server restart or graceful shutdown.** When a run is resumed via `POST /api/runs/:id/resume` after an oc restart, the graph walker calls `Workspace.fromTrigger(triggerPayload, triggerCfg?.workingDirectory)` to build a *fresh* workspace with default cwd. Any `setCwd()` call that a code node made during the first execution attempt is **not replayed** — that node is skipped on resume because it's in the checkpoint, so its `POST /api/runs/:runId/cwd` never re-fires. As a result, downstream code nodes and agents run under the workspace's default cwd, not the worktree path the first attempt established. Code nodes and agents that depend on a specific cwd should use absolute paths in their scripts, not relative paths that assume a particular cwd.
 
 ### Node Executor (`node-executor.ts`)
 
@@ -74,6 +76,10 @@ On resume, the latest checkpoint provides:
 - Agent session IDs (restore multi-turn conversations)
 
 A `resumeSkipNodes` set prevents re-executing checkpoint nodes on subsequent resumes.
+
+**Merge nodes on resume.** Merge nodes in the checkpoint are treated exactly like any other completed node — they enter the skip-and-traverse path via `resumeSkipNodes.has(entry.nodeId)`, emit `node:skipped`, and `resolveNextEntries` is called on their output to enqueue downstream nodes. The `firedMerges` set is NOT pre-seeded from checkpoint completedNodes — doing so (as the old code did prior to `12d4551`) would make checkpoint merges hit the `firedMerges.has(merge)` drop branch in the merge handler, silently dropping them without traversing downstream, and leaving the walker with an empty queue after the skips. The result would be a run that appears to "succeed" in milliseconds on resume while skipping everything past the merge. Do NOT reintroduce the pre-seed.
+
+**Success invariant check.** Before marking a run as `success` at the end of `executeGraph`, the walker scans `agent_tasks` for the run. Any node whose only tasks are `interrupted` or `running` (no `success` task recorded) is an orphan — the walker either exited without visiting it, or a task from a previous crashed execution was never replaced by a successful retry. In that case, the run is downgraded to `failure` with an error message listing the orphaned node IDs. Nodes that have both an interrupted AND a success task (the normal resume-after-crash pattern) pass the check because the successful task indicates the node was re-executed. This guards against silent data-corruption bugs in recovery logic.
 
 **Design decisions (intentional, not bugs):**
 - **Per-node checkpointing is required.** Each node writes a checkpoint immediately after completion. This enables resume-from-failure at node granularity — if a run crashes mid-execution, all previously completed nodes are preserved. The `checkpointOutputs` map stores raw `executeNode` outputs separately from `nodeOutputs` (which gets mutated by routing resolution), ensuring checkpoint data is always safe. Do NOT consolidate to a single end-of-run checkpoint.

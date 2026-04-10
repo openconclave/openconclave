@@ -78,7 +78,7 @@ Browser Editor → REST API → SQLite (Drizzle ORM) → WorkflowExecutor
 
 | Engine | Runtime | Session Support | Tool Support |
 |--------|---------|-----------------|-------------|
-| **claude** | Anthropic Agent SDK (stdio MCP) | Yes (session IDs) | Builtin + MCP + Knowledge |
+| **claude** | Anthropic Agent SDK — external MCP servers are stdio subprocesses; workflow-specific tools (routing, ask_user, knowledge) are in-process via `createSdkMcpServer` | Yes (session IDs) | Builtin + external MCP + Knowledge |
 | **ollama** | Local HTTP API | Yes (JSONL files) | Builtin + MCP (via bridge) |
 | **openai** | OpenAI-compatible providers | No | Builtin + MCP (via bridge) |
 | **debug** | Static response | No | No |
@@ -86,5 +86,15 @@ Browser Editor → REST API → SQLite (Drizzle ORM) → WorkflowExecutor
 ## Persistence
 
 - **SQLite** via Drizzle ORM — workflows, runs, agent_tasks, run_events, checkpoints, settings, knowledgeBases, documents, chunks, mcpServers.
-- **In-memory** — persistent agent sessions (Map with FIFO eviction at 256 entries), active workspaces per run.
+- **In-memory** — persistent agent sessions (Map with FIFO eviction at 256 entries), active workspaces per run. ⚠️ The active-workspaces map does NOT survive server restart; resume paths rebuild workspaces from the trigger payload and do not replay code-node `setCwd` calls.
 - **Filesystem** — Ollama session JSONL files, channel output files (`.openconclave/outputs/`).
+
+## Testing
+
+| Package | Test runner | Rationale |
+|---------|-------------|-----------|
+| `packages/server` | `bun test` | Server runs on Bun in production and uses Bun-native APIs (`bun:sqlite`, `Bun.serve`, `Bun.file`); testing on the same runtime eliminates mock impedance mismatches |
+| `packages/shared` | `bun test` | No runtime dependencies; simplest test runner wins |
+| `packages/client` | `vitest` | Uses Vite's transformer pipeline for JSX, path aliases, and CSS modules; vitest shares that pipeline |
+
+The root `package.json`'s `test` script runs server + shared via `bun test`. Client tests run via `bun run --filter client test`.

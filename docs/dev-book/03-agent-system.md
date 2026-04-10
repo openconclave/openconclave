@@ -55,13 +55,14 @@ Unified tool resolution for all engines. Created per-agent-invocation.
 Uses the Anthropic Agent SDK (`@anthropic-ai/claude-agent-sdk`).
 
 - **Session management** — Passes `sessionId` for multi-turn conversations. The SDK handles message history.
-- **MCP servers** — Builtin tools and external MCP servers are exposed as stdio MCP servers to the SDK.
-- **Workflow MCP server** — A special per-invocation MCP server (`workflow-mcp-server.ts`) that provides:
-  - `route_workflow` tool — Select a downstream branch
-  - Knowledge tools — When KBs are connected
-  - `ask_user` tool — When bidirectional prompt connections exist
-- **Thinking blocks** — Supported when `config.thinking` is true
-- **Cost tracking** — Computed from token usage (input/output/cache tokens)
+- **External MCP servers** — Configured via `config.mcpServers` and exposed to the SDK as stdio MCP servers. The SDK spawns one subprocess per server.
+- **In-process workflow tools** — Tools that need the executor's own state (routing, knowledge, ask_user) are built per-invocation using `createSdkMcpServer()` and `tool()` from the Agent SDK itself, then passed to `query()` via `mcpServers["openconclave-workflow"]`. No subprocess is spawned. The tools execute in the same Node/Bun event loop as the rest of the server, which means:
+  - Tool handlers can call the server's underlying modules directly (`searchMultipleKBs`, `registerPrompt`, `broadcastRunEvent`, `ingestText`, direct `db.select`) without going through HTTP loopback.
+  - There is no re-entrancy risk and no latency cliff from serializing through Hono routing.
+  - Errors thrown inside a tool handler are caught by a `try/catch` wrapper that returns an MCP error content block, so thrown exceptions never escape into the agent turn.
+- **Bunfs CLI extraction** — On Windows, the Claude CLI embedded by the SDK lives inside the compiled Bun binary at `B:/~BUN/...`. `runtime.ts` re-extracts it to a stable temp path via `resolveCliPath()` before calling `query({ pathToClaudeCodeExecutable })`, so the SDK can actually spawn it. See `d71a547` for the history.
+- **Thinking blocks** — Supported when `config.thinking` is true.
+- **Cost tracking** — Computed from token usage (input/output/cache tokens) as reported in the `result` message.
 
 ### Ollama (`ollama.ts`)
 
@@ -109,11 +110,11 @@ Connects agents to external MCP servers at runtime.
 
 ## LLM Call Dispatcher (`llm-call.ts`)
 
-Single-turn LLM calls with dynamic tool definitions. Used by moderators and the `/api/agents/invoke` endpoint.
+Single-turn LLM calls with dynamic tool definitions. Used by discussion node moderators and the `/api/agents/invoke` endpoint.
 
 `invokeWithTools({ engine, config, prompt, tools, runId, nodeId, emit })` → `{ output, tool_call? }`
 
-For Claude: spawns a `dynamic-tools-mcp-server.ts` subprocess that serves the provided tool definitions as an MCP server, then uses the Agent SDK's `query()` (single-turn, no session).
+For Claude: builds an in-process SDK MCP server from the provided `ToolDef[]` using `createSdkMcpServer()` and `tool()`, converts each `ToolDef.input_schema` (JSON schema) to a zod shape via a local `jsonSchemaToZod()` helper, and passes the server to `query()` via `mcpServers["game-tools"]`. A closure variable captures the tool name and input when the agent calls the tool, and is returned to the caller as `tool_call`. No subprocess, no state file, single-turn, no session.
 
 ## Builtin Tools (`builtin-tools.ts`)
 
@@ -131,12 +132,28 @@ For Claude: spawns a `dynamic-tools-mcp-server.ts` subprocess that serves the pr
 | `route_workflow` | Route to downstream workflow targets |
 | `ask_user` | Send question to connected prompt node |
 
-## Workflow MCP Server (`workflow-mcp-server.ts`)
+## In-process workflow tools (inside `runtime.ts`)
 
-A per-invocation MCP server exposed to the Claude SDK. Provides workflow-aware tools that the generic builtin system doesn't cover:
+The Claude runtime builds a per-invocation SDK MCP server by calling `createSdkMcpServer({ name: "openconclave-workflow", tools: [...] })` and registers tool handlers via `tool(name, description, zodShape, handler)`. The server is passed into `query({ mcpServers: { "openconclave-workflow": sdkServer } })` and runs in the same process, not as a subprocess.
 
-- Routing tools (when agent has outgoing condition edges)
-- Knowledge tools (when agent has connected knowledge bases)
-- Ask-user tools (when agent has bidirectional prompt connections)
+The tools added depend on the agent's graph context:
 
-Runs as a stdio subprocess, communicates via stdin/stdout with the Agent SDK.
+- **`openconclave_next`** — added when `routeTargets.length >= 1`. The handler writes the chosen route to a closure variable `routingState` that the executor reads after `query()` resolves.
+- **`ask_user`** — added when `promptConfig` is set (agent has bidirectional prompt connections). The handler calls `broadcastRunEvent({ type: "prompt:question", ... })` to notify the channel plugin, then `await registerPrompt(runId, nodeId, question, null)` which blocks until a response arrives via `POST /api/prompts/respond` or the `oc_respond` MCP tool. Both are direct function calls into the server's own modules — no HTTP loopback.
+- **`knowledge_search`** — added when the agent has knowledge bases attached. The handler calls `searchMultipleKBs(targetIds, query, topK)` from `knowledge/search.ts` directly.
+- **`knowledge_fetch`** — added with knowledge tools. The handler does `db.select` queries against the `documents` and `chunks` tables directly.
+- **`knowledge_add`** — added with knowledge tools. The handler calls `ingestText(kbId, filename, content)` from `knowledge/ingest.ts` directly.
+
+Each handler is wrapped in `try/catch` that returns an MCP error content block on failure, so thrown exceptions never escape into the agent turn.
+
+**The HTTP routes `/api/prompts/ask`, `/api/knowledge/:id/search`, `/api/knowledge/:id/documents/:docId/chunks`, `/api/knowledge/:id/ingest` are still live and untouched** — external callers (Claude Code plugin, curl, web UI) use them as before. Only the in-process path bypasses them.
+
+### Why not loopback HTTP?
+
+Before `a64a6d2` (April 2026), these tool handlers used `fetch("http://localhost:4000/api/...")` to call the server's own HTTP routes. That introduced several problems in compiled Bun binaries:
+
+- **Re-entrancy crashes.** A tool handler inside an agent turn would make a loopback HTTP call, hit a Hono route that threw an `AppError`, and Bun's error reporter in the compiled binary would print the construction stack while the error was being handled by the middleware — wedging the server hard enough to need a manual restart. Observed in run 404 with a hallucinated `document_id: 1`.
+- **Latency cliffs.** An agent calling `knowledge_search` with `topK: 20` would block the event loop for the duration of the embedding call plus vector search plus JSON serialization — seconds to minutes. Every browser request during that window queued behind it. The UI appeared frozen. Observed in runs 407 and 411.
+- **Opaque errors.** Tool handlers received a JSON response body with no stack trace, so debugging a knowledge query failure meant reading opaque "Error fetching document" messages instead of real stack frames.
+
+All three classes are eliminated by calling the underlying modules directly. **When adding a new tool that needs data the server already has, always import the function directly; never write `fetch("http://localhost:4000/...")` inside an in-process tool handler.**
