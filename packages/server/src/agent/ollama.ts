@@ -93,8 +93,18 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
         messages.push(JSON.parse(line));
       } catch { /* skip malformed lines */ }
     }
+    // Append new input so the model sees the current turn, not just old history
+    const inputStr =
+      options.input !== undefined
+        ? typeof options.input === "string"
+          ? options.input
+          : JSON.stringify(options.input, null, 2)
+        : options.prompt || "";
+    if (inputStr) {
+      messages.push({ role: "user", content: inputStr });
+    }
   } else {
-    // Fallback: no session file — build minimal messages
+    // No session file — build minimal messages
     if (options.systemPrompt) {
       messages.push({ role: "system", content: options.systemPrompt });
     }
@@ -217,7 +227,18 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         for (const toolCall of assistantMsg.tool_calls as any[]) {
           const fnName = toolCall.function.name as string;
-          const fnArgs = toolCall.function.arguments as Record<string, unknown>;
+          let fnArgs: Record<string, unknown>;
+          const rawArgs = toolCall.function.arguments;
+          if (typeof rawArgs === "string") {
+            try {
+              fnArgs = JSON.parse(rawArgs);
+            } catch {
+              messages.push({ role: "tool", content: `Error: malformed JSON arguments for "${fnName}"` });
+              continue;
+            }
+          } else {
+            fnArgs = (rawArgs as Record<string, unknown>) ?? {};
+          }
 
           // Capture routing before executing
           if (fnName === "openconclave_next" && fnArgs?.node_id) {

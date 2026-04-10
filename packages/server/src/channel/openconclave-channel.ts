@@ -359,16 +359,12 @@ function connectWebSocket() {
             `  update_node(workflowId: "${d.workflowId}", nodeId: "${d.nodeId}", config: { systemPrompt: "your improved prompt" })`,
           ].join("\n");
 
+          // Route improve events through channel:output so Claude Code delivers them
           await server.notification({
             method: "notifications/claude/channel",
             params: {
               content,
-              meta: {
-                event_type: "channel:improve-prompt",
-                workflow_id: String(d.workflowId),
-                node_id: String(d.nodeId),
-                node_label: String(d.nodeLabel),
-              },
+              meta: { event_type: "channel:output", node_label: "Improve Prompt" },
             },
           });
         }
@@ -392,10 +388,7 @@ function connectWebSocket() {
             method: "notifications/claude/channel",
             params: {
               content,
-              meta: {
-                event_type: "channel:improve-description",
-                workflow_id: String(d.workflowId),
-              },
+              meta: { event_type: "channel:output", node_label: "Improve Description" },
             },
           });
         }
@@ -425,12 +418,7 @@ function connectWebSocket() {
             method: "notifications/claude/channel",
             params: {
               content,
-              meta: {
-                event_type: "channel:improve-code",
-                workflow_id: String(d.workflowId),
-                node_id: String(d.nodeId),
-                node_label: String(d.nodeLabel),
-              },
+              meta: { event_type: "channel:output", node_label: "Improve Code" },
             },
           });
         }
