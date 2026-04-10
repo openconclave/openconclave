@@ -136,8 +136,8 @@ export function createMcpServer() {
       try {
         const data = await ocApi(`/workflows/${workflowId}`, "PUT", body);
         return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
-      } catch {
-        return { content: [{ type: "text", text: "Workflow not found" }], isError: true };
+      } catch (e) {
+        return { content: [{ type: "text", text: e instanceof Error ? e.message : "Workflow not found" }], isError: true };
       }
     }
   );
