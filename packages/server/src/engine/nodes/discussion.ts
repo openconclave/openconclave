@@ -101,6 +101,8 @@ export async function executeDiscussion(
   exitReason = "max_rounds";
   let currentParticipantIndex = 0;
 
+  const participantLabels = participants.map((p) => p.data.label);
+
   // Moderator opening turn — runs before any participant speaks so the moderator
   // can set the stage (e.g. assign tasks, give instructions, pick who goes first).
   if (config.moderator) {
@@ -110,6 +112,8 @@ export async function executeDiscussion(
       transcript,
       0,
       input,
+      participantLabels,
+      config.maxRounds,
       runId,
       nodeId,
       emit,
@@ -222,6 +226,8 @@ export async function executeDiscussion(
         transcript,
         round,
         input,
+        participantLabels,
+        config.maxRounds,
         runId,
         nodeId,
         emit,
@@ -280,6 +286,8 @@ async function runModerator(
   transcript: string,
   round: number,
   input: unknown,
+  participantLabels: string[],
+  maxRounds: number,
   runId: number,
   nodeId: string,
   emit: (event: RunEvent) => void,
@@ -287,7 +295,17 @@ async function runModerator(
   if (moderator.type === "code") {
     return runCodeModerator(moderator, responses, transcript, round, input);
   }
-  return runAgentModerator(moderator, transcript, runId, nodeId, emit);
+  return runAgentModerator(
+    moderator,
+    transcript,
+    round,
+    input,
+    participantLabels,
+    maxRounds,
+    runId,
+    nodeId,
+    emit,
+  );
 }
 
 // ── Code moderator ───────────────────────────────────────────
@@ -342,6 +360,10 @@ async function runCodeModerator(
 async function runAgentModerator(
   moderator: DiscussionModeratorConfig,
   transcript: string,
+  round: number,
+  input: unknown,
+  participantLabels: string[],
+  maxRounds: number,
   runId: number,
   nodeId: string,
   emit: (event: RunEvent) => void,
@@ -368,11 +390,12 @@ async function runAgentModerator(
         },
         nextAgent: {
           type: "string",
-          description: "Required when action=call_specific. Participant label or node ID.",
+          description: "Required when action=call_specific. Participant label (exact match).",
         },
         summary: {
           type: "string",
-          description: "Optional summary of the discussion so far.",
+          description:
+            "Optional summary of the discussion so far, or — on the opening turn — an introduction/topic framing that will be shown to participants.",
         },
       },
       required: ["action"],
@@ -384,10 +407,26 @@ async function runAgentModerator(
       ? transcript.slice(-TRANSCRIPT_MAX_BYTES)
       : transcript;
 
+  const topic = typeof input === "string" ? input : JSON.stringify(input);
+  const participantList = participantLabels.length > 0
+    ? participantLabels.map((l) => `- ${l}`).join("\n")
+    : "(none)";
+
+  const header =
+    `You are moderating a multi-agent discussion.\n\n` +
+    `Topic / user question:\n${topic}\n\n` +
+    `Participants (${participantLabels.length}):\n${participantList}\n\n` +
+    `Max rounds: ${maxRounds}`;
+
+  const prompt =
+    round === 0
+      ? `${header}\n\nThis is the opening turn — no one has spoken yet.`
+      : `${header}\n\nRound ${round} of ${maxRounds} just finished.\n\nTranscript so far:\n${safeTranscript}`;
+
   const moderatorResult = await invokeWithTools({
     engine: agentConfig.engine ?? "claude",
     config: resolvedConfig,
-    prompt: `Discussion transcript:\n${safeTranscript}\n\nBased on the discussion so far, what should happen next?`,
+    prompt,
     tools: [moderateTool],
     runId,
     nodeId,

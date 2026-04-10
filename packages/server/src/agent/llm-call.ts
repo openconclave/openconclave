@@ -311,19 +311,14 @@ function toolShape(inputSchema: Record<string, unknown>): Record<string, z.ZodTy
 
 async function invokeClaude(options: InvokeWithToolsOptions): Promise<ToolCallResult> {
   const { query, createSdkMcpServer, tool } = await import("@anthropic-ai/claude-agent-sdk");
+  const { cliPath } = await import("./runtime");
 
   const modelMap: Record<string, string> = { sonnet: "sonnet", opus: "opus", haiku: "haiku" };
   const model = options.config.model && modelMap[options.config.model]
     ? modelMap[options.config.model]
     : undefined;
 
-  const toolNames = options.tools.map((t) => t.name).join(", ");
-
-  const systemPrompt = [
-    options.config.systemPrompt ?? "",
-    `\nYou MUST call one of these tools to complete your action: ${toolNames}`,
-    "Call the tool and then stop. Do not continue after calling the tool.",
-  ].join("\n");
+  const systemPrompt = options.config.systemPrompt ?? "";
 
   // In-process tool state captured by the tool handlers below
   const toolState: { toolName?: string; toolInput?: Record<string, unknown> } = {};
@@ -354,6 +349,7 @@ async function invokeClaude(options: InvokeWithToolsOptions): Promise<ToolCallRe
   const agentQuery = query({
     prompt: options.prompt,
     options: {
+      pathToClaudeCodeExecutable: cliPath,
       model,
       systemPrompt,
       maxTurns: 3,
@@ -361,6 +357,7 @@ async function invokeClaude(options: InvokeWithToolsOptions): Promise<ToolCallRe
       allowDangerouslySkipPermissions: true,
       tools: [],
       mcpServers,
+      strictMcpConfig: true,
     },
   });
 

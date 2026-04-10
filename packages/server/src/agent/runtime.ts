@@ -37,7 +37,7 @@ function resolveCliPath(path: string): string {
   }
 }
 
-const cliPath = resolveCliPath(embeddedCliPath);
+export const cliPath = resolveCliPath(embeddedCliPath);
 
 export interface ThinkingBlock {
   thinking: string;
