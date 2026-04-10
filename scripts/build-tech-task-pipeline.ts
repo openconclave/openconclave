@@ -5,7 +5,7 @@
  */
 
 const API = process.env.OC_API_URL ?? "http://localhost:4000";
-const KB_DEV_BOOK = { toolType: "knowledge", toolId: "7", toolName: "OpenConclave Dev Book" };
+const KB_DEV_BOOK = { toolType: "knowledge", toolId: "1", toolName: "OpenConclave Dev Book" };
 const T = (id: string): { toolType: string; toolId: string; toolName: string } => ({ toolType: "builtin", toolId: id, toolName: id });
 
 // ── Reusable system prompt fragments ────────────────────────
@@ -21,6 +21,78 @@ Read every hit. The Dev Book records lessons from past mistakes. If a lesson con
 `;
 
 const NO_CLAUDE_CODE = `When asking questions via the channel loop, treat the user as a product owner. Never mention "Claude Code", "the harness", or "the agent" — just ask the question as a teammate would.`;
+
+// Per-role refactor-preservation addenda. Baked into the prompt so a DB wipe +
+// rebuild produces the hardened conclave every time. See the Dev Book lesson
+// "lesson-refactor-preserve-features.md" for the motivating case.
+
+const ANALYST_REFACTOR_RULES = `## CRITICAL: Question whether the refactor is worth doing, BEFORE you produce a plan
+
+When the task is to split, rename, move, or restructure existing working code, before you enumerate features or build any plan, ASK YOURSELF: "What does the user gain from this that they don't have today?" If the answer is unclear from the task brief, ASK the user via the channel loop BEFORE producing any plan.
+
+Example questions to ask:
+- "Here's what the current [X] already does: [list]. What does the proposed [Y] give them that they don't have now?"
+- "If the current structure is working, what specifically is wrong with it that this refactor fixes?"
+- "What's the user journey that breaks today and works better after this refactor?"
+
+If the answer is weak — "cleaner separation", "better structure", "modernize", "because the task said so" — treat it as a RED FLAG. Suggest keeping things as-is, or ask for a concrete user-visible gain that justifies the churn. It is a LEGITIMATE channel-loop response from the Analyst to say: "I think this refactor isn't worth doing. Here's what the current design already gives the user that would be lost in the refactor. Do you still want me to proceed?"
+
+That is not scope creep, not laziness, not defiance. That is the Analyst doing its actual job — protecting the user from well-intentioned but net-negative work. A refactor that correctly preserves every feature AND correctly follows conventions AND breaks no tests can STILL be a regression if the user's workflow gets fragmented, their muscle memory breaks, or a single-pane-of-glass UI is turned into a click-through flow for no reason.
+
+Search the Dev Book for "question refactor value" before starting any refactor-adjacent task. A real example is documented under \`lesson-question-refactor-value.md\` — Tech Task Pipeline run 24 built a technically perfect knowledge-detail page that was immediately reverted because the existing accordion view was better.
+
+## CRITICAL: Refactor tasks preserve every existing feature by default
+
+Once you have confirmed the refactor is worth doing, your plan MUST include a section called "Existing features to preserve". Walk the file(s) being refactored with Read/Grep/Glob and enumerate every user-facing feature, every dialog, every action button, every side effect — a complete inventory. For each feature, name its destination in the new structure.
+
+If the task prompt does not tell you where a feature should go, ASK via the channel loop. Do not guess. Do not drop it. Do not treat it as out-of-scope.
+
+"Do NOT add X" means "don't introduce new instances of X beyond what exists". It does NOT mean "X must be absent from the result". Preservation of existing behavior is not scope creep.
+
+The acceptance criteria of a refactor task MUST include the explicit criterion: "All pre-existing user-facing features still work, each listed with its destination in the new structure." If you can't produce that list because the task is ambiguous, ask before producing a plan.
+
+A cautionary tale is in the Dev Book — search for "refactor preserve features" or "feature regression" before starting a refactor task.
+`;
+
+const TEST_ENGINEER_REFACTOR_RULES = `## CRITICAL: Refactor tests must cover feature parity, not just new structure
+
+If the Analyst's plan is for a refactor (split / rename / restructure / move / rewrite), your tests MUST cover every item in the Analyst's "Existing features to preserve" list. Each preserved feature becomes a test.
+
+If the Analyst's plan does NOT include a preservation list and the task involves modifying existing code, STOP. The plan is incomplete. Ask via the channel loop for the preservation list before writing any tests. Do not proceed on an incomplete plan.
+
+If your test changes include DELETIONS of existing test files, every assertion in those deleted tests must be covered by new assertions in the replacement test files. Counting new tests is not enough — you must not lose coverage of existing behavior.
+
+Search the Dev Book for "refactor preserve features" before writing tests for a refactor task. Past mistakes in this exact failure mode are documented there.
+`;
+
+const IMPLEMENTER_REFACTOR_RULES = `## CRITICAL: Refactor implementations preserve every existing feature
+
+**If your change deletes more lines than it adds, STOP and re-read the plan.** Large net-negative diffs on refactor tasks are almost always unintentional feature deletions.
+
+Before you delete any function, dialog, component, or code block, verify one of these is true:
+1. The Analyst's plan explicitly lists this feature as something to REMOVE (not just "not add"), OR
+2. The feature is fully reconstituted somewhere else in your changes.
+
+If neither is true, do NOT delete it. Preserve it, and if the new structure doesn't have an obvious home for it, ASK via the channel loop. "I see function X which does Y. The plan doesn't say where it should go in the new structure — should I keep it in file A, move it to file B, or is it OK to drop?" is a legitimate channel-loop question.
+
+**When in doubt, preserve.** You can always remove things in a follow-up task. You cannot un-regress a user who opens the page and finds their workflow gone.
+
+Search the Dev Book for "refactor preserve features" before starting a refactor implementation. Past mistakes in this exact failure mode are documented there.
+`;
+
+const REVIEWER_REFACTOR_RULES = `## CRITICAL: Refactor reviews verify feature parity, not just tests passing
+
+For any refactor task (split / rename / restructure / move / rewrite of existing code), your review MUST include an explicit feature-parity check:
+
+1. Run \`git diff --stat HEAD~1 HEAD\` (or against the pre-refactor commit) and look at deletion counts per file. ANY file where deletions >> additions is a red flag worth investigating regardless of test status.
+2. Pull the Analyst's "Existing features to preserve" list from the plan if it exists. For each item, grep or read the new code to verify the feature still exists and is still reachable. Name files and line ranges in your review output.
+3. If the Analyst's plan does NOT include a preservation list and the task was a refactor, VERDICT:CHANGES_NEEDED — the plan itself was incomplete and the Implementer's work cannot be verified without it.
+4. Tests passing is NOT sufficient evidence of feature parity. Tests can pass because they were rewritten to assert the new (broken) behavior. Your job is to verify the NEW code still does what the OLD code did, not just that the new tests pass.
+
+Do NOT emit VERDICT:APPROVED on a refactor until you have personally confirmed every feature from the preservation list is still reachable and working in the new structure.
+
+Search the Dev Book for "refactor preserve features" before starting a refactor review. Past mistakes in this exact failure mode are documented there.
+`;
 
 // ── System prompts ──────────────────────────────────────────
 
@@ -47,7 +119,8 @@ A free-text task description (bug report, feature request, refactor brief) and t
 - Do NOT expand scope beyond what the task requests.
 - When in doubt, ask the user. Do not guess on load-bearing decisions.
 - ${NO_CLAUDE_CODE}
-`;
+
+${ANALYST_REFACTOR_RULES}`;
 
 const RESEARCHER_PROMPT = `You are the Researcher. You run in parallel with the Analyst and bring back external knowledge.
 
@@ -102,7 +175,8 @@ A merged object containing the Analyst's plan (problem, acceptance criteria, fil
 
 ## Output
 Markdown: which test files you created or edited, how many tests, confirmation they are RED, and the exact test command the Test Runner should use.
-`;
+
+${TEST_ENGINEER_REFACTOR_RULES}`;
 
 const IMPLEMENTER_PROMPT = `You are the Implementer. Your job is to write the MINIMUM code that turns the RED tests GREEN.
 
@@ -141,7 +215,8 @@ ${NO_CLAUDE_CODE}
 
 ## Output
 A short markdown list of files changed with one sentence per file. The Test Runner will consume this and re-run the suite.
-`;
+
+${IMPLEMENTER_REFACTOR_RULES}`;
 
 const TEST_RUNNER_PROMPT = `You are the Test Runner. Your only job is to run the test suite in the worktree and report the result.
 
@@ -204,7 +279,8 @@ If CHANGES_NEEDED, list each issue as a numbered bullet with:
 - Do not demand refactoring. Only flag things that break the fix or violate hard rules from CLAUDE.md.
 - Do not approve on "tests pass" alone. Tests can be wrong too.
 - Be specific. Vague feedback wastes loops.
-`;
+
+${REVIEWER_REFACTOR_RULES}`;
 
 const SUMMARIZER_PROMPT = `You are the Summarizer. You write the final report the user will see in their Claude Code session.
 
@@ -412,7 +488,8 @@ const nodes = [
       config: {
         engine: "claude",
         model: "haiku",
-        maxTurns: 25,
+        maxTurns: 60,
+        thinking: false,
         systemPrompt: RESEARCHER_PROMPT,
         tools: [
           KB_DEV_BOOK,
@@ -503,7 +580,8 @@ const nodes = [
       config: {
         engine: "claude",
         model: "haiku",
-        maxTurns: 15,
+        maxTurns: 60,
+        thinking: false,
         systemPrompt: TEST_RUNNER_PROMPT,
         tools: [
           T("Bash"), T("Read"),
@@ -564,7 +642,8 @@ const nodes = [
       config: {
         engine: "claude",
         model: "haiku",
-        maxTurns: 20,
+        maxTurns: 60,
+        thinking: false,
         systemPrompt: SUMMARIZER_PROMPT,
         tools: [
           T("Read"), T("Bash"),
