@@ -244,6 +244,17 @@ export function AgentFields({ nodeId, config, onUpdate }: AgentFieldsProps) {
               className={INPUT_CLASS}
             />
           </Field>
+          <label className="flex items-start gap-2 px-1 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={config.thinking ?? true}
+              onChange={(e) => update({ thinking: e.target.checked })}
+              className="mt-0.5 rounded border-border"
+            />
+            <span className="text-xs text-muted-foreground leading-tight">
+              Enable extended thinking. Turn off for utility agents (run a command, format output, emit a marker) to keep them fast and predictable.
+            </span>
+          </label>
         </>
       )}
 

@@ -413,7 +413,9 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
         // Only servers explicitly passed in mcpServers above will be available.
         strictMcpConfig: true,
         resume: options.sessionId,
-        thinking: { type: "enabled" as const, budgetTokens: 31999 },
+        thinking: config.thinking === false
+          ? { type: "disabled" as const }
+          : { type: "enabled" as const, budgetTokens: 31999 },
         stderr: (data: string) => onOutput?.(`[CLI stderr] ${data}`),
       },
     });
