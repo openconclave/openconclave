@@ -4,20 +4,17 @@
  * Used by the invoke endpoint when `tools` are provided.
  * Each engine gets a lightweight path: prompt + tools in → tool call result out.
  *
- * - Claude: spawns dynamic-tools-mcp-server.ts via Agent SDK query()
+ * - Claude: uses in-process SDK MCP server via Agent SDK query()
  * - Ollama: /api/chat with tools
  * - OpenAI: Chat Completions with function calling
  * - Debug: returns first enum value from first tool
  */
 
-import { resolve, join } from "path";
-import { mkdirSync, existsSync, readFileSync, unlinkSync } from "fs";
 import { eq } from "drizzle-orm";
+import { z } from "zod";
 
 import { db } from "../db/client";
 import { agentTasks, settings } from "../db/schema";
-import { TMP_DIR } from "../lib/workspace";
-import { logger } from "../lib/logger";
 import type { ResolvedAgentConfig } from "@openconclave/shared";
 import type { RunEvent } from "../engine/types";
 
@@ -258,74 +255,127 @@ async function invokeOpenAI(options: InvokeWithToolsOptions): Promise<ToolCallRe
   return { output: choice?.content ?? "" };
 }
 
-// ── Claude engine (via Agent SDK + dynamic MCP) ─────────────
+// ── JSON schema → Zod shape converter ───────────────────────
+
+function jsonSchemaToZod(schema: Record<string, unknown>): z.ZodType {
+  const type = schema.type as string;
+  const enumValues = schema.enum as string[] | undefined;
+
+  if (enumValues && enumValues.length > 0) {
+    return z.enum(enumValues as [string, ...string[]]);
+  }
+
+  switch (type) {
+    case "string":
+      return z.string();
+    case "number":
+    case "integer":
+      return z.number();
+    case "boolean":
+      return z.boolean();
+    case "object": {
+      const props = (schema.properties ?? {}) as Record<string, Record<string, unknown>>;
+      const required = (schema.required ?? []) as string[];
+      const shape: Record<string, z.ZodType> = {};
+      for (const [key, propSchema] of Object.entries(props)) {
+        const zodProp = jsonSchemaToZod(propSchema);
+        shape[key] = required.includes(key) ? zodProp : zodProp.optional();
+      }
+      return z.object(shape);
+    }
+    case "array": {
+      const items = schema.items as Record<string, unknown> | undefined;
+      return z.array(items ? jsonSchemaToZod(items) : z.unknown());
+    }
+    default:
+      return z.unknown();
+  }
+}
+
+function toolShape(inputSchema: Record<string, unknown>): Record<string, z.ZodType> {
+  const props = (inputSchema.properties ?? {}) as Record<string, Record<string, unknown>>;
+  const required = (inputSchema.required ?? []) as string[];
+  const shape: Record<string, z.ZodType> = {};
+  for (const [key, propSchema] of Object.entries(props)) {
+    let zodProp = jsonSchemaToZod(propSchema);
+    const desc = propSchema.description as string | undefined;
+    if (desc && zodProp instanceof z.ZodString) {
+      zodProp = (zodProp as z.ZodString).describe(desc);
+    }
+    shape[key] = required.includes(key) ? zodProp : zodProp.optional();
+  }
+  return shape;
+}
+
+// ── Claude engine (via Agent SDK + in-process SDK MCP) ──────
 
 async function invokeClaude(options: InvokeWithToolsOptions): Promise<ToolCallResult> {
-  const { query } = await import("@anthropic-ai/claude-agent-sdk");
+  const { query, createSdkMcpServer, tool } = await import("@anthropic-ai/claude-agent-sdk");
 
   const modelMap: Record<string, string> = { sonnet: "sonnet", opus: "opus", haiku: "haiku" };
   const model = options.config.model && modelMap[options.config.model]
     ? modelMap[options.config.model]
     : undefined;
 
-  // Set up dynamic tools MCP server
-  mkdirSync(TMP_DIR, { recursive: true });
-  const stateFile = join(TMP_DIR, `tools-state-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`);
-  const mcpPath = resolve(import.meta.dir, "dynamic-tools-mcp-server.ts");
-
   const toolNames = options.tools.map((t) => t.name).join(", ");
 
-  // Append instruction to call one of the tools
   const systemPrompt = [
     options.config.systemPrompt ?? "",
     `\nYou MUST call one of these tools to complete your action: ${toolNames}`,
     "Call the tool and then stop. Do not continue after calling the tool.",
   ].join("\n");
 
-  const mcpServers: Record<string, { command: string; args: string[]; env: Record<string, string> }> = {
-    "game-tools": {
-      command: "bun",
-      args: ["run", mcpPath],
-      env: {
-        OC_STATE_FILE: stateFile,
-        OC_DYNAMIC_TOOLS: JSON.stringify(options.tools),
+  // In-process tool state captured by the tool handlers below
+  const toolState: { toolName?: string; toolInput?: Record<string, unknown> } = {};
+
+  const sdkTools = options.tools.map((t) =>
+    tool(
+      t.name,
+      t.description,
+      toolShape(t.input_schema),
+      async (args: Record<string, unknown>) => {
+        toolState.toolName = t.name;
+        toolState.toolInput = args;
+        return {
+          content: [{ type: "text", text: `Action recorded: ${t.name}` }],
+        };
       },
-    },
+    ),
+  );
+
+  const mcpServers = {
+    "game-tools": createSdkMcpServer({
+      name: "openconclave-dynamic-tools",
+      version: "0.1.0",
+      tools: sdkTools,
+    }),
   };
 
-  try {
-    const agentQuery = query({
-      prompt: options.prompt,
-      options: {
-        model,
-        systemPrompt,
-        maxTurns: 3,
-        permissionMode: "bypassPermissions",
-        allowDangerouslySkipPermissions: true,
-        tools: [],
-        mcpServers,
-      },
-    });
+  const agentQuery = query({
+    prompt: options.prompt,
+    options: {
+      model,
+      systemPrompt,
+      maxTurns: 3,
+      permissionMode: "bypassPermissions",
+      allowDangerouslySkipPermissions: true,
+      tools: [],
+      mcpServers,
+    },
+  });
 
-    for await (const message of agentQuery) {
-      // Consume the generator — we just need it to complete
-    }
-
-    // Read tool call from state file
-    if (existsSync(stateFile)) {
-      const state = JSON.parse(readFileSync(stateFile, "utf8")) as { tool_name: string; tool_input: Record<string, unknown> };
-      try { unlinkSync(stateFile); } catch { /* ignore */ }
-      return {
-        output: JSON.stringify(state),
-        tool_call: { name: state.tool_name, input: state.tool_input },
-      };
-    }
-
-    // No tool call — agent returned text without calling a tool
-    try { unlinkSync(stateFile); } catch { /* ignore */ }
-    return { output: "(agent did not call any tool)" };
-  } catch (err: unknown) {
-    try { unlinkSync(stateFile); } catch { /* ignore */ }
-    throw err;
+  for await (const _message of agentQuery) {
+    // Consume the generator — we just need it to complete
+    void _message;
   }
+
+  if (toolState.toolName) {
+    const payload = { tool_name: toolState.toolName, tool_input: toolState.toolInput ?? {} };
+    return {
+      output: JSON.stringify(payload),
+      tool_call: { name: toolState.toolName, input: toolState.toolInput ?? {} },
+    };
+  }
+
+  return { output: "(agent did not call any tool)" };
 }

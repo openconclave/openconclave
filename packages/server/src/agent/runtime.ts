@@ -1,12 +1,12 @@
-import { query } from "@anthropic-ai/claude-agent-sdk";
-import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import { query, createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
+import type { SDKMessage, McpServerConfig } from "@anthropic-ai/claude-agent-sdk";
 import embeddedCliPath from "@anthropic-ai/claude-agent-sdk/embed";
 import { createHash } from "crypto";
-import { writeFileSync, unlinkSync, mkdirSync, readFileSync, existsSync, chmodSync, renameSync } from "fs";
+import { mkdirSync, readFileSync, existsSync, chmodSync, renameSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
-import { join, resolve } from "path";
+import { join } from "path";
+import { z } from "zod";
 import type { ResolvedAgentConfig } from "@openconclave/shared";
-import { TMP_DIR } from "../lib/workspace";
 import { Workspace } from "../engine/workspace";
 
 // SDK's extractFromBunfs only checks for "$bunfs" but Bun on Windows uses "B:/~BUN/".
@@ -86,8 +86,8 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
   }
 
   // Build MCP server config from workspace (single source of truth for dirs + configs)
-  // Claude SDK only supports stdio transport — remote servers are handled by McpBridge in other engines.
-  const mcpServers: Record<string, { command: string; args: string[]; env?: Record<string, string> }> = {};
+  // Claude SDK supports stdio external MCP servers and in-process SDK MCP servers.
+  const mcpServers: Record<string, McpServerConfig> = {};
 
   if (config.mcpServers?.length) {
     const mcpTools = config.mcpTools ?? [];
@@ -96,46 +96,299 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
     );
     const resolved = ws.getMcpToolConfigs(mcpTools, legacyIds);
     for (const [id, cfg] of Object.entries(resolved)) {
-      // Claude SDK only supports stdio MCP servers
+      // Claude SDK only supports stdio MCP servers for external servers
       if (cfg.transport === "stdio" && cfg.command) {
-        mcpServers[id] = { command: cfg.command, args: cfg.args ?? [], env: cfg.env };
+        mcpServers[id] = { type: "stdio", command: cfg.command, args: cfg.args ?? [], env: cfg.env };
       }
     }
   }
 
-  // Add OpenConclave workflow MCP server for routing and knowledge tools
+  // In-process workflow MCP server for routing, ask_user, and knowledge tools.
+  // Runs in the same process as the server — no subprocess spawn needed, so this
+  // works inside Bun compiled binaries (where workflow-mcp-server.ts lives at a
+  // virtual bunfs path that a spawned `bun run` cannot reach).
   const routeTargets = options.routeTargets;
   const knowledgeBaseIds = config.knowledgeBases?.map(Number).filter((n) => !isNaN(n)) ?? [];
-  let stateFile: string | null = null;
   const promptConfig = options.promptConfig;
-  const needsWorkflowMcp = (routeTargets && routeTargets.length >= 1) || knowledgeBaseIds.length > 0 || !!promptConfig;
+  const apiUrl = process.env.OC_API_URL ?? `http://localhost:${process.env.PORT ?? 4000}`;
+  const routingState: { routeTo?: string; routeContent?: string } = {};
 
-  if (needsWorkflowMcp) {
-    const tmpDir = TMP_DIR;
-    mkdirSync(tmpDir, { recursive: true });
-    stateFile = join(tmpDir, `state-${Date.now()}.json`);
+  // Use ReturnType<typeof tool> is not portable across zod generics, so accept
+  // heterogeneous tool shapes via a permissive element type.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const workflowTools: any[] = [];
 
-    const workflowMcpPath = resolve(import.meta.dir, "workflow-mcp-server.ts");
-    const apiUrl = process.env.OC_API_URL ?? `http://localhost:${process.env.PORT ?? 4000}`;
-    const mcpEnv: Record<string, string> = {
-      OC_STATE_FILE: stateFile,
-      OC_ROUTE_TARGETS: JSON.stringify(routeTargets ?? []),
-      OC_API_URL: apiUrl,
-    };
-    if (knowledgeBaseIds.length > 0) {
-      mcpEnv.OC_KNOWLEDGE_BASE_IDS = JSON.stringify(knowledgeBaseIds);
-    }
-    if (promptConfig) {
-      mcpEnv.OC_PROMPT_NODE_ID = promptConfig.nodeId;
-      mcpEnv.OC_PROMPT_RUN_ID = String(promptConfig.runId);
-      mcpEnv.OC_PROMPT_SENDER = promptConfig.senderNode;
-      if (promptConfig.description) mcpEnv.OC_PROMPT_DESCRIPTION = promptConfig.description;
-    }
-    mcpServers["openconclave-workflow"] = {
-      command: "bun",
-      args: ["run", workflowMcpPath],
-      env: mcpEnv,
-    };
+  if (routeTargets && routeTargets.length >= 1) {
+    const validIds = routeTargets.map((t) => t.nodeId) as [string, ...string[]];
+    const routeDescription = routeTargets
+      .map((t) => {
+        const desc = (t as { description?: string }).description;
+        return `  - "${t.nodeId}" → ${t.label} (${t.type})${desc ? ` — ${desc}` : ""}`;
+      })
+      .join("\n");
+
+    workflowTools.push(
+      tool(
+        "openconclave_next",
+        [
+          "Choose the next step in the workflow. You MUST call this exactly once when you are done.",
+          "Available routes:",
+          routeDescription,
+        ].join("\n"),
+        {
+          node_id: z.enum(validIds).describe("The ID of the next node to route to"),
+          content: z.string().describe("Your output message to pass to the next node"),
+        },
+        async ({ node_id, content }) => {
+          routingState.routeTo = node_id;
+          routingState.routeContent = content;
+          const target = routeTargets.find((t) => t.nodeId === node_id);
+          return {
+            content: [{ type: "text", text: `Routing to: ${target?.label ?? node_id}` }],
+          };
+        },
+      ),
+    );
+  }
+
+  if (promptConfig) {
+    workflowTools.push(
+      tool(
+        "ask_user",
+        promptConfig.description ||
+          "Ask the user a question and wait for their response. Use when you need clarification or more information.",
+        {
+          question: z.string().describe("The question to ask the user"),
+        },
+        async ({ question }) => {
+          const res = await fetch(`${apiUrl}/api/prompts/ask`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              runId: promptConfig.runId,
+              nodeId: promptConfig.nodeId,
+              question,
+              senderNode: promptConfig.senderNode,
+            }),
+          });
+          const data = (await res.json()) as { response?: string; error?: string };
+          return {
+            content: [{ type: "text", text: data.response ?? data.error ?? "No response received" }],
+          };
+        },
+      ),
+    );
+  }
+
+  if (knowledgeBaseIds.length > 0) {
+    const kbList = knowledgeBaseIds.join(", ");
+
+    workflowTools.push(
+      tool(
+        "knowledge_search",
+        `Search connected knowledge bases (IDs: ${kbList}) using semantic similarity. Returns the most relevant text passages.`,
+        {
+          query: z.string().describe("The search query"),
+          top_k: z.number().optional().describe("Number of results to return (default: 5)"),
+          knowledge_base_id: z
+            .number()
+            .optional()
+            .describe(`Specific KB to search. If omitted, searches all connected KBs (${kbList})`),
+        },
+        async ({ query: searchQuery, top_k, knowledge_base_id }) => {
+          const topK = top_k ?? 5;
+          const targetIds =
+            knowledge_base_id !== undefined ? [knowledge_base_id] : knowledgeBaseIds;
+
+          if (knowledge_base_id !== undefined && !knowledgeBaseIds.includes(knowledge_base_id)) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Error: knowledge base ${knowledge_base_id} is not connected to this agent. Available: ${kbList}`,
+                },
+              ],
+            };
+          }
+
+          const allResults: Array<{
+            content: string;
+            score: number;
+            documentName: string;
+            chunkIndex: number;
+          }> = [];
+
+          for (const kbId of targetIds) {
+            try {
+              const res = await fetch(`${apiUrl}/api/knowledge/${kbId}/search`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ query: searchQuery, topK }),
+              });
+              if (!res.ok) continue;
+              const json = (await res.json()) as {
+                data: Array<{ content: string; score: number; documentName: string; chunkIndex: number }>;
+              };
+              allResults.push(...json.data);
+            } catch {
+              // Skip unreachable KBs
+            }
+          }
+
+          allResults.sort((a, b) => b.score - a.score);
+          const results = allResults.slice(0, topK);
+
+          if (results.length === 0) {
+            return { content: [{ type: "text", text: "No relevant results found." }] };
+          }
+
+          const formatted = results
+            .map(
+              (r, i) =>
+                `[${i + 1}] (score: ${r.score.toFixed(3)}) [${r.documentName} chunk ${r.chunkIndex}]\n${r.content}`,
+            )
+            .join("\n\n---\n\n");
+
+          return { content: [{ type: "text", text: formatted }] };
+        },
+      ),
+    );
+
+    workflowTools.push(
+      tool(
+        "knowledge_fetch",
+        "Fetch full document content or specific chunks from a knowledge base. Use after searching to get complete context.",
+        {
+          knowledge_base_id: z.number().describe(`Knowledge base ID (available: ${kbList})`),
+          document_id: z.number().describe("Document ID (from search results or document listing)"),
+          chunk_index: z
+            .number()
+            .optional()
+            .describe("Specific chunk index to fetch. If omitted, returns all chunks (full document)"),
+        },
+        async ({ knowledge_base_id, document_id, chunk_index }) => {
+          if (!knowledgeBaseIds.includes(knowledge_base_id)) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Error: knowledge base ${knowledge_base_id} is not connected to this agent. Available: ${kbList}`,
+                },
+              ],
+            };
+          }
+
+          try {
+            const res = await fetch(
+              `${apiUrl}/api/knowledge/${knowledge_base_id}/documents/${document_id}/chunks`,
+            );
+            if (!res.ok) {
+              const errText = await res.text();
+              return { content: [{ type: "text", text: `Error fetching document: ${errText}` }] };
+            }
+            const json = (await res.json()) as {
+              data: {
+                document: { id: number; filename: string; sourcePath: string | null };
+                chunks: Array<{ id: number; content: string; chunkIndex: number }>;
+              };
+            };
+            const { document: doc, chunks: docChunks } = json.data;
+
+            if (chunk_index !== undefined) {
+              const chunk = docChunks.find((c) => c.chunkIndex === chunk_index);
+              if (!chunk) {
+                return {
+                  content: [
+                    {
+                      type: "text",
+                      text: `Chunk ${chunk_index} not found in document "${doc.filename}" (${docChunks.length} chunks available)`,
+                    },
+                  ],
+                };
+              }
+              return {
+                content: [
+                  {
+                    type: "text",
+                    text: `Document: ${doc.filename}\nChunk ${chunk.chunkIndex}/${docChunks.length - 1}:\n\n${chunk.content}`,
+                  },
+                ],
+              };
+            }
+
+            const sorted = [...docChunks].sort((a, b) => a.chunkIndex - b.chunkIndex);
+            const fullText = sorted.map((c) => c.content).join("\n\n");
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Document: ${doc.filename} (${docChunks.length} chunks)\nSource: ${doc.sourcePath ?? "N/A"}\n\n${fullText}`,
+                },
+              ],
+            };
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            return { content: [{ type: "text", text: `Error: ${msg}` }] };
+          }
+        },
+      ),
+    );
+
+    workflowTools.push(
+      tool(
+        "knowledge_add",
+        "Add new text content to a connected knowledge base. The text will be chunked and embedded automatically.",
+        {
+          knowledge_base_id: z.number().describe(`Knowledge base ID to add to (available: ${kbList})`),
+          filename: z.string().describe("A descriptive filename for the content (e.g. 'meeting-notes-2024.txt')"),
+          content: z.string().describe("The text content to ingest"),
+        },
+        async ({ knowledge_base_id, filename, content }) => {
+          if (!knowledgeBaseIds.includes(knowledge_base_id)) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Error: knowledge base ${knowledge_base_id} is not connected to this agent. Available: ${kbList}`,
+                },
+              ],
+            };
+          }
+
+          try {
+            const res = await fetch(`${apiUrl}/api/knowledge/${knowledge_base_id}/ingest`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ text: content, filename }),
+            });
+            if (!res.ok) {
+              const errText = await res.text();
+              return { content: [{ type: "text", text: `Error ingesting: ${errText}` }] };
+            }
+            const json = (await res.json()) as { data: { documentId: number } };
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Successfully added "${filename}" to knowledge base ${knowledge_base_id}. Document ID: ${json.data.documentId}`,
+                },
+              ],
+            };
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            return { content: [{ type: "text", text: `Error: ${msg}` }] };
+          }
+        },
+      ),
+    );
+  }
+
+  if (workflowTools.length > 0) {
+    mcpServers["openconclave-workflow"] = createSdkMcpServer({
+      name: "openconclave-workflow",
+      version: "0.1.0",
+      tools: workflowTools,
+    });
   }
 
   try {
@@ -219,22 +472,12 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
 
     const durationMs = Date.now() - startTime;
 
-    // Read workflow state file for routing decisions
+    // Read routing decision from in-process workflow tool state
     let routeTo: string | undefined;
-    if (stateFile) {
-      try {
-        if (existsSync(stateFile)) {
-          const state = JSON.parse(readFileSync(stateFile, "utf8"));
-          if (state.routeTo) {
-            routeTo = state.routeTo;
-            if (state.routeContent) {
-              resultOutput = state.routeContent;
-            }
-          }
-          unlinkSync(stateFile);
-        }
-      } catch {
-        // State file not written — agent didn't call routing tool
+    if (routingState.routeTo) {
+      routeTo = routingState.routeTo;
+      if (routingState.routeContent) {
+        resultOutput = routingState.routeContent;
       }
     }
 
@@ -248,11 +491,6 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
       sessionId,
     };
   } catch (err: unknown) {
-    // Clean up temp files on error
-    if (stateFile) {
-      try { unlinkSync(stateFile); } catch {}
-    }
-
     const message = err instanceof Error ? err.message : String(err);
     return {
       success: false,
