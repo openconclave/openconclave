@@ -1,4 +1,5 @@
 import type { WorkflowNode, WorkflowEdge } from "@openconclave/shared";
+import { AppError, ErrorCode } from "@openconclave/shared";
 
 export type ExecutionLayer = {
   nodeIds: string[];
@@ -18,8 +19,15 @@ export function topologicalSort(
   }
 
   for (const edge of edges) {
-    adjacency.get(edge.source)?.push(edge.target);
-    inDegree.set(edge.target, (inDegree.get(edge.target) ?? 0) + 1);
+    if (!nodeMap.has(edge.source) || !nodeMap.has(edge.target)) {
+      const invalid = !nodeMap.has(edge.source) ? edge.source : edge.target;
+      throw AppError.validation(
+        `Edge references invalid node "${invalid}" not found in workflow`,
+        { edgeId: edge.id, source: edge.source, target: edge.target }
+      );
+    }
+    adjacency.get(edge.source)!.push(edge.target);
+    inDegree.set(edge.target, inDegree.get(edge.target)! + 1);
   }
 
   const layers: ExecutionLayer[] = [];
@@ -35,7 +43,12 @@ export function topologicalSort(
     }
 
     if (layer.length === 0) {
-      throw new Error("Cycle detected in workflow graph");
+      const cycleNodes = [...inDegree.keys()].filter((id) => !visited.has(id));
+      throw new AppError(
+        ErrorCode.WORKFLOW_CYCLE_DETECTED,
+        `Cycle detected involving nodes: ${cycleNodes.join(", ")}`,
+        422
+      );
     }
 
     for (const id of layer) {
