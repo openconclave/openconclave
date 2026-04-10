@@ -1,7 +1,7 @@
 import { eq, desc } from "drizzle-orm";
 
 import { db } from "../db/client";
-import { runs, checkpoints } from "../db/schema";
+import { runs, checkpoints, agentTasks } from "../db/schema";
 import { getIncomingEdges, getOutgoingEdges } from "./graph";
 import { executeNode } from "./node-executor";
 import { normalizeWorkflowNodeTypes } from "./normalize-workflow";
@@ -186,12 +186,11 @@ export async function executeGraph(
     // Fan-in tracking: count how many inputs each node has received
     // Nodes with multiple incoming edges wait until all have arrived
     const pendingInputs = new Map<string, Map<string, unknown>>(); // nodeId -> (sourceId -> output)
-    // Track which merge nodes have already fired to prevent double-execution
+    // Track which merge nodes have already fired to prevent double-execution.
+    // Do NOT pre-seed from completedNodes — that would block the skip-and-traverse
+    // path at the `resumeSkipNodes.has(entry.nodeId)` check below, causing downstream
+    // nodes after a merge-in-checkpoint to be silently dropped on resume.
     const firedMerges = new Set<string>();
-    // Resume: prevent already-completed merge nodes from waiting for inputs again
-    for (const nodeId of completedNodes) {
-      if (nodeMap.get(nodeId)?.data.type === "merge") firedMerges.add(nodeId);
-    }
     let iterations = 0;
 
     while (queue.length > 0) {
@@ -343,8 +342,41 @@ export async function executeGraph(
       }
     }
 
-    // Success
+    // Invariant check before marking the run as success: every node that has an
+    // interrupted/running task for this run must also have a successful task for
+    // the same node (meaning the resume re-executed it). Nodes whose ONLY tasks
+    // are interrupted are orphans — the resume skipped them without re-running.
+    // This guards against the bug where resume marks runs success without
+    // actually executing everything. See issue #27.
+    const allTasks = await db
+      .select({ nodeId: agentTasks.nodeId, status: agentTasks.status })
+      .from(agentTasks)
+      .where(eq(agentTasks.runId, runId));
+    const successfulNodes = new Set<string>();
+    const orphanCandidates = new Set<string>();
+    for (const t of allTasks) {
+      if (t.status === "success") successfulNodes.add(t.nodeId);
+      else if (t.status === "interrupted" || t.status === "running") {
+        orphanCandidates.add(t.nodeId);
+      }
+    }
+    const orphanedNodes = [...orphanCandidates].filter((n) => !successfulNodes.has(n));
+
     const now = new Date().toISOString();
+    if (orphanedNodes.length > 0) {
+      const message = `Run has ${orphanedNodes.length} orphaned node(s) with no successful task: ${orphanedNodes.join(", ")}`;
+      await db
+        .update(runs)
+        .set({ status: "failure", completedAt: now, error: message })
+        .where(eq(runs.id, runId));
+      emit({
+        type: "run:completed",
+        runId,
+        data: { status: "failure", error: message },
+      });
+      return;
+    }
+
     await db
       .update(runs)
       .set({ status: "success", completedAt: now })
