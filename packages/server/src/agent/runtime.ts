@@ -424,9 +424,19 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
     for await (const message of agentQuery) {
       const msg = message as SDKMessage & { type: string; subtype?: string; [key: string]: unknown };
 
-      // Capture thinking blocks from assistant messages
+      // Capture thinking + tool-use blocks from assistant messages
       if (msg.type === "assistant") {
-        const assistantMsg = msg as unknown as { message?: { content?: Array<{ type: string; thinking?: string; signature?: string }> } };
+        const assistantMsg = msg as unknown as {
+          message?: {
+            content?: Array<{
+              type: string;
+              thinking?: string;
+              signature?: string;
+              name?: string;
+              input?: unknown;
+            }>;
+          };
+        };
         if (assistantMsg.message?.content) {
           for (const block of assistantMsg.message.content) {
             if (block.type === "thinking" && block.thinking) {
@@ -435,6 +445,53 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
                 signature: block.signature,
               });
               onOutput?.(`[thinking: ${block.thinking.slice(0, 100)}...]\n`);
+            } else if (block.type === "tool_use" && block.name) {
+              // Emit one event per tool invocation for observability.
+              // Truncate args to keep run_events manageable — full input is in the SDK stream.
+              let argSummary = "";
+              try {
+                const json = JSON.stringify(block.input ?? {});
+                argSummary = json.length > 200 ? json.slice(0, 200) + "…" : json;
+              } catch {
+                argSummary = "(unserializable)";
+              }
+              onOutput?.(`[tool: ${block.name}(${argSummary})]\n`);
+            }
+          }
+        }
+      }
+
+      // Emit tool results from user messages so we can see what came back.
+      if (msg.type === "user") {
+        const userMsg = msg as unknown as {
+          message?: {
+            content?: Array<{
+              type: string;
+              tool_use_id?: string;
+              content?: string | Array<{ type: string; text?: string }>;
+              is_error?: boolean;
+            }>;
+          };
+        };
+        if (userMsg.message?.content) {
+          for (const block of userMsg.message.content) {
+            if (block.type === "tool_result") {
+              let resultText = "";
+              if (typeof block.content === "string") {
+                resultText = block.content;
+              } else if (Array.isArray(block.content)) {
+                resultText = block.content
+                  .filter((b) => b.type === "text" && typeof b.text === "string")
+                  .map((b) => b.text)
+                  .join("");
+              }
+              // Truncate aggressively — full results are available via the session file
+              // and may be large. Keep the event stream lightweight.
+              const preview = resultText.length > 300
+                ? resultText.slice(0, 300) + "…"
+                : resultText;
+              const tag = block.is_error ? "tool_error" : "tool_result";
+              onOutput?.(`[${tag}: ${preview}]\n`);
             }
           }
         }
