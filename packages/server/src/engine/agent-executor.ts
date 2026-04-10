@@ -5,6 +5,7 @@ import { db } from "../db/client";
 import { agentTasks, settings } from "../db/schema";
 import { agentPool } from "../agent/pool";
 import { AgentBase } from "../agent/base";
+import { TOOL_NAME_MAP } from "../agent/builtin-tools";
 import { runOllamaAgent } from "../agent/ollama";
 import { runOpenAIAgent, type OpenAIProvider } from "../agent/openai";
 import type { AgentResult, ThinkingBlock } from "../agent/runtime";
@@ -22,15 +23,10 @@ import { registerPrompt } from "./prompt-registry";
 
 export function mapOllamaTools(config: ResolvedAgentConfig): string[] {
   const tools: string[] = [];
-  const toolMap: Record<string, string> = {
-    Bash: "bash",
-    Read: "read_file",
-    Write: "write_file",
-  };
 
   if (config.allowedTools) {
     for (const t of config.allowedTools) {
-      const mapped = toolMap[t];
+      const mapped = TOOL_NAME_MAP[t];
       if (mapped) tools.push(mapped);
     }
   }
