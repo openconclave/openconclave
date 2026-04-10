@@ -5,9 +5,16 @@ import { createHash } from "crypto";
 import { mkdirSync, readFileSync, existsSync, chmodSync, renameSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
 import type { ResolvedAgentConfig } from "@openconclave/shared";
 import { Workspace } from "../engine/workspace";
+import { db } from "../db/client";
+import { documents, chunks } from "../db/schema";
+import { searchMultipleKBs } from "../knowledge/search";
+import { ingestText } from "../knowledge/ingest";
+import { registerPrompt } from "../engine/prompt-registry";
+import { broadcastRunEvent } from "../ws/broadcast";
 
 // SDK's extractFromBunfs only checks for "$bunfs" but Bun on Windows uses "B:/~BUN/".
 // Re-extract here to cover both patterns.
@@ -110,7 +117,6 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
   const routeTargets = options.routeTargets;
   const knowledgeBaseIds = config.knowledgeBases?.map(Number).filter((n) => !isNaN(n)) ?? [];
   const promptConfig = options.promptConfig;
-  const apiUrl = process.env.OC_API_URL ?? `http://localhost:${process.env.PORT ?? 4000}`;
   const routingState: { routeTo?: string; routeContent?: string } = {};
 
   // Use ReturnType<typeof tool> is not portable across zod generics, so accept
@@ -161,20 +167,31 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
           question: z.string().describe("The question to ask the user"),
         },
         async ({ question }) => {
-          const res = await fetch(`${apiUrl}/api/prompts/ask`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
+          try {
+            broadcastRunEvent({
+              type: "prompt:question",
               runId: promptConfig.runId,
               nodeId: promptConfig.nodeId,
+              data: {
+                question,
+                waitingForResponse: true,
+                workflowName: "",
+                nodeLabel: promptConfig.nodeId,
+                senderNode: promptConfig.senderNode ?? "agent",
+                senderType: "agent",
+              },
+            });
+            const response = await registerPrompt(
+              promptConfig.runId,
+              promptConfig.nodeId,
               question,
-              senderNode: promptConfig.senderNode,
-            }),
-          });
-          const data = (await res.json()) as { response?: string; error?: string };
-          return {
-            content: [{ type: "text", text: data.response ?? data.error ?? "No response received" }],
-          };
+              null,
+            );
+            return { content: [{ type: "text", text: response }] };
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            return { content: [{ type: "text", text: `Error asking user: ${msg}` }] };
+          }
         },
       ),
     );
@@ -196,60 +213,40 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
             .describe(`Specific KB to search. If omitted, searches all connected KBs (${kbList})`),
         },
         async ({ query: searchQuery, top_k, knowledge_base_id }) => {
-          const topK = top_k ?? 5;
-          const targetIds =
-            knowledge_base_id !== undefined ? [knowledge_base_id] : knowledgeBaseIds;
+          try {
+            const topK = top_k ?? 5;
 
-          if (knowledge_base_id !== undefined && !knowledgeBaseIds.includes(knowledge_base_id)) {
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: `Error: knowledge base ${knowledge_base_id} is not connected to this agent. Available: ${kbList}`,
-                },
-              ],
-            };
-          }
-
-          const allResults: Array<{
-            content: string;
-            score: number;
-            documentName: string;
-            chunkIndex: number;
-          }> = [];
-
-          for (const kbId of targetIds) {
-            try {
-              const res = await fetch(`${apiUrl}/api/knowledge/${kbId}/search`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ query: searchQuery, topK }),
-              });
-              if (!res.ok) continue;
-              const json = (await res.json()) as {
-                data: Array<{ content: string; score: number; documentName: string; chunkIndex: number }>;
+            if (knowledge_base_id !== undefined && !knowledgeBaseIds.includes(knowledge_base_id)) {
+              return {
+                content: [
+                  {
+                    type: "text",
+                    text: `Error: knowledge base ${knowledge_base_id} is not connected to this agent. Available: ${kbList}`,
+                  },
+                ],
               };
-              allResults.push(...json.data);
-            } catch {
-              // Skip unreachable KBs
             }
+
+            const targetIds =
+              knowledge_base_id !== undefined ? [knowledge_base_id] : knowledgeBaseIds;
+            const results = await searchMultipleKBs(targetIds, searchQuery, topK);
+
+            if (results.length === 0) {
+              return { content: [{ type: "text", text: "No relevant results found." }] };
+            }
+
+            const formatted = results
+              .map(
+                (r, i) =>
+                  `[${i + 1}] (score: ${r.score.toFixed(3)}) [${r.documentName} chunk ${r.chunkIndex}]\n${r.content}`,
+              )
+              .join("\n\n---\n\n");
+
+            return { content: [{ type: "text", text: formatted }] };
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            return { content: [{ type: "text", text: `Error searching knowledge: ${msg}` }] };
           }
-
-          allResults.sort((a, b) => b.score - a.score);
-          const results = allResults.slice(0, topK);
-
-          if (results.length === 0) {
-            return { content: [{ type: "text", text: "No relevant results found." }] };
-          }
-
-          const formatted = results
-            .map(
-              (r, i) =>
-                `[${i + 1}] (score: ${r.score.toFixed(3)}) [${r.documentName} chunk ${r.chunkIndex}]\n${r.content}`,
-            )
-            .join("\n\n---\n\n");
-
-          return { content: [{ type: "text", text: formatted }] };
         },
       ),
     );
@@ -267,32 +264,41 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
             .describe("Specific chunk index to fetch. If omitted, returns all chunks (full document)"),
         },
         async ({ knowledge_base_id, document_id, chunk_index }) => {
-          if (!knowledgeBaseIds.includes(knowledge_base_id)) {
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: `Error: knowledge base ${knowledge_base_id} is not connected to this agent. Available: ${kbList}`,
-                },
-              ],
-            };
-          }
-
           try {
-            const res = await fetch(
-              `${apiUrl}/api/knowledge/${knowledge_base_id}/documents/${document_id}/chunks`,
-            );
-            if (!res.ok) {
-              const errText = await res.text();
-              return { content: [{ type: "text", text: `Error fetching document: ${errText}` }] };
-            }
-            const json = (await res.json()) as {
-              data: {
-                document: { id: number; filename: string; sourcePath: string | null };
-                chunks: Array<{ id: number; content: string; chunkIndex: number }>;
+            if (!knowledgeBaseIds.includes(knowledge_base_id)) {
+              return {
+                content: [
+                  {
+                    type: "text",
+                    text: `Error: knowledge base ${knowledge_base_id} is not connected to this agent. Available: ${kbList}`,
+                  },
+                ],
               };
-            };
-            const { document: doc, chunks: docChunks } = json.data;
+            }
+
+            const doc = await db
+              .select()
+              .from(documents)
+              .where(eq(documents.id, document_id))
+              .get();
+            if (!doc || doc.knowledgeBaseId !== knowledge_base_id) {
+              return {
+                content: [
+                  {
+                    type: "text",
+                    text: `Error: document ${document_id} not found in knowledge base ${knowledge_base_id}`,
+                  },
+                ],
+              };
+            }
+
+            const docChunks = await db
+              .select({
+                content: chunks.content,
+                chunkIndex: chunks.chunkIndex,
+              })
+              .from(chunks)
+              .where(eq(chunks.documentId, document_id));
 
             if (chunk_index !== undefined) {
               const chunk = docChunks.find((c) => c.chunkIndex === chunk_index);
@@ -328,7 +334,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
             };
           } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);
-            return { content: [{ type: "text", text: `Error: ${msg}` }] };
+            return { content: [{ type: "text", text: `Error fetching document: ${msg}` }] };
           }
         },
       ),
@@ -344,39 +350,30 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
           content: z.string().describe("The text content to ingest"),
         },
         async ({ knowledge_base_id, filename, content }) => {
-          if (!knowledgeBaseIds.includes(knowledge_base_id)) {
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: `Error: knowledge base ${knowledge_base_id} is not connected to this agent. Available: ${kbList}`,
-                },
-              ],
-            };
-          }
-
           try {
-            const res = await fetch(`${apiUrl}/api/knowledge/${knowledge_base_id}/ingest`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ text: content, filename }),
-            });
-            if (!res.ok) {
-              const errText = await res.text();
-              return { content: [{ type: "text", text: `Error ingesting: ${errText}` }] };
+            if (!knowledgeBaseIds.includes(knowledge_base_id)) {
+              return {
+                content: [
+                  {
+                    type: "text",
+                    text: `Error: knowledge base ${knowledge_base_id} is not connected to this agent. Available: ${kbList}`,
+                  },
+                ],
+              };
             }
-            const json = (await res.json()) as { data: { documentId: number } };
+
+            const documentId = await ingestText(knowledge_base_id, filename, content);
             return {
               content: [
                 {
                   type: "text",
-                  text: `Successfully added "${filename}" to knowledge base ${knowledge_base_id}. Document ID: ${json.data.documentId}`,
+                  text: `Successfully added "${filename}" to knowledge base ${knowledge_base_id}. Document ID: ${documentId}`,
                 },
               ],
             };
           } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);
-            return { content: [{ type: "text", text: `Error: ${msg}` }] };
+            return { content: [{ type: "text", text: `Error ingesting: ${msg}` }] };
           }
         },
       ),
