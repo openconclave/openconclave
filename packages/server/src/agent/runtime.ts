@@ -1,10 +1,36 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { writeFileSync, unlinkSync, mkdirSync, readFileSync, existsSync } from "fs";
+import embeddedCliPath from "@anthropic-ai/claude-agent-sdk/embed";
+import { createHash } from "crypto";
+import { writeFileSync, unlinkSync, mkdirSync, readFileSync, existsSync, chmodSync, renameSync } from "fs";
+import { tmpdir } from "os";
 import { join, resolve } from "path";
 import type { ResolvedAgentConfig } from "@openconclave/shared";
 import { TMP_DIR } from "../lib/workspace";
 import { Workspace } from "../engine/workspace";
+
+// SDK's extractFromBunfs only checks for "$bunfs" but Bun on Windows uses "B:/~BUN/".
+// Re-extract here to cover both patterns.
+function resolveCliPath(path: string): string {
+  if (!path.includes("$bunfs") && !path.includes("~BUN")) return path;
+  try {
+    const content = readFileSync(path);
+    const hash = createHash("sha256").update(content).digest("hex").slice(0, 16);
+    const dir = join(tmpdir(), `claude-agent-sdk-${hash}`);
+    const out = join(dir, "cli.js");
+    if (existsSync(out)) return out;
+    mkdirSync(dir, { recursive: true });
+    const tmp = join(dir, `cli.js.tmp.${process.pid}`);
+    writeFileSync(tmp, content);
+    try { chmodSync(tmp, 0o755); } catch {}
+    renameSync(tmp, out);
+    return out;
+  } catch {
+    return path;
+  }
+}
+
+const cliPath = resolveCliPath(embeddedCliPath);
 
 export interface ThinkingBlock {
   thinking: string;
@@ -121,6 +147,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
     const agentQuery = query({
       prompt,
       options: {
+        pathToClaudeCodeExecutable: cliPath,
         cwd: ws.cwd,
         env: { ...process.env, ...env } as Record<string, string>,
         model: config.model && modelMap[config.model] ? modelMap[config.model] : undefined,
@@ -137,6 +164,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
         strictMcpConfig: true,
         resume: options.sessionId,
         thinking: { type: "enabled" as const, budgetTokens: 31999 },
+        stderr: (data: string) => onOutput?.(`[CLI stderr] ${data}`),
       },
     });
 
