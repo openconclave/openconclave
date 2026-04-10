@@ -5,7 +5,6 @@ import {
   FileSearch,
   FolderSearch,
   Search,
-  Globe,
   GripVertical,
 } from "lucide-react";
 
@@ -17,8 +16,6 @@ const builtinTools = [
   { id: "Write", label: "Write", icon: FileEdit, description: "Write files" },
   { id: "Glob", label: "Glob", icon: FolderSearch, description: "Find files by pattern" },
   { id: "Grep", label: "Grep", icon: Search, description: "Search file contents" },
-  { id: "WebFetch", label: "WebFetch", icon: Globe, description: "Fetch web content" },
-  { id: "WebSearch", label: "WebSearch", icon: Globe, description: "Search the web" },
 ];
 
 // Known MCP servers (user can add custom ones too)

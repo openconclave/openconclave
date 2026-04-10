@@ -8,7 +8,7 @@ export type OllamaBuiltinTool = {
 
 /**
  * Creates builtin tool definitions for Ollama agents.
- * Extends the shared builtin tools (bash, read_file, write_file, web_fetch)
+ * Extends the shared builtin tools (bash, read_file, write_file)
  * with Ollama-specific tools (send_telegram).
  */
 export function createOllamaBuiltinTools(cwd?: string): Record<string, OllamaBuiltinTool> {

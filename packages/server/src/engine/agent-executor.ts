@@ -26,7 +26,6 @@ export function mapOllamaTools(config: ResolvedAgentConfig): string[] {
     Bash: "bash",
     Read: "read_file",
     Write: "write_file",
-    WebFetch: "web_fetch",
   };
 
   if (config.allowedTools) {

@@ -289,31 +289,6 @@ export function createBuiltinTools(workspace?: Workspace): Record<string, Builti
         }
       },
     },
-    web_fetch: {
-      tool: {
-        type: "function",
-        function: {
-          name: "web_fetch",
-          description: "Fetch content from a URL and return the text",
-          parameters: {
-            type: "object",
-            required: ["url"],
-            properties: {
-              url: { type: "string", description: "The URL to fetch" },
-            },
-          },
-        },
-      },
-      execute: async (args) => {
-        try {
-          const res = await fetch(args.url as string, { signal: AbortSignal.timeout(15000) });
-          const text = await res.text();
-          return text.length > 8000 ? text.slice(0, 8000) + "\n...(truncated)" : text;
-        } catch (err: unknown) {
-          return `Error: ${err instanceof Error ? err.message : String(err)}`;
-        }
-      },
-    },
   };
 }
 
@@ -322,5 +297,4 @@ export const TOOL_NAME_MAP: Record<string, string> = {
   Bash: "bash",
   Read: "read_file",
   Write: "write_file",
-  WebFetch: "web_fetch",
 };

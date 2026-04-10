@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Zap, User, GitFork, Code, Combine, MessageCircleQuestion, Send, FileText, BookOpen,
-  Terminal, FileEdit, FileSearch, FolderSearch, Search, Globe, Server, ChevronDown, ChevronRight,
+  Terminal, FileEdit, FileSearch, FolderSearch, Search, Server, ChevronDown, ChevronRight,
   Users, Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -85,11 +85,6 @@ const codeToolItems: ToolItem[] = [
   { toolType: "builtin", toolId: "Write", toolName: "Write", icon: FileEdit, description: "Write files" },
   { toolType: "builtin", toolId: "Glob", toolName: "Glob", icon: FolderSearch, description: "Find files by pattern" },
   { toolType: "builtin", toolId: "Grep", toolName: "Grep", icon: Search, description: "Search file contents" },
-];
-
-const webToolItems: ToolItem[] = [
-  { toolType: "builtin", toolId: "WebFetch", toolName: "WebFetch", icon: Globe, description: "Fetch web content" },
-  { toolType: "builtin", toolId: "WebSearch", toolName: "WebSearch", icon: Globe, description: "Search the web" },
 ];
 
 // ── MCP Registry search ──────────────────────────────────────
@@ -342,12 +337,6 @@ export function NodePalette() {
       <div className="space-y-3">
         <ToolGroup label="Code">
           {codeToolItems.map((item) => (
-            <DraggableToolItem key={item.toolId} item={item} onDragStart={onToolDragStart} />
-          ))}
-        </ToolGroup>
-
-        <ToolGroup label="Web">
-          {webToolItems.map((item) => (
             <DraggableToolItem key={item.toolId} item={item} onDragStart={onToolDragStart} />
           ))}
         </ToolGroup>
