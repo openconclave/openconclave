@@ -10,10 +10,11 @@ import { RunDetailPage } from "@/pages/run-detail";
 import { SettingsPage } from "@/pages/settings";
 import { ChatPage } from "@/pages/chat";
 import { KnowledgePage } from "@/pages/knowledge";
+import { KnowledgeDetailPage } from "@/pages/knowledge-detail";
 import { OnboardingPage } from "@/pages/onboarding";
 import { api } from "@/lib/api";
 
-function getPage() {
+export function getPage() {
   const path = window.location.pathname;
   if (path === "/" || path === "") return <DashboardPage />;
   if (path === "/conclaves") return <ConclavesPage />;
@@ -21,6 +22,7 @@ function getPage() {
   if (path === "/runs") return <RunsPage />;
   if (path.startsWith("/runs/")) return <RunDetailPage />;
   if (path === "/settings") return <SettingsPage />;
+  if (path.startsWith("/knowledge/")) return <KnowledgeDetailPage />;
   if (path === "/knowledge") return <KnowledgePage />;
   // /:toolName/chat or /:toolName/chat/:sessionId
   if (path.split("/")[2] === "chat") return <ChatPage />;
