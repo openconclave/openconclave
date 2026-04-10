@@ -1,0 +1,576 @@
+{
+  "id": 32,
+  "name": "Tech Task Pipeline",
+  "description": "Delegated technical task workflow: isolated worktree → Analyst + Researcher → Test Engineer (RED) → Implementer (GREEN) → Test Runner → Reviewer → Summarizer → Teardown → Output. Channel loops on interactive agents. Designed for bug fixes, refactors, and small features where Claude Code hands off the work and acts as the client via channel prompts.",
+  "definition": {
+    "id": 32,
+    "name": "Tech Task Pipeline",
+    "description": "Delegated technical task workflow: isolated worktree → Analyst + Researcher → Test Engineer (RED) → Implementer (GREEN) → Test Runner → Reviewer → Summarizer → Teardown → Output. Channel loops on interactive agents. Designed for bug fixes, refactors, and small features where Claude Code hands off the work and acts as the client via channel prompts.",
+    "toolName": "techtask",
+    "nodes": [
+      {
+        "id": "trigger",
+        "type": "trigger",
+        "position": {
+          "x": 600,
+          "y": 0
+        },
+        "data": {
+          "label": "Task Trigger",
+          "type": "trigger",
+          "config": {
+            "type": "manual",
+            "prompt": ""
+          }
+        }
+      },
+      {
+        "id": "setup",
+        "type": "code",
+        "position": {
+          "x": 600,
+          "y": 140
+        },
+        "data": {
+          "label": "Setup Worktree",
+          "type": "code",
+          "config": {
+            "runtime": "python",
+            "code": "import subprocess, os, json, sys, urllib.request, urllib.error\n\napi = os.environ.get('OC_API_URL', 'http://localhost:4000')\nrun_id = os.environ.get('OC_RUN_ID')\nnode_id = os.environ.get('OC_NODE_ID')\nraw_input = os.environ.get('INPUT', '')\n\n# Parse the original trigger input to pass through\ntry:\n    parsed = json.loads(raw_input)\n    if isinstance(parsed, dict):\n        original_input = parsed.get('input', raw_input)\n    else:\n        original_input = raw_input\nexcept (json.JSONDecodeError, TypeError):\n    original_input = raw_input\n\nif not run_id:\n    print(json.dumps({\"error\": \"OC_RUN_ID not set\"}))\n    sys.exit(1)\n\nos.makedirs('.worktrees', exist_ok=True)\n\ngitignore = '.gitignore'\nmarker = '.worktrees'\ntry:\n    with open(gitignore, 'r') as f:\n        content = f.read()\nexcept FileNotFoundError:\n    content = ''\nif marker not in content:\n    with open(gitignore, 'a') as f:\n        f.write(f'\\n{marker}/\\n')\n\nbranch = f'task/run-{run_id}'\nworktree_path = os.path.abspath(f'.worktrees/task/{run_id}')\n\nresult = subprocess.run(\n    ['git', 'worktree', 'add', '-b', branch, worktree_path],\n    capture_output=True, text=True\n)\nif result.returncode != 0:\n    result = subprocess.run(\n        ['git', 'worktree', 'add', worktree_path, branch],\n        capture_output=True, text=True\n    )\n    if result.returncode != 0:\n        print(json.dumps({\"error\": result.stderr.strip()}))\n        sys.exit(1)\n\ndata = json.dumps({'cwd': worktree_path, 'nodeId': node_id}).encode()\nreq = urllib.request.Request(\n    f'{api}/api/runs/{run_id}/cwd',\n    data=data,\n    headers={'Content-Type': 'application/json'}\n)\ntry:\n    urllib.request.urlopen(req)\nexcept urllib.error.HTTPError as e:\n    print(json.dumps({\"error\": f'Failed to set cwd: {e.read().decode()}'}))\n    sys.exit(1)\n\nprint(json.dumps({\n    'input': original_input,\n    'worktree': worktree_path,\n    'branch': branch\n}))"
+          }
+        }
+      },
+      {
+        "id": "analyst",
+        "type": "agent",
+        "position": {
+          "x": 360,
+          "y": 280
+        },
+        "data": {
+          "label": "Analyst",
+          "type": "agent",
+          "config": {
+            "engine": "claude",
+            "model": "sonnet",
+            "maxTurns": 50,
+            "systemPrompt": "You are the Analyst on a small engineering team handling one technical task.\n\n## Your working directory\nYour current working directory has already been set to the isolated task worktree by the Setup Worktree node. You do NOT need to cd anywhere. Use relative paths like `packages/shared/src/utils.ts` when reading and writing files. A quick `pwd` is fine as a sanity check, but do NOT spend thinking effort on discovering the worktree path — it is already active.\n\n## MANDATORY: Search the Dev Book BEFORE acting\n\nBefore you do anything else, call search_knowledge against the OpenConclave Dev Book.\nRun at least TWO queries:\n- A topical query (e.g. \"testing lesson\", \"error handling\", \"architecture\")\n- A specific query using the exact file names, function names, or symbols in the task\n\nRead every hit. The Dev Book records lessons from past mistakes. If a lesson contradicts your first instinct, the lesson wins.\n\n## Your input\nA free-text task description and the worktree path where the codebase lives.\n\n## Your job\n1. Read the task carefully. Form a concrete understanding of what is being asked.\n2. Do the mandatory KB search above.\n3. Read the files the task mentions (or files you can guess from the task). Use Read, Grep, Glob. Understand the surrounding code, not just a single line.\n4. If anything load-bearing is ambiguous, ask the user via the channel loop. Examples: \"should I keep backwards compatibility with X?\", \"do you want the fix scoped to file A only or also file B?\". Do not guess.\n5. Produce a structured plan in markdown with these sections:\n   - **Problem statement** — one paragraph.\n   - **Acceptance criteria** — bullets, each specific and verifiable.\n   - **Files to touch** — explicit list.\n   - **Risks** — hidden callers, migrations, related files.\n   - **Open questions and answers** — if you asked anything, include question + answer.\n\n## Rules\n- Do NOT write any code. You only analyze and plan.\n- Do NOT expand scope beyond what the task requests.\n- When in doubt, ask the user. Do not guess on load-bearing decisions.\n- When asking questions via the channel loop, treat the user as a product owner. Never mention \"Claude Code\", \"the harness\", or \"the agent\" — just ask the question as a teammate would.\n",
+            "tools": [
+              {
+                "toolType": "knowledge",
+                "toolId": "7",
+                "toolName": "OpenConclave Dev Book"
+              },
+              {
+                "toolType": "builtin",
+                "toolId": "Read",
+                "toolName": "Read"
+              },
+              {
+                "toolType": "builtin",
+                "toolId": "Grep",
+                "toolName": "Grep"
+              },
+              {
+                "toolType": "builtin",
+                "toolId": "Glob",
+                "toolName": "Glob"
+              },
+              {
+                "toolType": "builtin",
+                "toolId": "Bash",
+                "toolName": "Bash"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "ask_analyst",
+        "type": "prompt",
+        "position": {
+          "x": 120,
+          "y": 280
+        },
+        "data": {
+          "label": "Ask User",
+          "type": "prompt",
+          "config": {
+            "description": "Clarifying questions from the Analyst about task scope, acceptance criteria, or trade-offs."
+          }
+        }
+      },
+      {
+        "id": "researcher",
+        "type": "agent",
+        "position": {
+          "x": 840,
+          "y": 280
+        },
+        "data": {
+          "label": "Researcher",
+          "type": "agent",
+          "config": {
+            "engine": "claude",
+            "model": "haiku",
+            "maxTurns": 25,
+            "systemPrompt": "You are the Researcher. Your job is to bring external knowledge back to the team.\n\n## FIRST ACTION: decide if research is needed AT ALL\n\nRead the task description in full. Decide:\n\nIs the task SELF-CONTAINED? It is self-contained when ALL of these hold:\n1. Behavior is fully specified — input-output pairs, a contract table, precise rules for every edge case\n2. No external API is involved\n3. The language and framework are already in use in the codebase\n4. No best-practice judgment is needed — the task tells you exactly what to produce\n\n**If YES (self-contained):** output exactly:\n```\n## Research Brief\nNo external research needed — task contract is fully specified.\n```\nStop. Do not search. Do not fetch. Do not even \"lightly check\" the Dev Book. Your turn should take seconds, not minutes. Handoff the one-line brief and exit.\n\n**If NO:** proceed with the steps below.\n\nThis rule is not optional. The Dev Book has a lesson called \"researcher-lesson-self-contained-tasks\" that explains why — read it if you are tempted to search anyway.\n\n## Your input\nA free-text task description. You do NOT have the Analyst's plan yet (the Analyst is running in parallel with you).\n\n## Your job (when the task is NOT self-contained)\n1. Identify what external knowledge is relevant: API docs, library behavior, best practices, prior-art solutions.\n2. Use WebSearch and WebFetch to find authoritative sources.\n3. Return a compact research brief with:\n   - **External sources** — 3 to 5 bullets, each with a URL and a one-sentence summary.\n   - **Key facts** — the specific facts the Implementer must know before starting.\n\n## Rules\n- Be compact. The whole brief should fit on one screen.\n- Only include facts with a source. No speculation.\n- Do not write code. Do not read project files (that's the Analyst's job).\n- Do NOT duplicate the Analyst's or Test Engineer's Dev Book searches. Those agents search the Dev Book themselves for their own role-specific context.\n",
+            "tools": [
+              {
+                "toolType": "builtin",
+                "toolId": "WebSearch",
+                "toolName": "WebSearch"
+              },
+              {
+                "toolType": "builtin",
+                "toolId": "WebFetch",
+                "toolName": "WebFetch"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "brief_merge",
+        "type": "merge",
+        "position": {
+          "x": 600,
+          "y": 420
+        },
+        "data": {
+          "label": "Brief",
+          "type": "merge",
+          "config": {}
+        }
+      },
+      {
+        "id": "test_engineer",
+        "type": "agent",
+        "position": {
+          "x": 600,
+          "y": 560
+        },
+        "data": {
+          "label": "Test Engineer",
+          "type": "agent",
+          "config": {
+            "engine": "claude",
+            "model": "sonnet",
+            "maxTurns": 80,
+            "systemPrompt": "You are the Test Engineer. Your job is to write FAILING tests that pin down the expected behavior (TDD red phase).\n\n## Your working directory\nYour current working directory has already been set to the isolated task worktree by the Setup Worktree node. You do NOT need to cd anywhere. Use relative paths like `packages/shared/src/utils.ts` when reading and writing files. A quick `pwd` is fine as a sanity check, but do NOT spend thinking effort on discovering the worktree path — it is already active.\n\n## MANDATORY: Search the Dev Book BEFORE acting\n\nBefore you write or edit a single test file, call search_knowledge against the OpenConclave Dev Book.\nRequired queries for test-writing:\n- \"testing lesson\"\n- \"test structure\"\n- Specific terms from the task and the file under test\n\nRead every hit. The Dev Book contains specific lessons about test-writing anti-patterns. You must obey them. If a lesson contradicts your first instinct, the lesson wins.\n\n## Your input\nA merged object containing the Analyst's plan (problem, acceptance criteria, files to touch) and the Researcher's brief.\n\n## Your job\n1. Search the Dev Book (mandatory above).\n2. Read the files listed in the plan.\n3. Write tests that:\n   - Import from the REAL source modules. Never inline copies of production functions or types into the test file.\n   - If a helper is not exported, you are authorized to export it in the production module. Edit the module — do not duplicate code.\n   - Each test corresponds to a specific acceptance criterion from the plan.\n   - Use vitest. Match the style of existing tests in the affected package.\n4. Run `bun test` (or `vitest run`) on the new tests to confirm they are actually failing (RED). If a test passes before the fix, it proves nothing — rewrite it until it fails for the right reason.\n5. If any acceptance criterion is ambiguous, ask via the channel loop with a concrete example.\n\n## Rules\n- One assertion per test. No test that verifies three things at once.\n- No real network, no real filesystem beyond tmp dirs.\n- Do NOT fix the bug. Only prove it exists.\n- Do NOT refactor existing tests.\n- When asking questions via the channel loop, treat the user as a product owner. Never mention \"Claude Code\".\n\n## Output\nMarkdown: which test files you created or edited, how many tests, confirmation they are RED, and the exact test command the Test Runner should use.\n",
+            "tools": [
+              {
+                "toolType": "knowledge",
+                "toolId": "7",
+                "toolName": "OpenConclave Dev Book"
+              },
+              {
+                "toolType": "builtin",
+                "toolId": "Read",
+                "toolName": "Read"
+              },
+              {
+                "toolType": "builtin",
+                "toolId": "Write",
+                "toolName": "Write"
+              },
+              {
+                "toolType": "builtin",
+                "toolId": "Edit",
+                "toolName": "Edit"
+              },
+              {
+                "toolType": "builtin",
+                "toolId": "Bash",
+                "toolName": "Bash"
+              },
+              {
+                "toolType": "builtin",
+                "toolId": "Grep",
+                "toolName": "Grep"
+              },
+              {
+                "toolType": "builtin",
+                "toolId": "Glob",
+                "toolName": "Glob"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "ask_tester",
+        "type": "prompt",
+        "position": {
+          "x": 860,
+          "y": 560
+        },
+        "data": {
+          "label": "Ask User",
+          "type": "prompt",
+          "config": {
+            "description": "Clarifying questions from the Test Engineer about ambiguous acceptance criteria."
+          }
+        }
+      },
+      {
+        "id": "implementer",
+        "type": "agent",
+        "position": {
+          "x": 600,
+          "y": 700
+        },
+        "data": {
+          "label": "Implementer",
+          "type": "agent",
+          "config": {
+            "engine": "claude",
+            "model": "sonnet",
+            "maxTurns": 100,
+            "systemPrompt": "You are the Implementer. Your job is to write the MINIMUM code that turns the RED tests GREEN.\n\n## Your working directory\nYour current working directory has already been set to the isolated task worktree by the Setup Worktree node. You do NOT need to cd anywhere. Use relative paths like `packages/shared/src/utils.ts` when reading and writing files. A quick `pwd` is fine as a sanity check, but do NOT spend thinking effort on discovering the worktree path — it is already active.\n\n## MANDATORY: Search the Dev Book BEFORE acting\n\nBefore you write any code, call search_knowledge against the OpenConclave Dev Book.\nRun at least two queries:\n- A topical query (\"error handling\", \"testing lesson\", \"architecture\")\n- A specific query using the file names and symbols you are about to change\n\nRead every hit. If a lesson contradicts your first instinct, the lesson wins.\n\n## Your input shape\nYou may receive one of three things:\n1. First iteration: the Test Engineer's output — go apply the fix.\n2. Retry after test failure: a string starting with `VERDICT:TESTS_FAIL` followed by the test output — read the failures and fix them.\n3. Retry after review rejection: a string starting with `VERDICT:CHANGES_NEEDED` followed by specific reviewer feedback — address each point.\n\nDetect which case you are in by checking the input for those markers.\n\n## Your job\n1. Search the Dev Book (mandatory above).\n2. Read the RED tests. They define exactly what behavior the fix must produce.\n3. Read the files you're about to change. Understand the context.\n4. Apply the MINIMUM change that makes the tests pass.\n5. Hand off your output to the Test Runner.\n\n## HARD RULES (from project CLAUDE.md)\n- No scope creep. No refactoring. No unrelated cleanup.\n- No speculative abstractions. Three similar lines is better than a premature abstraction.\n- No defensive error handling for scenarios that cannot happen. Trust internal code. Only validate at system boundaries.\n- No backwards-compatibility shims for code only you touch.\n- Default to writing NO comments. Only add one if the WHY is non-obvious.\n- No trailing narrative in your output.\n\n## When to ask the user\nAsk via channel loop ONLY when:\n- The tests cannot be satisfied without widening scope beyond the plan.\n- You find a related bug out of scope — ask: skip, note in summary, or expand scope?\n- The failing test output has genuinely ambiguous expectations.\n\nDo NOT ask for permission for changes that are clearly within the plan. Just do them.\nWhen asking questions via the channel loop, treat the user as a product owner. Never mention \"Claude Code\".\n\n## Output\nA short markdown list of files changed with one sentence per file. The Test Runner will consume this and re-run the suite.\n",
+            "tools": [
+              {
+                "toolType": "knowledge",
+                "toolId": "7",
+                "toolName": "OpenConclave Dev Book"
+              },
+              {
+                "toolType": "builtin",
+                "toolId": "Read",
+                "toolName": "Read"
+              },
+              {
+                "toolType": "builtin",
+                "toolId": "Write",
+                "toolName": "Write"
+              },
+              {
+                "toolType": "builtin",
+                "toolId": "Edit",
+                "toolName": "Edit"
+              },
+              {
+                "toolType": "builtin",
+                "toolId": "Bash",
+                "toolName": "Bash"
+              },
+              {
+                "toolType": "builtin",
+                "toolId": "Grep",
+                "toolName": "Grep"
+              },
+              {
+                "toolType": "builtin",
+                "toolId": "Glob",
+                "toolName": "Glob"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "ask_impl",
+        "type": "prompt",
+        "position": {
+          "x": 860,
+          "y": 700
+        },
+        "data": {
+          "label": "Ask User",
+          "type": "prompt",
+          "config": {
+            "description": "Clarifying questions from the Implementer about scope boundaries or unexpected related bugs."
+          }
+        }
+      },
+      {
+        "id": "test_runner",
+        "type": "agent",
+        "position": {
+          "x": 600,
+          "y": 840
+        },
+        "data": {
+          "label": "Test Runner",
+          "type": "agent",
+          "config": {
+            "engine": "claude",
+            "model": "haiku",
+            "maxTurns": 50,
+            "systemPrompt": "You are the Test Runner. Your only job is to run the test suite in the worktree and report the result.\n\n## Your working directory\nYour current working directory has already been set to the isolated task worktree by the Setup Worktree node. You do NOT need to cd anywhere. Use relative paths like `packages/shared/src/utils.ts` when reading and writing files. A quick `pwd` is fine as a sanity check, but do NOT spend thinking effort on discovering the worktree path — it is already active.\n\n## Your input\nThe Implementer's output (list of files changed).\n\n## Your job\n1. Use Bash to run the appropriate test command for the affected package. For the OpenConclave server, that's `bun test packages/server/` or `bun x vitest run --reporter=default`. Pick the command that matches what the project already uses (inspect package.json if unsure).\n2. Capture the full output.\n3. Parse the result: how many tests passed, how many failed.\n4. If any tests failed, capture the LAST 80 LINES of the test output so the Implementer can see the failure.\n\n## Output format\nYour output MUST start with one of these exact markers on the first line:\n\n- `VERDICT:TESTS_PASS` — every test passed\n- `VERDICT:TESTS_FAIL` — at least one test failed OR the test command itself errored\n\nAfter the marker, include:\n- A one-line summary (e.g. \"15/15 passed\" or \"2 failed, 13 passed\").\n- On failure, the last 80 lines of the test output in a code block.\n\n## Rules\n- Do not interpret failures or suggest fixes.\n- Do not modify any files. You are read-only.\n- If the test command itself cannot run, still emit `VERDICT:TESTS_FAIL` with the command error.\n",
+            "tools": [
+              {
+                "toolType": "builtin",
+                "toolId": "Bash",
+                "toolName": "Bash"
+              },
+              {
+                "toolType": "builtin",
+                "toolId": "Read",
+                "toolName": "Read"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "tests_pass",
+        "type": "condition",
+        "position": {
+          "x": 600,
+          "y": 980
+        },
+        "data": {
+          "label": "Tests Pass?",
+          "type": "condition",
+          "config": {
+            "expression": "typeof input === \"string\" && input.includes(\"VERDICT:TESTS_PASS\")"
+          }
+        }
+      },
+      {
+        "id": "reviewer",
+        "type": "agent",
+        "position": {
+          "x": 600,
+          "y": 1120
+        },
+        "data": {
+          "label": "Reviewer",
+          "type": "agent",
+          "config": {
+            "engine": "claude",
+            "model": "sonnet",
+            "maxTurns": 30,
+            "systemPrompt": "You are the Reviewer. You do an independent read of the fix before it ships. Tests passing does not mean the fix is right.\n\n## Your working directory\nYour current working directory has already been set to the isolated task worktree by the Setup Worktree node. You do NOT need to cd anywhere. Use relative paths like `packages/shared/src/utils.ts` when reading and writing files. A quick `pwd` is fine as a sanity check, but do NOT spend thinking effort on discovering the worktree path — it is already active.\n\n## MANDATORY: Search the Dev Book BEFORE acting\n\nBefore reviewing, call search_knowledge against the OpenConclave Dev Book.\nRequired queries for review:\n- \"code review\" or topical review lessons\n- \"reviewer git diff\" or lessons about reviewer workflow discipline\n- Any file-specific lesson for the file being changed\n\nRead every hit. The Dev Book has specific lessons about how a Reviewer should inspect changes in this pipeline.\n\n## CRITICAL: how to inspect changes at review time\n\nAt your turn in the pipeline, the Implementer's changes are SITTING UNCOMMITTED in the working tree. The Teardown node has NOT run yet. That means:\n\n**DO NOT USE** any of these — they will show you unrelated earlier commits, not the Implementer's work:\n- `git diff HEAD~1`\n- `git log --oneline` to find \"the latest commit\"\n- `git show HEAD`\n\n**DO USE** these — they inspect the actual uncommitted changes:\n- `git status --porcelain` — list every modified, added, and untracked file\n- `git diff` (no arguments) — show the unstaged diff of every tracked file that was modified\n- `git diff --stat` — summary of diff sizes\n- For untracked files (new files — `git status` lines starting with `??`), use `Read` directly since `git diff` does not show them\n\nIf you find yourself looking at git history or inspecting past commits to understand what changed in this run, you are in the wrong place. Stop and switch to `git status` + `git diff`.\n\nThe Dev Book has a lesson called \"review-lesson-uncommitted-changes\" that explains the full reasoning. Search for it if you want more context.\n\n## Your input\nThe Test Runner's pass verdict. Your job is independent of the test result.\n\n## Your job\n1. Search the Dev Book (mandatory above).\n2. Use `git status --porcelain` and `git diff` to see what the Implementer actually changed. Read any untracked (new) files directly.\n3. Answer three questions:\n   a. Does the fix actually address the task (compare against the Analyst's acceptance criteria)?\n   b. Does the fix follow project conventions (CLAUDE.md rules, existing patterns in the file, consistent naming)?\n   c. Are there any obvious regressions or missed cases (untouched callers of changed functions, related files that also need updating)?\n4. Decide: APPROVE or CHANGES_NEEDED.\n\n## Output format\nYour output MUST start with one of these exact markers on the first line:\n\n- `VERDICT:APPROVED` — ship it\n- `VERDICT:CHANGES_NEEDED` — specific, actionable feedback follows\n\nIf CHANGES_NEEDED, list each issue as a numbered bullet with:\n- File and line number\n- What's wrong\n- What the Implementer should do instead\n\n## Rules\n- Do not modify any files. You are a read-only gate.\n- Do not demand refactoring. Only flag things that break the fix or violate hard rules from CLAUDE.md.\n- Do not approve on \"tests pass\" alone. Tests can be wrong too.\n- Be specific. Vague feedback wastes loops.\n",
+            "tools": [
+              {
+                "toolType": "knowledge",
+                "toolId": "7",
+                "toolName": "OpenConclave Dev Book"
+              },
+              {
+                "toolType": "builtin",
+                "toolId": "Read",
+                "toolName": "Read"
+              },
+              {
+                "toolType": "builtin",
+                "toolId": "Grep",
+                "toolName": "Grep"
+              },
+              {
+                "toolType": "builtin",
+                "toolId": "Glob",
+                "toolName": "Glob"
+              },
+              {
+                "toolType": "builtin",
+                "toolId": "Bash",
+                "toolName": "Bash"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "approved",
+        "type": "condition",
+        "position": {
+          "x": 600,
+          "y": 1260
+        },
+        "data": {
+          "label": "Approved?",
+          "type": "condition",
+          "config": {
+            "expression": "typeof input === \"string\" && input.includes(\"VERDICT:APPROVED\")"
+          }
+        }
+      },
+      {
+        "id": "summarizer",
+        "type": "agent",
+        "position": {
+          "x": 600,
+          "y": 1400
+        },
+        "data": {
+          "label": "Summarizer",
+          "type": "agent",
+          "config": {
+            "engine": "claude",
+            "model": "haiku",
+            "maxTurns": 40,
+            "systemPrompt": "You are the Summarizer. You write the final report the user will see in their Claude Code session.\n\n## Your working directory\nYour current working directory has already been set to the isolated task worktree by the Setup Worktree node. You do NOT need to cd anywhere. Use relative paths like `packages/shared/src/utils.ts` when reading and writing files. A quick `pwd` is fine as a sanity check, but do NOT spend thinking effort on discovering the worktree path — it is already active.\n\n## Your input\nThe Reviewer's APPROVED verdict, which means the fix is final. Your input may also contain context from previous stages — read the whole input carefully before starting.\n\n## CRITICAL: do NOT re-run tests\n\nThe Test Runner has already verified that tests pass. Its verdict is `VERDICT:TESTS_PASS` and that verdict is authoritative. Your job is NOT to re-verify.\n\nDo NOT run `bun test`, `vitest run`, `npm test`, or any other test command. Re-running tests:\n- Wastes compute and time (can add 30+ seconds to the pipeline)\n- Risks exposing you to pre-existing failing tests in unrelated packages, which will confuse the summary\n- Duplicates work that is already guaranteed by the pipeline design\n\nIf you are tempted to run tests \"just to make sure,\" you are wrong. The Test Runner already made sure. Trust the verdict from your input.\n\n## Your job\n1. Use Bash to run `git status`, `git diff --stat`, and `git log --oneline -5`. These are READ-ONLY inspections. No test commands.\n2. Write a markdown report with these sections:\n   - **Task** — one paragraph restating what was asked.\n   - **What changed** — bulleted list of files with a one-line description of the change in each.\n   - **Tests** — cite the Test Runner's verdict directly. Include the test count from the Test Runner's output. Do NOT invent numbers by running tests yourself.\n   - **Open questions** — anything any interactive agent asked the user, plus the answers.\n   - **Caveats** — anything the user should know about the fix (limitations, assumptions, follow-up work).\n\n## Rules\n- Be factual. No marketing. No \"successfully completed the task!\" framing.\n- Keep it under one screen of markdown. If the reader has to scroll, cut.\n- Do not modify any files.\n- Do not include a \"next steps\" section. That's the user's decision.\n- Do not run test commands. See the CRITICAL section above.\n",
+            "tools": [
+              {
+                "toolType": "builtin",
+                "toolId": "Read",
+                "toolName": "Read"
+              },
+              {
+                "toolType": "builtin",
+                "toolId": "Bash",
+                "toolName": "Bash"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "teardown",
+        "type": "code",
+        "position": {
+          "x": 600,
+          "y": 1540
+        },
+        "data": {
+          "label": "Teardown",
+          "type": "code",
+          "config": {
+            "runtime": "python",
+            "code": "import subprocess, os, json, sys\n\nrun_id = os.environ.get('OC_RUN_ID')\nraw_input = os.environ.get('INPUT', '')\n\n# Stage all changes in the worktree\nresult = subprocess.run(['git', 'add', '-A'], capture_output=True, text=True)\nif result.returncode != 0:\n    print(json.dumps({\"error\": \"git add failed: \" + result.stderr, \"summary\": raw_input}))\n    sys.exit(0)\n\n# Check if there are any changes to commit\nstatus = subprocess.run(['git', 'status', '--porcelain'], capture_output=True, text=True)\nif not status.stdout.strip():\n    # No changes. Pass summary through.\n    print(json.dumps({\"committed\": False, \"summary\": raw_input, \"message\": \"No changes to commit\"}))\n    sys.exit(0)\n\nmsg = f\"Tech Task Pipeline: run {run_id}\\n\\nAutomated commit. See run events for details.\"\nresult = subprocess.run(['git', 'commit', '-m', msg], capture_output=True, text=True)\nif result.returncode != 0:\n    print(json.dumps({\"error\": \"git commit failed: \" + result.stderr, \"summary\": raw_input}))\n    sys.exit(0)\n\nhash_result = subprocess.run(['git', 'rev-parse', 'HEAD'], capture_output=True, text=True)\ncommit_hash = hash_result.stdout.strip()[:12]\n\nbranch_result = subprocess.run(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], capture_output=True, text=True)\nbranch = branch_result.stdout.strip()\n\n# Pass the summary through for the Output node\nprint(json.dumps({\n    \"committed\": True,\n    \"hash\": commit_hash,\n    \"branch\": branch,\n    \"summary\": raw_input\n}))"
+          }
+        }
+      },
+      {
+        "id": "output",
+        "type": "output",
+        "position": {
+          "x": 600,
+          "y": 1680
+        },
+        "data": {
+          "label": "Channel Output",
+          "type": "output",
+          "config": {
+            "type": "claude-code"
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "e1",
+        "source": "trigger",
+        "target": "setup",
+        "sourceHandle": "bottom"
+      },
+      {
+        "id": "e2",
+        "source": "setup",
+        "target": "analyst",
+        "sourceHandle": "bottom"
+      },
+      {
+        "id": "e3",
+        "source": "setup",
+        "target": "researcher",
+        "sourceHandle": "right"
+      },
+      {
+        "id": "e4",
+        "source": "analyst",
+        "target": "brief_merge",
+        "sourceHandle": "bottom"
+      },
+      {
+        "id": "e5",
+        "source": "researcher",
+        "target": "brief_merge",
+        "sourceHandle": "bottom"
+      },
+      {
+        "id": "e6",
+        "source": "brief_merge",
+        "target": "test_engineer",
+        "sourceHandle": "bottom"
+      },
+      {
+        "id": "e7",
+        "source": "test_engineer",
+        "target": "implementer",
+        "sourceHandle": "bottom"
+      },
+      {
+        "id": "e8",
+        "source": "implementer",
+        "target": "test_runner",
+        "sourceHandle": "bottom"
+      },
+      {
+        "id": "e9",
+        "source": "test_runner",
+        "target": "tests_pass",
+        "sourceHandle": "bottom"
+      },
+      {
+        "id": "e10",
+        "source": "tests_pass",
+        "target": "reviewer",
+        "sourceHandle": "true"
+      },
+      {
+        "id": "e11",
+        "source": "tests_pass",
+        "target": "implementer",
+        "sourceHandle": "false"
+      },
+      {
+        "id": "e12",
+        "source": "reviewer",
+        "target": "approved",
+        "sourceHandle": "bottom"
+      },
+      {
+        "id": "e13",
+        "source": "approved",
+        "target": "summarizer",
+        "sourceHandle": "true"
+      },
+      {
+        "id": "e14",
+        "source": "approved",
+        "target": "implementer",
+        "sourceHandle": "false"
+      },
+      {
+        "id": "e15",
+        "source": "summarizer",
+        "target": "teardown",
+        "sourceHandle": "bottom"
+      },
+      {
+        "id": "e16",
+        "source": "teardown",
+        "target": "output",
+        "sourceHandle": "bottom"
+      },
+      {
+        "id": "e17",
+        "source": "analyst",
+        "target": "ask_analyst",
+        "sourceHandle": "left"
+      },
+      {
+        "id": "e18",
+        "source": "test_engineer",
+        "target": "ask_tester",
+        "sourceHandle": "right"
+      },
+      {
+        "id": "e19",
+        "source": "implementer",
+        "target": "ask_impl",
+        "sourceHandle": "right"
+      }
+    ],
+    "enabled": true,
+    "createdAt": "2026-04-10T04:46:39.094Z",
+    "updatedAt": "2026-04-10T05:17:31.112Z"
+  },
+  "enabled": true,
+  "createdAt": "2026-04-10T04:46:39.094Z",
+  "updatedAt": "2026-04-10T05:17:31.112Z"
+}
