@@ -142,14 +142,14 @@ export async function executeNode(
 
 // ── Discussion output filtering ──────────────────────────────
 
-interface SpeechRecord {
+export interface SpeechRecord {
   agentName: string;
   agentId: string;
   round: number;
   message: string;
 }
 
-interface DiscussionOutput {
+export interface DiscussionOutput {
   responses: SpeechRecord[];
   transcript: string;
   moderatorSummary: string | null;
@@ -168,7 +168,7 @@ function isDiscussionOutput(val: unknown): val is DiscussionOutput {
   );
 }
 
-function filterDiscussionOutput(output: unknown, sourceHandle: string): unknown {
+export function filterDiscussionOutput(output: unknown, sourceHandle: string): unknown {
   if (!isDiscussionOutput(output)) return output;
 
   switch (sourceHandle) {
