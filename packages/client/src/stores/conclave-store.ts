@@ -11,8 +11,8 @@ import {
   addEdge,
 } from "@xyflow/react";
 import type {
-  WorkflowNodeData,
-  WorkflowNodeConfig,
+  ConclaveNodeData,
+  ConclaveNodeConfig,
   TriggerConfig,
 } from "@openconclave/shared";
 
@@ -37,13 +37,13 @@ export function edgeStyle(sourceHandle?: string | null, bidirectional = false) {
   };
 }
 
-function isChatTrigger(node: Node<WorkflowNodeData>): boolean {
+function isChatTrigger(node: Node<ConclaveNodeData>): boolean {
   return node.data.type === "trigger" && (node.data.config as TriggerConfig)?.type === "chat";
 }
 
 function isBidirectional(
-  source: Node<WorkflowNodeData>,
-  target: Node<WorkflowNodeData>,
+  source: Node<ConclaveNodeData>,
+  target: Node<ConclaveNodeData>,
 ): boolean {
   if (isChatTrigger(source)) return true;
   if (source.data.type === "agent" && target.data.type === "prompt") return true;
@@ -54,7 +54,7 @@ function isBidirectional(
 // ── History (undo/redo) ──────────────────────────────────────
 
 interface Snapshot {
-  nodes: Node<WorkflowNodeData>[];
+  nodes: Node<ConclaveNodeData>[];
   edges: Edge[];
 }
 
@@ -62,14 +62,14 @@ const MAX_HISTORY = 50;
 
 // ── Store Types ──────────────────────────────────────────────
 
-interface WorkflowState {
-  nodes: Node<WorkflowNodeData>[];
+interface ConclaveState {
+  nodes: Node<ConclaveNodeData>[];
   edges: Edge[];
   selectedNodeId: string | null;
   activeNodeIds: Set<string>;
   skippedNodeIds: Set<string>;
-  workflowName: string;
-  workflowDescription: string;
+  conclaveName: string;
+  conclaveDescription: string;
   toolName?: string;
   isDirty: boolean;
   isDraggingTool: boolean;
@@ -79,7 +79,7 @@ interface WorkflowState {
   _past: Snapshot[];
   _future: Snapshot[];
 
-  onNodesChange: OnNodesChange<Node<WorkflowNodeData>>;
+  onNodesChange: OnNodesChange<Node<ConclaveNodeData>>;
   onEdgesChange: OnEdgesChange;
   onConnect: OnConnect;
   setSelectedNode: (id: string | null) => void;
@@ -87,13 +87,13 @@ interface WorkflowState {
   setSkippedNodes: (ids: Set<string>) => void;
   setDraggingTool: (v: boolean) => void;
   pushHistory: () => void;
-  addNode: (node: Node<WorkflowNodeData>) => void;
-  updateNodeData: (id: string, data: Partial<WorkflowNodeData>) => void;
-  updateNodeConfig: (id: string, config: Partial<WorkflowNodeConfig>) => void;
+  addNode: (node: Node<ConclaveNodeData>) => void;
+  updateNodeData: (id: string, data: Partial<ConclaveNodeData>) => void;
+  updateNodeConfig: (id: string, config: Partial<ConclaveNodeConfig>) => void;
   removeNode: (id: string) => void;
-  setWorkflowMeta: (name: string, description: string) => void;
-  loadWorkflow: (
-    nodes: Node<WorkflowNodeData>[],
+  setConclaveMeta: (name: string, description: string) => void;
+  loadConclave: (
+    nodes: Node<ConclaveNodeData>[],
     edges: Edge[],
     name: string,
     description: string,
@@ -106,7 +106,7 @@ interface WorkflowState {
 
 // ── Store ────────────────────────────────────────────────────
 
-export const useWorkflowStore = create<WorkflowState>((set, get) => {
+export const useConclaveStore = create<ConclaveState>((set, get) => {
 
   /** Push current nodes/edges onto the undo stack.
    *  Debounced: rapid calls within 50ms batch into one entry. */
@@ -141,8 +141,8 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => {
   selectedNodeId: null,
   activeNodeIds: new Set<string>(),
   skippedNodeIds: new Set<string>(),
-  workflowName: "Untitled Workflow",
-  workflowDescription: "",
+  conclaveName: "Untitled Conclave",
+  conclaveDescription: "",
   isDirty: false,
   isDraggingTool: false,
   openDropdownId: null,
@@ -275,11 +275,11 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => {
     });
   },
 
-  setWorkflowMeta: (name, description) => {
-    set({ workflowName: name, workflowDescription: description, isDirty: true });
+  setConclaveMeta: (name, description) => {
+    set({ conclaveName: name, conclaveDescription: description, isDirty: true });
   },
 
-  loadWorkflow: (nodes, edges, name, description, toolName) => {
+  loadConclave: (nodes, edges, name, description, toolName) => {
     // Cancel any pending debounce so a stale snapshot is not committed after load
     if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
     pendingSnapshot = null;
@@ -299,8 +299,8 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => {
     set({
       nodes: remappedNodes,
       edges: styledEdges,
-      workflowName: name,
-      workflowDescription: description,
+      conclaveName: name,
+      conclaveDescription: description,
       toolName,
       isDirty: false,
       selectedNodeId: null,
@@ -319,8 +319,8 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => {
       selectedNodeId: null,
       activeNodeIds: new Set<string>(),
       skippedNodeIds: new Set<string>(),
-      workflowName: "Untitled Workflow",
-      workflowDescription: "",
+      conclaveName: "Untitled Conclave",
+      conclaveDescription: "",
       isDirty: false,
       _past: [],
       _future: [],

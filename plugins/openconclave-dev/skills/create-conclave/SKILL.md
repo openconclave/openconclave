@@ -1,24 +1,24 @@
 ---
-description: "Create an OpenConclave workflow from a natural language description. Use when the user wants to build a workflow, automate a task, orchestrate agents, set up a pipeline, or connect multiple AI steps together. Triggers on: 'create a workflow', 'build a workflow', 'automate', 'set up a pipeline', 'I want to orchestrate'."
-argument-hint: "Describe what the workflow should do"
+description: "Create an OpenConclave conclave from a natural language description. Use when the user wants to build a conclave, automate a task, orchestrate agents, set up a pipeline, or connect multiple AI steps together. Triggers on: 'create a conclave', 'build a conclave', 'automate', 'set up a pipeline', 'I want to orchestrate'."
+argument-hint: "Describe what the conclave should do"
 allowed-tools:
-  - mcp__plugin_openconclave-dev_openconclave-dev__create_workflow
-  - mcp__plugin_openconclave-dev_openconclave-dev__list_workflows
-  - mcp__plugin_openconclave-dev_openconclave-dev__get_workflow
+  - mcp__plugin_openconclave-dev_openconclave-dev__create_conclave
+  - mcp__plugin_openconclave-dev_openconclave-dev__list_conclaves
+  - mcp__plugin_openconclave-dev_openconclave-dev__get_conclave
   - mcp__plugin_openconclave-dev_openconclave-dev__add_node
   - mcp__plugin_openconclave-dev_openconclave-dev__update_node
   - mcp__plugin_openconclave-dev_openconclave-dev__get_node
 ---
 
-# Create OpenConclave Workflow
+# Create OpenConclave Conclave
 
-You are designing and creating an OpenConclave workflow from the user's request. Your goal: translate their intent into a working workflow with proper node structure, then create it via MCP and give them the URL.
+You are designing and creating an OpenConclave conclave from the user's request. Your goal: translate their intent into a working conclave with proper node structure, then create it via MCP and give them the URL.
 
 ## Design Principles
 
 **Single Responsibility**: Each agent does ONE thing well. Never create a "hero agent" that handles everything. Break complex tasks into focused steps.
 
-**Don't oversimplify**: If the task has distinct phases (fetch, process, format, deliver), use separate nodes. A workflow with 1 agent is usually wrong.
+**Don't oversimplify**: If the task has distinct phases (fetch, process, format, deliver), use separate nodes. A conclave with 1 agent is usually wrong.
 
 **Don't over-engineer**: If 2 agents can do the job, don't use 5. Every node should earn its place. Ask: "would removing this node lose something?"
 
@@ -34,7 +34,7 @@ You are designing and creating an OpenConclave workflow from the user's request.
 ## Node Types Reference
 
 ### Trigger
-Starts the workflow. Config:
+Starts the conclave. Config:
 - `type`: "manual" | "cron" | "webhook" | "channel" | "telegram"
 - `prompt`: default input text (for manual/cron)
 - `cron`: cron expression (for cron type, e.g., "0 9 * * *")
@@ -70,7 +70,7 @@ Combines parallel outputs. No config needed.
 - Keys are source node labels — make sure they're unique
 
 ### Prompt (Channel Loop)
-Lets an agent ask the user a question and wait for a response. The workflow pauses until the user replies.
+Lets an agent ask the user a question and wait for a response. The conclave pauses until the user replies.
 - `description`: what kind of questions the agent might ask
 - Connect: Agent → (right handle) → Prompt → Agent (back)
 - The agent's system prompt should say "ask the user via the channel loop" — never mention "Claude Code"
@@ -82,7 +82,7 @@ Delivers results. Config:
 - `type`: "claude-code" (channel to Claude Code session) | "telegram" (send to chat) | "log" (server console)
 - `chatId`: for telegram type
 
-## Workflow Patterns
+## Conclave Patterns
 
 **Sequential**: Trigger → Agent A → Agent B → Output
 Use when each step depends on the previous.
@@ -125,24 +125,24 @@ Bad agent prompts:
 - **Opus**: powerful, slower. Good for: complex reasoning, deep analysis, architecture decisions
 - **Ollama** (local): free, private. Good for: simple text tasks, when privacy matters, no internet needed
 
-## Creating the Workflow
+## Creating the Conclave
 
-After designing the workflow:
+After designing the conclave:
 
 1. Assign unique labels to every node (Agent A, Agent B, not Agent, Agent)
-2. Use `create_workflow` to create the workflow with all nodes and edges
-3. Or build incrementally: `create_workflow` with trigger, then `add_node` with `connectFrom`/`connectTo` for each node
+2. Use `create_conclave` to create the conclave with all nodes and edges
+3. Or build incrementally: `create_conclave` with trigger, then `add_node` with `connectFrom`/`connectTo` for each node
 4. Use `update_node` to adjust config or rewire edges after creation
 5. Use `get_node` to inspect full node details (config, code)
 6. Node positions: start trigger at {x: 0, y: 0}, space nodes 160px vertically, parallel nodes 240px horizontally
 7. Edge IDs: use format "e1", "e2", etc.
-8. After creation, give the user the URL: `http://localhost:5173/workflows/{id}`
+8. After creation, give the user the URL: `http://localhost:5173/conclaves/{id}`
 
 ## Process
 
 1. Read the user's request
 2. If critical info is missing (like: should it run on schedule? what model?), ask ONE focused question
-3. Design the workflow following the principles above
+3. Design the conclave following the principles above
 4. Explain the design briefly: what each node does and why
 5. Create it via MCP
 6. Give the user the URL and suggest they test it

@@ -1,12 +1,12 @@
 import { logger } from "../lib/logger";
 import { db } from "../db/client";
-import { workflows } from "../db/schema";
+import { conclaves } from "../db/schema";
 import { eq } from "drizzle-orm";
-import { WorkflowExecutor } from "./executor";
-import type { WorkflowDefinition, WorkflowNode, TriggerConfig } from "@openconclave/shared";
+import { ConclaveExecutor } from "./executor";
+import type { ConclaveDefinition, ConclaveNode, TriggerConfig } from "@openconclave/shared";
 
 type ScheduledJob = {
-  workflowId: string;
+  conclaveId: string;
   triggerNodeId: string;
   cron: string;
   nextRun: Date;
@@ -63,17 +63,17 @@ function parseCron(cron: string, from: Date): Date | null {
 export class CronScheduler {
   private jobs = new Map<string, ScheduledJob>();
   private timer: ReturnType<typeof setInterval> | null = null;
-  private executor: WorkflowExecutor;
+  private executor: ConclaveExecutor;
   private checkIntervalMs: number;
 
-  constructor(executor: WorkflowExecutor, checkIntervalMs = 15000) {
+  constructor(executor: ConclaveExecutor, checkIntervalMs = 15000) {
     this.executor = executor;
     this.checkIntervalMs = checkIntervalMs;
   }
 
-  getSchedule(): { workflowId: string; cron: string; nextRun: string; enabled: boolean }[] {
+  getSchedule(): { conclaveId: string; cron: string; nextRun: string; enabled: boolean }[] {
     return Array.from(this.jobs.values()).map((j) => ({
-      workflowId: j.workflowId,
+      conclaveId: j.conclaveId,
       cron: j.cron,
       nextRun: j.nextRun.toISOString(),
       enabled: j.enabled,
@@ -87,7 +87,7 @@ export class CronScheduler {
     // Check for due jobs every N seconds
     this.timer = setInterval(() => this.tick(), this.checkIntervalMs);
 
-    // Re-sync workflow definitions every 60s
+    // Re-sync conclave definitions every 60s
     setInterval(() => this.sync(), 60000);
   }
 
@@ -100,13 +100,13 @@ export class CronScheduler {
   }
 
   async sync() {
-    const allWorkflows = await db.select().from(workflows);
+    const allConclaves = await db.select().from(conclaves);
     const activeIds = new Set<string>();
 
-    for (const wf of allWorkflows) {
+    for (const wf of allConclaves) {
       if (!wf.enabled) continue;
 
-      const def = wf.definition as unknown as WorkflowDefinition;
+      const def = wf.definition as unknown as ConclaveDefinition;
       if (!def.nodes) continue;
 
       // Find cron trigger nodes
@@ -121,7 +121,7 @@ export class CronScheduler {
               const nextRun = parseCron(config.cron, new Date());
               if (nextRun) {
                 this.jobs.set(wf.id, {
-                  workflowId: wf.id,
+                  conclaveId: wf.id,
                   triggerNodeId: node.id,
                   cron: config.cron,
                   nextRun,
@@ -137,7 +137,7 @@ export class CronScheduler {
       }
     }
 
-    // Remove jobs for deleted/disabled workflows
+    // Remove jobs for deleted/disabled conclaves
     for (const [id] of this.jobs) {
       if (!activeIds.has(id)) {
         this.jobs.delete(id);
@@ -153,19 +153,19 @@ export class CronScheduler {
       if (now < job.nextRun) continue;
 
       // Time to run
-      console.log(`⏰ Triggering workflow ${id} (cron: ${job.cron})`);
+      console.log(`⏰ Triggering conclave ${id} (cron: ${job.cron})`);
 
       try {
-        const wf = await db.select().from(workflows).where(eq(workflows.id, id));
+        const wf = await db.select().from(conclaves).where(eq(conclaves.id, id));
         if (!wf.length || !wf[0].enabled) {
           job.enabled = false;
           continue;
         }
 
-        const def = wf[0].definition as unknown as WorkflowDefinition;
+        const def = wf[0].definition as unknown as ConclaveDefinition;
         await this.executor.execute(def, { cronTrigger: true, scheduledAt: now.toISOString() }, job.triggerNodeId);
       } catch (err: any) {
-        console.error(`⏰ Failed to trigger workflow ${id}:`, err.message);
+        console.error(`⏰ Failed to trigger conclave ${id}:`, err.message);
       }
 
       // Calculate next run

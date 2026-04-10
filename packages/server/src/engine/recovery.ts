@@ -43,7 +43,7 @@ export async function recoverStaleRuns(): Promise<void> {
       .update(runs)
       .set({
         status: "interrupted",
-        error: "Server restarted while workflow was running",
+        error: "Server restarted while conclave was running",
         completedAt: now,
       })
       .where(eq(runs.status, "running"));

@@ -2,7 +2,7 @@ import { type NodeProps } from "@xyflow/react";
 import { Zap } from "lucide-react";
 import { BaseNode } from "./base-node";
 import { useNodeData } from "@/hooks/use-node-data";
-import { useWorkflowStore } from "@/stores/workflow-store";
+import { useConclaveStore } from "@/stores/conclave-store";
 import type { TriggerConfig } from "@openconclave/shared";
 
 const triggerLabels: Record<string, string> = {
@@ -25,7 +25,7 @@ const triggerOptions = [
 export function TriggerNode(props: NodeProps) {
   const data = useNodeData(props);
   const config = data.config as TriggerConfig;
-  const updateNodeConfig = useWorkflowStore((s) => s.updateNodeConfig);
+  const updateNodeConfig = useConclaveStore((s) => s.updateNodeConfig);
 
   return (
     <BaseNode

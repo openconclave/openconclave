@@ -6,16 +6,16 @@ import { NODE_TYPES, NODE_TYPE_ALIASES } from "@openconclave/shared/src/constant
 const OC_URL = process.env.OPENCONCLAVE_URL ?? "http://localhost:4000";
 
 /**
- * Accepted node types for MCP workflow creation/update.
+ * Accepted node types for MCP conclave creation/update.
  * Includes both current and legacy type names for backward compatibility.
- * Legacy names are mapped to their current equivalents by the workflow normalizer.
+ * Legacy names are mapped to their current equivalents by the conclave normalizer.
  *
  * Note: This set is more restrictive than NODE_TYPES because the MCP API
  * doesn't expose all node types (e.g., "file" and "discussion" are internal only).
  */
 const legacyNodeTypes = Object.keys(NODE_TYPE_ALIASES) as string[];
-const workflowNodeTypesForMcp = ["trigger", "agent", "condition", "code", "merge", "prompt", "output"] as const;
-const acceptedWorkflowNodeTypes = [...workflowNodeTypesForMcp, ...legacyNodeTypes] as [string, ...string[]];
+const conclaveNodeTypesForMcp = ["trigger", "agent", "condition", "code", "merge", "prompt", "output"] as const;
+const acceptedConclaveNodeTypes = [...conclaveNodeTypesForMcp, ...legacyNodeTypes] as [string, ...string[]];
 
 async function ocApi(path: string, method = "GET", body?: unknown): Promise<unknown> {
   const res = await fetch(`${OC_URL}/api${path}`, {
@@ -36,15 +36,15 @@ export function createMcpServer() {
     version: "0.1.0",
   });
 
-  // ── Workflows ──────────────────────────────────────────────
+  // ── Conclaves ──────────────────────────────────────────────
 
   server.tool(
-    "list_workflows",
-    "List all workflows in OpenConclave",
+    "list_conclaves",
+    "List all conclaves in OpenConclave",
     {},
     async () => {
-      const data = await ocApi("/workflows") as { workflows: unknown[] };
-      const summary = data.workflows.map((w: Record<string, unknown>) => ({
+      const data = await ocApi("/conclaves") as { conclaves: unknown[] };
+      const summary = data.conclaves.map((w: Record<string, unknown>) => ({
         id: w.id,
         name: w.name,
         description: w.description,
@@ -55,39 +55,39 @@ export function createMcpServer() {
   );
 
   server.tool(
-    "get_workflow",
-    "Get a workflow's full definition including nodes and edges",
-    { workflowId: z.string().describe("The workflow ID") },
-    async ({ workflowId }) => {
+    "get_conclave",
+    "Get a conclave's full definition including nodes and edges",
+    { conclaveId: z.string().describe("The conclave ID") },
+    async ({ conclaveId }) => {
       try {
-        const data = await ocApi(`/workflows/${workflowId}`);
+        const data = await ocApi(`/conclaves/${conclaveId}`);
         return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
       } catch {
-        return { content: [{ type: "text", text: "Workflow not found" }], isError: true };
+        return { content: [{ type: "text", text: "Conclave not found" }], isError: true };
       }
     }
   );
 
   server.tool(
-    "create_workflow",
-    "Create a new workflow with nodes and edges",
+    "create_conclave",
+    "Create a new conclave with nodes and edges",
     {
-      name: z.string().describe("Workflow name"),
-      description: z.string().optional().describe("Workflow description"),
+      name: z.string().describe("Conclave name"),
+      description: z.string().optional().describe("Conclave description"),
       nodes: z
         .array(
           z.object({
             id: z.string(),
-            type: z.enum(acceptedWorkflowNodeTypes),
+            type: z.enum(acceptedConclaveNodeTypes),
             position: z.object({ x: z.number(), y: z.number() }),
             data: z.object({
               label: z.string(),
-              type: z.enum(acceptedWorkflowNodeTypes),
+              type: z.enum(acceptedConclaveNodeTypes),
               config: z.record(z.unknown()),
             }),
           })
         )
-        .describe("Workflow nodes"),
+        .describe("Conclave nodes"),
       edges: z
         .array(
           z.object({
@@ -98,29 +98,29 @@ export function createMcpServer() {
             label: z.string().optional(),
           })
         )
-        .describe("Workflow edges connecting nodes"),
+        .describe("Conclave edges connecting nodes"),
     },
     async ({ name, description, nodes, edges }) => {
-      const data = await ocApi("/workflows", "POST", { name, description, nodes, edges });
+      const data = await ocApi("/conclaves", "POST", { name, description, nodes, edges });
       return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
     }
   );
 
   server.tool(
-    "update_workflow",
-    "Update an existing workflow's name, description, enabled status, nodes, or edges",
+    "update_conclave",
+    "Update an existing conclave's name, description, enabled status, nodes, or edges",
     {
-      workflowId: z.string().describe("The workflow ID to update"),
+      conclaveId: z.string().describe("The conclave ID to update"),
       name: z.string().optional(),
       description: z.string().optional(),
       enabled: z.boolean().optional(),
       nodes: z.array(z.object({
         id: z.string(),
-        type: z.enum(acceptedWorkflowNodeTypes),
+        type: z.enum(acceptedConclaveNodeTypes),
         position: z.object({ x: z.number(), y: z.number() }),
         data: z.object({
           label: z.string(),
-          type: z.enum(acceptedWorkflowNodeTypes),
+          type: z.enum(acceptedConclaveNodeTypes),
           config: z.record(z.unknown()),
         }),
       })).optional(),
@@ -132,50 +132,50 @@ export function createMcpServer() {
         label: z.string().optional(),
       })).optional(),
     },
-    async ({ workflowId, ...body }) => {
+    async ({ conclaveId, ...body }) => {
       try {
-        const data = await ocApi(`/workflows/${workflowId}`, "PUT", body);
+        const data = await ocApi(`/conclaves/${conclaveId}`, "PUT", body);
         return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
       } catch (e) {
-        return { content: [{ type: "text", text: e instanceof Error ? e.message : "Workflow not found" }], isError: true };
+        return { content: [{ type: "text", text: e instanceof Error ? e.message : "Conclave not found" }], isError: true };
       }
     }
   );
 
   server.tool(
-    "delete_workflow",
-    "Delete a workflow by ID",
-    { workflowId: z.string().describe("The workflow ID to delete") },
-    async ({ workflowId }) => {
-      await ocApi(`/workflows/${workflowId}`, "DELETE");
-      return { content: [{ type: "text", text: JSON.stringify({ id: workflowId, status: "deleted" }) }] };
+    "delete_conclave",
+    "Delete a conclave by ID",
+    { conclaveId: z.string().describe("The conclave ID to delete") },
+    async ({ conclaveId }) => {
+      await ocApi(`/conclaves/${conclaveId}`, "DELETE");
+      return { content: [{ type: "text", text: JSON.stringify({ id: conclaveId, status: "deleted" }) }] };
     }
   );
 
   // ── Runs ───────────────────────────────────────────────────
 
   server.tool(
-    "trigger_workflow",
-    "Trigger a workflow run. Always pass your current working directory as cwd so agents run in the correct project.",
+    "trigger_conclave",
+    "Trigger a conclave run. Always pass your current working directory as cwd so agents run in the correct project.",
     {
-      workflowId: z.string().describe("The workflow ID to trigger"),
+      conclaveId: z.string().describe("The conclave ID to trigger"),
       payload: z.record(z.unknown()).optional().describe("Optional trigger payload data"),
       cwd: z.string().describe("Your current working directory — agents will run here"),
     },
-    async ({ workflowId, payload, cwd }) => {
+    async ({ conclaveId, payload, cwd }) => {
       try {
         const enrichedPayload = { ...(payload ?? {}), ...(cwd ? { _callerCwd: cwd } : {}) };
-        const data = await ocApi(`/workflows/${workflowId}/run`, "POST", { payload: enrichedPayload });
+        const data = await ocApi(`/conclaves/${conclaveId}/run`, "POST", { payload: enrichedPayload });
         return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
       } catch {
-        return { content: [{ type: "text", text: "Workflow not found" }], isError: true };
+        return { content: [{ type: "text", text: "Conclave not found" }], isError: true };
       }
     }
   );
 
   server.tool(
     "list_runs",
-    "List workflow runs",
+    "List conclave runs",
     {
       status: z.enum(["queued", "running", "success", "failure", "cancelled"]).optional(),
       limit: z.number().int().positive().max(100).default(20),
@@ -212,7 +212,7 @@ export function createMcpServer() {
 
   server.tool(
     "cancel_run",
-    "Cancel a running workflow",
+    "Cancel a running conclave",
     { runId: z.string().describe("The run ID to cancel") },
     async ({ runId }) => {
       await ocApi(`/runs/${runId}/cancel`, "POST");
@@ -236,7 +236,7 @@ export function createMcpServer() {
 
   server.tool(
     "get_dashboard",
-    "Get an overview of OpenConclave: workflow count, active runs, recent activity",
+    "Get an overview of OpenConclave: conclave count, active runs, recent activity",
     {},
     async () => {
       const data = await ocApi("/dashboard");
@@ -248,7 +248,7 @@ export function createMcpServer() {
 
   server.tool(
     "get_schedule",
-    "List all scheduled cron workflows with their next run time",
+    "List all scheduled cron conclaves with their next run time",
     {},
     async () => {
       try {
@@ -261,32 +261,32 @@ export function createMcpServer() {
   );
 
   server.tool(
-    "pause_workflow",
-    "Pause a workflow — disables it and stops its cron schedule",
-    { workflowId: z.string().describe("The workflow ID to pause") },
-    async ({ workflowId }) => {
+    "pause_conclave",
+    "Pause a conclave — disables it and stops its cron schedule",
+    { conclaveId: z.string().describe("The conclave ID to pause") },
+    async ({ conclaveId }) => {
       try {
-        await ocApi(`/workflows/${workflowId}`, "PUT", { enabled: false });
+        await ocApi(`/conclaves/${conclaveId}`, "PUT", { enabled: false });
         await ocApi("/scheduler/sync", "POST");
-        return { content: [{ type: "text", text: JSON.stringify({ id: workflowId, status: "paused" }) }] };
+        return { content: [{ type: "text", text: JSON.stringify({ id: conclaveId, status: "paused" }) }] };
       } catch {
-        return { content: [{ type: "text", text: "Workflow not found" }], isError: true };
+        return { content: [{ type: "text", text: "Conclave not found" }], isError: true };
       }
     }
   );
 
   server.tool(
-    "resume_workflow",
-    "Resume a paused workflow — enables it and restarts its cron schedule",
-    { workflowId: z.string().describe("The workflow ID to resume") },
-    async ({ workflowId }) => {
+    "resume_conclave",
+    "Resume a paused conclave — enables it and restarts its cron schedule",
+    { conclaveId: z.string().describe("The conclave ID to resume") },
+    async ({ conclaveId }) => {
       try {
-        await ocApi(`/workflows/${workflowId}`, "PUT", { enabled: true });
+        await ocApi(`/conclaves/${conclaveId}`, "PUT", { enabled: true });
         await ocApi("/scheduler/sync", "POST");
         const schedule = await ocApi("/scheduler") as { schedule: unknown[] };
-        return { content: [{ type: "text", text: JSON.stringify({ id: workflowId, status: "resumed", schedule }, null, 2) }] };
+        return { content: [{ type: "text", text: JSON.stringify({ id: conclaveId, status: "resumed", schedule }, null, 2) }] };
       } catch {
-        return { content: [{ type: "text", text: "Workflow not found" }], isError: true };
+        return { content: [{ type: "text", text: "Conclave not found" }], isError: true };
       }
     }
   );

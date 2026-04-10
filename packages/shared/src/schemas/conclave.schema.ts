@@ -107,7 +107,7 @@ export const discussionConfigSchema = z.object({
   // filter intentionally absent — new Function() sandbox bypass (CVE-2026-25049)
 });
 
-export const workflowNodeSchema = z.object({
+export const conclaveNodeSchema = z.object({
   id: z.string(),
   type: z.enum(NODE_TYPES),
   position: z.object({ x: z.number(), y: z.number() }),
@@ -118,7 +118,7 @@ export const workflowNodeSchema = z.object({
   }),
 });
 
-export const workflowEdgeSchema = z.object({
+export const conclaveEdgeSchema = z.object({
   id: z.string(),
   source: z.string(),
   target: z.string(),
@@ -127,14 +127,14 @@ export const workflowEdgeSchema = z.object({
   label: z.string().optional(),
 });
 
-export const createWorkflowSchema = z.object({
+export const createConclaveSchema = z.object({
   name: z.string().min(1).max(100),
   description: z.string().max(2000).optional(),
   toolName: z.string().max(50).optional(),
-  nodes: z.array(workflowNodeSchema),
-  edges: z.array(workflowEdgeSchema),
+  nodes: z.array(conclaveNodeSchema),
+  edges: z.array(conclaveEdgeSchema),
 });
 
-export const updateWorkflowSchema = createWorkflowSchema.partial().extend({
+export const updateConclaveSchema = createConclaveSchema.partial().extend({
   enabled: z.boolean().optional(),
 });

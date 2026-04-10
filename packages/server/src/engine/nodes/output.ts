@@ -3,22 +3,22 @@ import { db } from "../../db/client";
 import { settings } from "../../db/schema";
 import { logger } from "../../lib/logger";
 import { AppError, ErrorCode } from "@openconclave/shared";
-import type { WorkflowNode, OutputConfig } from "@openconclave/shared";
+import type { ConclaveNode, OutputConfig } from "@openconclave/shared";
 import type { RunEvent } from "../types";
 
 export async function executeOutput(
-  node: WorkflowNode,
+  node: ConclaveNode,
   input: unknown,
   runId: number,
   nodeId: string,
-  workflowName: string | undefined,
+  conclaveName: string | undefined,
   emit: (event: RunEvent) => void
 ): Promise<unknown> {
   const config = node.data.config as OutputConfig;
 
   switch (config.type) {
     case "claude-code":
-      emit({ type: "channel:output", runId, nodeId, data: { content: input, workflowName, nodeLabel: node.data.label } });
+      emit({ type: "channel:output", runId, nodeId, data: { content: input, conclaveName, nodeLabel: node.data.label } });
       break;
 
     case "telegram":

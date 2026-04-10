@@ -11,7 +11,7 @@ import type { AgentResult, ThinkingBlock } from "../agent/runtime";
 import { logger } from "../lib/logger";
 import { SESSIONS_DIR } from "../lib/workspace";
 import { AppError, ErrorCode } from "@openconclave/shared";
-import type { ResolvedAgentConfig, WorkflowNode, WorkflowEdge } from "@openconclave/shared";
+import type { ResolvedAgentConfig, ConclaveNode, ConclaveEdge } from "@openconclave/shared";
 import { getOutgoingEdges } from "./graph";
 
 import type { RouteTarget, RunEvent } from "./types";
@@ -59,8 +59,8 @@ export async function executeAgent(
   routeTargets?: RouteTarget[],
   sessionId?: string,
   workspace?: Workspace,
-  edges?: WorkflowEdge[],
-  nodeMap?: Map<string, WorkflowNode>,
+  edges?: ConclaveEdge[],
+  nodeMap?: Map<string, ConclaveNode>,
 ): Promise<{ output: string; thinking?: ThinkingBlock[]; sessionId?: string }> {
   const now = new Date().toISOString();
   const engine = config.engine ?? "claude";
@@ -135,7 +135,7 @@ export async function executeAgent(
                 data: {
                   question,
                   waitingForResponse: true,
-                  workflowName: "",
+                  conclaveName: "",
                   nodeLabel: promptLabel,
                   senderNode: agentLabel,
                   senderType: "agent",
@@ -200,7 +200,7 @@ export async function executeAgent(
       routeList,
       "",
       "Call openconclave_next with `node_id` (the route) and `content` (your summary). You MUST call it exactly once.",
-      "Failure to call this tool means the workflow hangs forever.",
+      "Failure to call this tool means the conclave hangs forever.",
     ].join("\n");
     augmentedConfig.systemPrompt = (config.systemPrompt ?? "") + routeInstruction;
   }

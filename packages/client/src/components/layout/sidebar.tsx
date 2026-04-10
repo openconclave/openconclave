@@ -9,7 +9,7 @@ import {
 
 const navItems = [
   { label: "Dashboard", icon: LayoutDashboard, href: "/" },
-  { label: "Workflows", icon: GitBranch, href: "/workflows" },
+  { label: "Conclaves", icon: GitBranch, href: "/conclaves" },
   { label: "Runs", icon: Play, href: "/runs" },
   { label: "Knowledge", icon: Brain, href: "/knowledge" },
   { label: "Settings", icon: Settings, href: "/settings" },

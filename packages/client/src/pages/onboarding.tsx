@@ -243,7 +243,7 @@ export function OnboardingPage({ onComplete }: { onComplete: () => void }) {
                 <div>
                   <h1 className="text-3xl font-bold tracking-tight">Welcome to OpenConclave</h1>
                   <p className="text-muted-foreground mt-2 leading-relaxed">
-                    OpenConclave is a visual workflow engine for AI agents.
+                    OpenConclave is a visual conclave engine for AI agents.
                     The best way to use it is through <strong>Claude Code</strong> — Anthropic's CLI tool
                     that connects directly to OpenConclave via MCP.
                   </p>
@@ -283,7 +283,7 @@ export function OnboardingPage({ onComplete }: { onComplete: () => void }) {
                   {claudeStatus === "installed" && (
                     <div className="rounded-md bg-success/5 border border-success/20 p-3">
                       <p className="text-xs text-success">
-                        You're all set. Claude Code can create, trigger, and monitor workflows
+                        You're all set. Claude Code can create, trigger, and monitor conclaves
                         through the OpenConclave MCP plugin.
                       </p>
                     </div>
@@ -292,7 +292,7 @@ export function OnboardingPage({ onComplete }: { onComplete: () => void }) {
                   {claudeStatus === "not_found" && (
                     <div className="space-y-3">
                       <p className="text-xs text-muted-foreground">
-                        Install Claude Code to create workflows with natural language,
+                        Install Claude Code to create conclaves with natural language,
                         trigger runs, respond to agent prompts, and manage everything from your terminal.
                       </p>
                       <div className="flex items-center gap-2">
@@ -331,16 +331,16 @@ export function OnboardingPage({ onComplete }: { onComplete: () => void }) {
                   </p>
                   <div className="grid gap-3">
                     <FeatureCard
-                      title="Create workflows with natural language"
-                      description="Describe what you want and Claude builds the workflow — nodes, edges, prompts, and all."
+                      title="Create conclaves with natural language"
+                      description="Describe what you want and Claude builds the conclave — nodes, edges, prompts, and all."
                     />
                     <FeatureCard
                       title="Trigger and monitor runs"
-                      description="Start workflows, watch progress, and respond to agent questions from your terminal."
+                      description="Start conclaves, watch progress, and respond to agent questions from your terminal."
                     />
                     <FeatureCard
                       title="Answer agent prompts"
-                      description="When a workflow asks a human-in-the-loop question, Claude Code receives and answers it."
+                      description="When a conclave asks a human-in-the-loop question, Claude Code receives and answers it."
                     />
                     <FeatureCard
                       title="Also works with Cursor, Windsurf, and other MCP clients"
@@ -652,7 +652,7 @@ export function OnboardingPage({ onComplete }: { onComplete: () => void }) {
                   <h1 className="text-2xl font-bold tracking-tight">Embedding Model for Knowledge</h1>
                   <p className="text-muted-foreground mt-1">
                     Knowledge Bases use an Ollama embedding model to turn documents into vectors
-                    for semantic search. Agents can then search your data during workflow runs.
+                    for semantic search. Agents can then search your data during conclave runs.
                   </p>
                 </div>
 
@@ -793,14 +793,14 @@ export function OnboardingPage({ onComplete }: { onComplete: () => void }) {
 
                 <div className="grid gap-3 max-w-md mx-auto mt-6">
                   <NextStepCard
-                    title="Create your first workflow"
+                    title="Create your first conclave"
                     description="Open the visual editor and wire up some agent nodes."
-                    href="/workflows"
+                    href="/conclaves"
                   />
                   <NextStepCard
-                    title="Try a pre-built workflow"
-                    description="Use the MCP plugin to create workflows from templates."
-                    href="/workflows"
+                    title="Try a pre-built conclave"
+                    description="Use the MCP plugin to create conclaves from templates."
+                    href="/conclaves"
                   />
                   <NextStepCard
                     title="Upload knowledge"

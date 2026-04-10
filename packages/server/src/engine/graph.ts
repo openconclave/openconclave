@@ -1,4 +1,4 @@
-import type { WorkflowNode, WorkflowEdge } from "@openconclave/shared";
+import type { ConclaveNode, ConclaveEdge } from "@openconclave/shared";
 import { AppError, ErrorCode } from "@openconclave/shared";
 
 export type ExecutionLayer = {
@@ -6,8 +6,8 @@ export type ExecutionLayer = {
 };
 
 export function topologicalSort(
-  nodes: WorkflowNode[],
-  edges: WorkflowEdge[]
+  nodes: ConclaveNode[],
+  edges: ConclaveEdge[]
 ): ExecutionLayer[] {
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
   const inDegree = new Map<string, number>();
@@ -22,7 +22,7 @@ export function topologicalSort(
     if (!nodeMap.has(edge.source) || !nodeMap.has(edge.target)) {
       const invalid = !nodeMap.has(edge.source) ? edge.source : edge.target;
       throw AppError.validation(
-        `Edge references invalid node "${invalid}" not found in workflow`,
+        `Edge references invalid node "${invalid}" not found in conclave`,
         { edgeId: edge.id, source: edge.source, target: edge.target }
       );
     }
@@ -45,7 +45,7 @@ export function topologicalSort(
     if (layer.length === 0) {
       const cycleNodes = [...inDegree.keys()].filter((id) => !visited.has(id));
       throw new AppError(
-        ErrorCode.WORKFLOW_CYCLE_DETECTED,
+        ErrorCode.CONCLAVE_CYCLE_DETECTED,
         `Cycle detected involving nodes: ${cycleNodes.join(", ")}`,
         422
       );
@@ -64,10 +64,10 @@ export function topologicalSort(
   return layers;
 }
 
-export function getIncomingEdges(nodeId: string, edges: WorkflowEdge[]): WorkflowEdge[] {
+export function getIncomingEdges(nodeId: string, edges: ConclaveEdge[]): ConclaveEdge[] {
   return edges.filter((e) => e.target === nodeId);
 }
 
-export function getOutgoingEdges(nodeId: string, edges: WorkflowEdge[]): WorkflowEdge[] {
+export function getOutgoingEdges(nodeId: string, edges: ConclaveEdge[]): ConclaveEdge[] {
   return edges.filter((e) => e.source === nodeId);
 }

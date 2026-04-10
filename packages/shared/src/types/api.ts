@@ -1,19 +1,19 @@
-import type { WorkflowDefinition, McpServerLaunchConfig } from "./workflow";
+import type { ConclaveDefinition, McpServerLaunchConfig } from "./conclave";
 import type { Run, AgentTask, RunEvent } from "./agent";
 
-export type CreateWorkflowRequest = {
+export type CreateConclaveRequest = {
   name: string;
   description?: string;
-  nodes: WorkflowDefinition["nodes"];
-  edges: WorkflowDefinition["edges"];
+  nodes: ConclaveDefinition["nodes"];
+  edges: ConclaveDefinition["edges"];
 };
 
-export type UpdateWorkflowRequest = Partial<CreateWorkflowRequest> & {
+export type UpdateConclaveRequest = Partial<CreateConclaveRequest> & {
   enabled?: boolean;
 };
 
-export type WorkflowListResponse = {
-  workflows: WorkflowDefinition[];
+export type ConclaveListResponse = {
+  conclaves: ConclaveDefinition[];
 };
 
 export type RunListResponse = {
@@ -35,7 +35,7 @@ export type RunDetailResponse = {
 
 export type DashboardResponse = {
   activeRuns: number;
-  totalWorkflows: number;
+  totalConclaves: number;
   recentRuns: Run[];
   agentTasks: AgentTask[];
 };

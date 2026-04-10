@@ -1,5 +1,5 @@
 import { getIncomingEdges } from "./graph";
-import type { WorkflowDefinition, WorkflowNode, WorkflowEdge, CodeConfig } from "@openconclave/shared";
+import type { ConclaveDefinition, ConclaveNode, ConclaveEdge, CodeConfig } from "@openconclave/shared";
 import type { RunEvent } from "./types";
 
 import { executeTrigger } from "./nodes/trigger";
@@ -16,12 +16,12 @@ import type { Workspace } from "./workspace";
 export async function executeNode(
   runId: number,
   nodeId: string,
-  nodeMap: Map<string, WorkflowNode>,
-  edges: WorkflowEdge[],
+  nodeMap: Map<string, ConclaveNode>,
+  edges: ConclaveEdge[],
   nodeOutputs: Map<string, unknown>,
   agentSessions: Map<string, string>,
-  workflowContext: string | null,
-  workflow: WorkflowDefinition,
+  conclaveContext: string | null,
+  conclave: ConclaveDefinition,
   emit: (event: RunEvent) => void,
   triggerPayload?: unknown,
   triggeredBy?: string | null,
@@ -82,17 +82,17 @@ export async function executeNode(
 
     switch (node.data.type) {
       case "trigger":
-        output = executeTrigger(node, input, triggerPayload, workflow, runId, nodeId, emit);
+        output = executeTrigger(node, input, triggerPayload, conclave, runId, nodeId, emit);
         break;
       case "agent":
-        output = await executeAgentNode(runId, nodeId, node, nodeMap, edges, nodeOutputs, agentSessions, workflowContext, input, emit, workspace);
+        output = await executeAgentNode(runId, nodeId, node, nodeMap, edges, nodeOutputs, agentSessions, conclaveContext, input, emit, workspace);
         break;
       case "condition":
         output = executeCondition(node, input);
         break;
       case "code":
         output = await executeCode(node.data.config as CodeConfig, input, {
-          workflowId: workflow.id!,
+          conclaveId: conclave.id!,
           runId,
           nodeId,
         }, workspace);
@@ -101,13 +101,13 @@ export async function executeNode(
         output = executeMerge(nodeId, edges, nodeMap, nodeOutputs);
         break;
       case "prompt":
-        output = await executePrompt(node, input, workflow, runId, nodeId, triggeredBy, nodeMap, emit);
+        output = await executePrompt(node, input, conclave, runId, nodeId, triggeredBy, nodeMap, emit);
         break;
       case "file":
         output = executeFile(node, input, workspace);
         break;
       case "output":
-        output = await executeOutput(node, input, runId, nodeId, workflow.name, emit);
+        output = await executeOutput(node, input, runId, nodeId, conclave.name, emit);
         break;
       case "discussion":
         output = await executeDiscussion(
@@ -118,7 +118,7 @@ export async function executeNode(
           edges,
           nodeOutputs,
           agentSessions,
-          workflowContext,
+          conclaveContext,
           input,
           emit,
           workspace,

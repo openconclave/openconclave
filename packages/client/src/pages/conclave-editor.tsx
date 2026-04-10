@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Header } from "@/components/layout/header";
 import { NodePalette } from "@/components/editor/node-palette";
-import { WorkflowCanvas } from "@/components/editor/workflow-canvas";
+import { ConclaveCanvas } from "@/components/editor/conclave-canvas";
 import { NodeInspector } from "@/components/editor/node-inspector";
-import { useWorkflowStore, edgeStyle } from "@/stores/workflow-store";
+import { useConclaveStore, edgeStyle } from "@/stores/conclave-store";
 import { api } from "@/lib/api";
 import { wsClient } from "@/lib/ws";
 import { Save, Play, Square, MessageSquare } from "lucide-react";
@@ -16,20 +16,20 @@ function toSnakeCase(s: string): string {
     .replace(/^_|_$/g, "");
 }
 
-export function WorkflowEditorPage() {
-  const { nodes, edges, workflowName, workflowDescription, isDirty, setWorkflowMeta, loadWorkflow, reset } =
-    useWorkflowStore();
+export function ConclaveEditorPage() {
+  const { nodes, edges, conclaveName, conclaveDescription, isDirty, setConclaveMeta, loadConclave, reset } =
+    useConclaveStore();
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
-  const setActiveNodes = useWorkflowStore((s) => s.setActiveNodes);
-  const setSkippedNodes = useWorkflowStore((s) => s.setSkippedNodes);
+  const setActiveNodes = useConclaveStore((s) => s.setActiveNodes);
+  const setSkippedNodes = useConclaveStore((s) => s.setSkippedNodes);
 
   const path = window.location.pathname;
-  const existingId = path.startsWith("/workflows/") ? path.split("/")[2] : null;
+  const existingId = path.startsWith("/conclaves/") ? path.split("/")[2] : null;
   const isNew = !existingId || existingId === "new";
 
-  // Load existing workflow on mount
+  // Load existing conclave on mount
   useEffect(() => {
     if (isNew) {
       reset();
@@ -38,10 +38,10 @@ export function WorkflowEditorPage() {
     }
 
     api
-      .get<any>(`/workflows/${existingId}`)
+      .get<any>(`/conclaves/${existingId}`)
       .then((wf) => {
         const def = wf.definition ?? wf;
-        loadWorkflow(
+        loadConclave(
           (def.nodes ?? []).map((n: any) => ({
             id: n.id,
             type: n.type ?? n.data?.type,
@@ -59,7 +59,7 @@ export function WorkflowEditorPage() {
               targetHandle: e.targetHandle ?? "top",
             };
           }),
-          def.name ?? wf.name ?? "Untitled Workflow",
+          def.name ?? wf.name ?? "Untitled Conclave",
           def.description ?? wf.description ?? "",
           def.toolName ?? wf.toolName
         );
@@ -71,7 +71,7 @@ export function WorkflowEditorPage() {
       });
   }, [existingId]);
 
-  // Poll for active runs on this workflow
+  // Poll for active runs on this conclave
   useEffect(() => {
     if (isNew) return;
     const check = () => {
@@ -79,7 +79,7 @@ export function WorkflowEditorPage() {
         .get<{ runs: any[] }>("/runs")
         .then((d) => {
           const active = d.runs.find(
-            (r: any) => String(r.workflowId) === existingId && (r.status === "running" || r.status === "queued")
+            (r: any) => String(r.conclaveId) === existingId && (r.status === "running" || r.status === "queued")
           );
           setActiveRunId(active?.id ?? null);
         })
@@ -178,7 +178,7 @@ export function WorkflowEditorPage() {
         if (count > 1) {
           const idx = (seen.get(n.data.label) ?? 0) + 1;
           seen.set(n.data.label, idx);
-          useWorkflowStore.getState().updateNodeData(n.id, { label: `${n.data.label} ${idx}` });
+          useConclaveStore.getState().updateNodeData(n.id, { label: `${n.data.label} ${idx}` });
         }
       }
       toast("Duplicate node labels renamed automatically", "success");
@@ -187,19 +187,19 @@ export function WorkflowEditorPage() {
     setSaving(true);
     try {
       // Re-read nodes after potential rename
-      const currentNodes = useWorkflowStore.getState().nodes;
+      const currentNodes = useConclaveStore.getState().nodes;
       // Auto-generate tool_name if missing
-      const currentToolName = useWorkflowStore.getState().toolName || toSnakeCase(workflowName);
+      const currentToolName = useConclaveStore.getState().toolName || toSnakeCase(conclaveName);
       if (currentToolName) {
-        useWorkflowStore.setState({ toolName: currentToolName });
+        useConclaveStore.setState({ toolName: currentToolName });
       }
 
       // Check uniqueness of name and toolName
-      const allWorkflows = await api.get<{ workflows: Array<{ id: string; name: string; definition: any }> }>("/workflows");
-      const others = allWorkflows.workflows.filter((w) => String(w.id) !== existingId);
-      const nameTaken = others.some((w) => w.name === workflowName);
+      const allConclaves = await api.get<{ conclaves: Array<{ id: string; name: string; definition: any }> }>("/conclaves");
+      const others = allConclaves.conclaves.filter((w) => String(w.id) !== existingId);
+      const nameTaken = others.some((w) => w.name === conclaveName);
       if (nameTaken) {
-        toast(`Workflow name "${workflowName}" is already taken`, "error");
+        toast(`Conclave name "${conclaveName}" is already taken`, "error");
         setSaving(false);
         return;
       }
@@ -214,8 +214,8 @@ export function WorkflowEditorPage() {
       }
 
       const payload = {
-        name: workflowName,
-        description: workflowDescription,
+        name: conclaveName,
+        description: conclaveDescription,
         toolName: currentToolName || undefined,
         nodes: currentNodes.map((n) => ({
           id: n.id,
@@ -234,13 +234,13 @@ export function WorkflowEditorPage() {
       };
 
       if (!isNew) {
-        await api.put(`/workflows/${existingId}`, payload);
+        await api.put(`/conclaves/${existingId}`, payload);
       } else {
-        const result = await api.post<{ id: string }>("/workflows", payload);
-        window.history.replaceState(null, "", `/workflows/${result.id}`);
+        const result = await api.post<{ id: string }>("/conclaves", payload);
+        window.history.replaceState(null, "", `/conclaves/${result.id}`);
       }
 
-      useWorkflowStore.setState({ isDirty: false });
+      useConclaveStore.setState({ isDirty: false });
       toast("Saved. Run /mcp in Claude Code to refresh tools.", "success");
     } finally {
       setSaving(false);
@@ -253,18 +253,18 @@ export function WorkflowEditorPage() {
     const triggerNode = nodes.find((n) => n.data?.type === "trigger");
     const triggerConfig = triggerNode?.data?.config as Record<string, unknown> | undefined;
     if (triggerConfig?.type === "chat") {
-      const toolName = useWorkflowStore.getState().toolName;
+      const toolName = useConclaveStore.getState().toolName;
       if (toolName) {
         window.open(`/${toolName}/chat`, "_blank");
         return;
       }
-      toast("Set a tool name first (in workflow settings) to use chat", "error");
+      toast("Set a tool name first (in conclave settings) to use chat", "error");
       return;
     }
     try {
-      const result = await api.post<{ runId: string }>(`/workflows/${existingId}/run`, {});
+      const result = await api.post<{ runId: string }>(`/conclaves/${existingId}/run`, {});
       setActiveRunId(result.runId);
-      toast(`Workflow run started: #${result.runId}`, "success");
+      toast(`Conclave run started: #${result.runId}`, "success");
     } catch (err: any) {
       toast(`Failed to start run: ${err.message}`, "error");
     }
@@ -275,7 +275,7 @@ export function WorkflowEditorPage() {
     try {
       await api.post(`/runs/${activeRunId}/cancel`, {});
       setActiveRunId(null);
-      toast("Workflow run cancelled", "success");
+      toast("Conclave run cancelled", "success");
     } catch (err: any) {
       toast(`Failed to cancel: ${err.message}`, "error");
     }
@@ -286,7 +286,7 @@ export function WorkflowEditorPage() {
       <>
         <Header title="Loading..." />
         <div className="flex flex-1 items-center justify-center text-muted-foreground">
-          Loading workflow...
+          Loading conclave...
         </div>
       </>
     );
@@ -295,20 +295,20 @@ export function WorkflowEditorPage() {
   return (
     <>
       <Header
-        breadcrumb={[{ label: "Workflows", href: "/workflows" }]}
+        breadcrumb={[{ label: "Conclaves", href: "/conclaves" }]}
         title={
           <input
             type="text"
-            value={workflowName}
+            value={conclaveName}
             onChange={(e) => {
-              setWorkflowMeta(e.target.value, workflowDescription);
-              const current = useWorkflowStore.getState().toolName;
-              if (!current || current === toSnakeCase(workflowName)) {
-                useWorkflowStore.setState({ toolName: toSnakeCase(e.target.value) || undefined });
+              setConclaveMeta(e.target.value, conclaveDescription);
+              const current = useConclaveStore.getState().toolName;
+              if (!current || current === toSnakeCase(conclaveName)) {
+                useConclaveStore.setState({ toolName: toSnakeCase(e.target.value) || undefined });
               }
             }}
             className="bg-transparent text-lg font-semibold border-none outline-none focus:ring-0 w-80"
-            placeholder="Workflow name..."
+            placeholder="Conclave name..."
           />
         }
         actions={
@@ -350,7 +350,7 @@ export function WorkflowEditorPage() {
       />
       <div className="flex flex-1 overflow-hidden">
         <NodePalette />
-        <WorkflowCanvas />
+        <ConclaveCanvas />
         <NodeInspector />
       </div>
     </>

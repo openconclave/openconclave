@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, mock, beforeEach } from "bun:test";
-import type { WorkflowNode, WorkflowEdge, ResolvedAgentConfig } from "@openconclave/shared";
+import type { ConclaveNode, ConclaveEdge, ResolvedAgentConfig } from "@openconclave/shared";
 
 // ── Spy captured before mock.module so tests can assert on its calls ─────
 const runOllamaAgentSpy = mock(() =>
@@ -73,7 +73,7 @@ const { executeAgent } = await import("../agent-executor");
 
 // ── Shared fixtures ───────────────────────────────────────────────────────
 
-const agentNode: WorkflowNode = {
+const agentNode: ConclaveNode = {
   id: "agent-1",
   type: "agent",
   position: { x: 0, y: 0 },
@@ -84,7 +84,7 @@ const agentNode: WorkflowNode = {
   },
 };
 
-const promptNode: WorkflowNode = {
+const promptNode: ConclaveNode = {
   id: "prompt-1",
   type: "prompt",
   position: { x: 200, y: 0 },
@@ -95,7 +95,7 @@ const promptNode: WorkflowNode = {
   },
 };
 
-const nodeMap = new Map<string, WorkflowNode>([
+const nodeMap = new Map<string, ConclaveNode>([
   ["agent-1", agentNode],
   ["prompt-1", promptNode],
 ]);
@@ -109,7 +109,7 @@ const config: ResolvedAgentConfig = {
 };
 
 // Two edges — same source ("agent-1") and same target ("prompt-1") but different handles
-const edgeA: WorkflowEdge = {
+const edgeA: ConclaveEdge = {
   id: "edge-a",
   source: "agent-1",
   target: "prompt-1",
@@ -117,7 +117,7 @@ const edgeA: WorkflowEdge = {
   targetHandle: "left",
 };
 
-const edgeB: WorkflowEdge = {
+const edgeB: ConclaveEdge = {
   id: "edge-b",
   source: "agent-1",
   target: "prompt-1",

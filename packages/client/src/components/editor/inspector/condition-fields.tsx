@@ -1,4 +1,4 @@
-import { useWorkflowStore } from "@/stores/workflow-store";
+import { useConclaveStore } from "@/stores/conclave-store";
 import type { ConditionConfig } from "@openconclave/shared";
 import { Field, MONO_INPUT_CLASS, AutoTextarea } from "./shared";
 
@@ -8,7 +8,7 @@ interface ConditionFieldsProps {
 }
 
 export function ConditionFields({ nodeId, config }: ConditionFieldsProps) {
-  const updateNodeConfig = useWorkflowStore((s) => s.updateNodeConfig);
+  const updateNodeConfig = useConclaveStore((s) => s.updateNodeConfig);
 
   return (
     <Field label="Expression">

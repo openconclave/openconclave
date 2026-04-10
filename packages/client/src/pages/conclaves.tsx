@@ -4,9 +4,9 @@ import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Position } from "@xyflow/react";
 import { buildMiniMapPath } from "@/components/editor/rounded-edge";
-import type { WorkflowDefinition } from "@openconclave/shared";
+import type { ConclaveDefinition } from "@openconclave/shared";
 
-type WorkflowRow = { id: string; name: string; description?: string; enabled: boolean; definition: WorkflowDefinition };
+type ConclaveRow = { id: string; name: string; description?: string; enabled: boolean; definition: ConclaveDefinition };
 import { GitBranch, Play, Clock, Trash2, Square, Loader2, Power, MessageSquare, ChevronDown, LayoutGrid, List } from "lucide-react";
 
 const previewColors: Record<string, string> = {
@@ -29,7 +29,7 @@ const handlePos: Record<string, Position> = {
   full: Position.Bottom, last: Position.Bottom, summary: Position.Bottom,
 };
 
-function WorkflowPreview({ nodes, edges }: { nodes?: any[]; edges?: any[] }) {
+function ConclavePreview({ nodes, edges }: { nodes?: any[]; edges?: any[] }) {
   const svg = useMemo(() => {
     if (!nodes?.length) return null;
     const dims = nodes.map((n) => {
@@ -95,10 +95,10 @@ function WorkflowPreview({ nodes, edges }: { nodes?: any[]; edges?: any[] }) {
 import { confirm } from "@/components/ui/confirm";
 import { toast } from "@/components/ui/toast";
 
-type ScheduleEntry = { workflowId: string; cron: string; nextRun: string; enabled: boolean };
-type ActiveRun = { id: number; workflowId: number; status: string };
+type ScheduleEntry = { conclaveId: string; cron: string; nextRun: string; enabled: boolean };
+type ActiveRun = { id: number; conclaveId: number; status: string };
 
-// ── Inline-editable workflow name ─────────────────────────────
+// ── Inline-editable conclave name ─────────────────────────────
 
 function InlineName({ name, onRename }: { name: string; onRename: (name: string) => void }) {
   const [editing, setEditing] = useState(false);
@@ -160,8 +160,8 @@ type SortBy = "name" | "created" | "modified";
 type SortOrder = "asc" | "desc";
 type ViewMode = "grid" | "list";
 
-export function WorkflowsPage() {
-  const [workflows, setWorkflows] = useState<WorkflowDefinition[]>([]);
+export function ConclavesPage() {
+  const [conclaves, setConclaves] = useState<ConclaveDefinition[]>([]);
   const [schedule, setSchedule] = useState<Map<string, ScheduleEntry>>(new Map());
   const [activeRuns, setActiveRuns] = useState<Map<string, ActiveRun>>(new Map());
   const [sortBy, setSortBy] = useState<SortBy>("modified");
@@ -171,10 +171,10 @@ export function WorkflowsPage() {
 
   const load = () => {
     api
-      .get<{ workflows: WorkflowRow[] }>("/workflows")
+      .get<{ conclaves: ConclaveRow[] }>("/conclaves")
       .then((d) =>
-        setWorkflows(
-          d.workflows.map((w) => ({
+        setConclaves(
+          d.conclaves.map((w) => ({
             ...w.definition,
             id: w.id,
             name: w.name,
@@ -183,13 +183,13 @@ export function WorkflowsPage() {
           }))
         )
       )
-      .catch(() => setWorkflows([]));
+      .catch(() => setConclaves([]));
 
     api
       .get<{ schedule: ScheduleEntry[] }>("/scheduler")
       .then((d) => {
         const map = new Map<string, ScheduleEntry>();
-        for (const s of d.schedule) map.set(s.workflowId, s);
+        for (const s of d.schedule) map.set(s.conclaveId, s);
         setSchedule(map);
       })
       .catch(() => setSchedule(new Map()));
@@ -202,7 +202,7 @@ export function WorkflowsPage() {
         const map = new Map<string, ActiveRun>();
         for (const r of d.runs) {
           if (r.status === "running" || r.status === "queued") {
-            const wfId = String(r.workflowId);
+            const wfId = String(r.conclaveId);
             if (!map.has(wfId)) map.set(wfId, r);
           }
         }
@@ -227,24 +227,24 @@ export function WorkflowsPage() {
     return () => clearInterval(interval);
   }, []);
 
-  const deleteWorkflow = async (e: React.MouseEvent, id: string, name: string) => {
+  const deleteConclave = async (e: React.MouseEvent, id: string, name: string) => {
     e.preventDefault();
     e.stopPropagation();
-    const confirmed = await confirm("Delete workflow", `Are you sure you want to delete "${name}"? This cannot be undone.`);
+    const confirmed = await confirm("Delete conclave", `Are you sure you want to delete "${name}"? This cannot be undone.`);
     if (!confirmed) return;
-    await api.delete(`/workflows/${id}`);
+    await api.delete(`/conclaves/${id}`);
     load();
   };
 
-  const toggleEnabled = async (e: React.MouseEvent, wf: WorkflowDefinition) => {
+  const toggleEnabled = async (e: React.MouseEvent, wf: ConclaveDefinition) => {
     e.preventDefault();
     e.stopPropagation();
-    await api.put(`/workflows/${wf.id}`, { enabled: !wf.enabled });
+    await api.put(`/conclaves/${wf.id}`, { enabled: !wf.enabled });
     await api.post("/scheduler/sync", {});
     load();
   };
 
-  const handleStart = (e: React.MouseEvent, wf: WorkflowDefinition) => {
+  const handleStart = (e: React.MouseEvent, wf: ConclaveDefinition) => {
     e.preventDefault();
     e.stopPropagation();
     const triggerNode = wf.nodes?.find((n) => n.data?.type === "trigger");
@@ -254,18 +254,18 @@ export function WorkflowsPage() {
       if (toolName) {
         window.open(`/${toolName}/chat`, "_blank");
       } else {
-        toast("Set a tool name first (in workflow settings) to use chat", "error");
+        toast("Set a tool name first (in conclave settings) to use chat", "error");
       }
       return;
     }
-    api.post(`/workflows/${wf.id}/run`, {})
+    api.post(`/conclaves/${wf.id}/run`, {})
       .then(() => { loadRuns(); toast(`Started ${wf.name}`, "success"); })
       .catch((err: Error) => toast(`Failed: ${err.message}`, "error"));
   };
 
   const sortLabels: Record<SortBy, string> = { name: "Alphabetical", created: "Date created", modified: "Last modified" };
 
-  const sortedWorkflows = [...workflows].sort((a, b) => {
+  const sortedConclaves = [...conclaves].sort((a, b) => {
     let cmp = 0;
     if (sortBy === "name") cmp = (a.name ?? "").localeCompare(b.name ?? "");
     else if (sortBy === "created") cmp = (a.createdAt ?? "").localeCompare(b.createdAt ?? "");
@@ -276,7 +276,7 @@ export function WorkflowsPage() {
   return (
     <>
       <Header
-        title="Workflows"
+        title="Conclaves"
         actions={
           <div className="flex items-center gap-2">
             {/* Sort dropdown */}
@@ -356,24 +356,24 @@ export function WorkflowsPage() {
             </div>
 
             <NewButton
-              label="New Workflow"
-              onClick={() => (window.location.href = "/workflows/new")}
+              label="New Conclave"
+              onClick={() => (window.location.href = "/conclaves/new")}
             />
           </div>
         }
       />
       <div className="flex-1 overflow-y-auto p-6">
-        {sortedWorkflows.length === 0 ? (
+        {sortedConclaves.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
             <GitBranch className="h-12 w-12 mb-4 opacity-30" />
-            <p className="text-lg font-medium">No workflows yet</p>
+            <p className="text-lg font-medium">No conclaves yet</p>
             <p className="text-sm mt-1">
-              Create your first workflow to start orchestrating AI agents.
+              Create your first conclave to start orchestrating AI agents.
             </p>
           </div>
         ) : (
           <div className={viewMode === "grid" ? "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4" : "flex flex-col gap-2"}>
-            {sortedWorkflows.map((wf) => {
+            {sortedConclaves.map((wf) => {
               const sched = schedule.get(wf.id);
               const activeRun = activeRuns.get(String(wf.id));
               const triggerNode = wf.nodes?.find((n) => n.data?.type === "trigger");
@@ -381,7 +381,7 @@ export function WorkflowsPage() {
               return (
                 <a
                   key={wf.id}
-                  href={`/workflows/${wf.id}`}
+                  href={`/conclaves/${wf.id}`}
                   className={cn(
                     "rounded-lg border bg-card hover:border-primary/50 transition-colors flex flex-col",
                     wf.enabled ? "border-border" : "border-border opacity-60",
@@ -391,7 +391,7 @@ export function WorkflowsPage() {
                   {/* Preview */}
                   {viewMode === "grid" && wf.nodes && wf.nodes.length > 0 && (
                     <div className="border-b border-border/30 px-4 pt-3 pb-1">
-                      <WorkflowPreview nodes={wf.nodes} edges={wf.edges} />
+                      <ConclavePreview nodes={wf.nodes} edges={wf.edges} />
                     </div>
                   )}
 
@@ -400,7 +400,7 @@ export function WorkflowsPage() {
                     <InlineName
                       name={wf.name}
                       onRename={(newName) => {
-                        api.put(`/workflows/${wf.id}`, { name: newName }).then(() => load());
+                        api.put(`/conclaves/${wf.id}`, { name: newName }).then(() => load());
                       }}
                     />
                     {wf.description && (
@@ -437,7 +437,7 @@ export function WorkflowsPage() {
                       <button
                         onClick={(e) => handleStop(e, activeRun)}
                         className="flex h-7 items-center gap-1.5 rounded-md bg-destructive/15 text-destructive px-2.5 hover:bg-destructive/25 transition-colors"
-                        title="Stop running workflow"
+                        title="Stop running conclave"
                       >
                         <Square className="h-3 w-3" />
                         <span className="text-[11px] font-medium">Stop</span>
@@ -451,7 +451,7 @@ export function WorkflowsPage() {
                             ? "bg-primary/15 text-primary hover:bg-primary/25"
                             : "bg-success/15 text-success hover:bg-success/25"
                         )}
-                        title={isChat ? "Open chat" : "Start workflow"}
+                        title={isChat ? "Open chat" : "Start conclave"}
                       >
                         {isChat ? <MessageSquare className="h-3 w-3" /> : <Play className="h-3 w-3" />}
                         <span className="text-[11px] font-medium">{isChat ? "Chat" : "Start"}</span>
@@ -466,14 +466,14 @@ export function WorkflowsPage() {
                           ? "text-success hover:bg-success/15"
                           : "text-muted-foreground/50 hover:bg-muted"
                       )}
-                      title={wf.enabled ? "Disable workflow" : "Enable workflow"}
+                      title={wf.enabled ? "Disable conclave" : "Enable conclave"}
                     >
                       <Power className="h-3.5 w-3.5" />
                     </button>
                     <button
-                      onClick={(e) => deleteWorkflow(e, wf.id, wf.name)}
+                      onClick={(e) => deleteConclave(e, wf.id, wf.name)}
                       className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground/50 hover:bg-destructive/15 hover:text-destructive transition-colors"
-                      title="Delete workflow"
+                      title="Delete conclave"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>

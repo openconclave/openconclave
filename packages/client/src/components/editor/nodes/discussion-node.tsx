@@ -2,7 +2,7 @@ import { useCallback, useState, useRef, useEffect, useLayoutEffect } from "react
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { Users, Code, Cpu, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useWorkflowStore } from "@/stores/workflow-store";
+import { useConclaveStore } from "@/stores/conclave-store";
 import { useNodeData } from "@/hooks/use-node-data";
 import type { DiscussionConfig, DiscussionModeratorConfig, AgentConfig, CodeConfig } from "@openconclave/shared";
 
@@ -80,12 +80,12 @@ export function DiscussionNode(props: NodeProps) {
   const data = useNodeData(props);
   const config = data.config as DiscussionConfig;
 
-  const setSelectedNode = useWorkflowStore((s) => s.setSelectedNode);
-  const updateNodeData = useWorkflowStore((s) => s.updateNodeData);
-  const activeNodeIds = useWorkflowStore((s) => s.activeNodeIds);
-  const isDraggingTool = useWorkflowStore((s) => s.isDraggingTool);
-  const updateNodeConfig = useWorkflowStore((s) => s.updateNodeConfig);
-  const edges = useWorkflowStore((s) => s.edges);
+  const setSelectedNode = useConclaveStore((s) => s.setSelectedNode);
+  const updateNodeData = useConclaveStore((s) => s.updateNodeData);
+  const activeNodeIds = useConclaveStore((s) => s.activeNodeIds);
+  const isDraggingTool = useConclaveStore((s) => s.isDraggingTool);
+  const updateNodeConfig = useConclaveStore((s) => s.updateNodeConfig);
+  const edges = useConclaveStore((s) => s.edges);
 
   const isActive = activeNodeIds.has(props.id);
 

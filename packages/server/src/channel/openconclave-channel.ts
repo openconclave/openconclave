@@ -22,16 +22,16 @@ const server = new Server(
       'Events from OpenConclave arrive as <channel source="openconclave" event_type="..." ...>.',
       "",
       "Event types:",
-      "- channel:output — a workflow produced output for you. Read and present to user.",
-      "- prompt:question — a workflow is asking YOU a question and waiting for your response.",
+      "- channel:output — a conclave produced output for you. Read and present to user.",
+      "- prompt:question — a conclave is asking YOU a question and waiting for your response.",
       "",
       "Core tools:",
-      "- oc_list_workflows, oc_trigger_workflow, oc_get_run, oc_list_runs",
+      "- oc_list_conclaves, oc_trigger_conclave, oc_get_run, oc_list_runs",
       "- oc_respond: respond to a pending prompt (REQUIRED when prompt:question events arrive)",
       "- oc_pending_prompts: list prompts waiting for response",
       "",
-      "Workflow tools: Each enabled workflow with a toolName appears as its own tool.",
-      "Call it directly to trigger the workflow — no need to use oc_trigger_workflow.",
+      "Conclave tools: Each enabled conclave with a toolName appears as its own tool.",
+      "Call it directly to trigger the conclave — no need to use oc_trigger_conclave.",
       "",
       "IMPORTANT: When you receive a prompt:question event, respond immediately using oc_respond.",
     ].join("\n"),
@@ -91,12 +91,12 @@ function defineTool(name: string, description: string, params: Record<string, z.
 // ── Core tools ──────────────────────────────────────────────
 
 defineTool(
-  "oc_list_workflows",
-  "List all workflows in OpenConclave",
+  "oc_list_conclaves",
+  "List all conclaves in OpenConclave",
   {},
   async () => {
-    const data = await ocApi("/workflows") as { workflows: unknown[] };
-    const summary = (data.workflows as Record<string, unknown>[]).map((w) => ({
+    const data = await ocApi("/conclaves") as { conclaves: unknown[] };
+    const summary = (data.conclaves as Record<string, unknown>[]).map((w) => ({
       id: w.id,
       name: w.name,
       enabled: w.enabled,
@@ -106,23 +106,23 @@ defineTool(
 );
 
 defineTool(
-  "oc_trigger_workflow",
-  "Trigger a workflow run. Always pass your current working directory as cwd so agents run in the correct project.",
+  "oc_trigger_conclave",
+  "Trigger a conclave run. Always pass your current working directory as cwd so agents run in the correct project.",
   {
-    workflow_id: z.string().describe("The workflow ID to trigger"),
+    conclave_id: z.string().describe("The conclave ID to trigger"),
     payload: z.record(z.unknown()).optional().describe("Optional payload data"),
     cwd: z.string().describe("Your current working directory — agents will run here"),
   },
-  async ({ workflow_id, payload, cwd }) => {
+  async ({ conclave_id, payload, cwd }) => {
     const enrichedPayload = { ...((payload as Record<string, unknown>) ?? {}), ...(cwd ? { _callerCwd: cwd } : {}) };
-    const data = await ocApi(`/workflows/${workflow_id}/run`, "POST", { payload: enrichedPayload });
+    const data = await ocApi(`/conclaves/${conclave_id}/run`, "POST", { payload: enrichedPayload });
     return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
   }
 );
 
 defineTool(
   "oc_get_run",
-  "Get details of a specific workflow run including tasks and events",
+  "Get details of a specific conclave run including tasks and events",
   { run_id: z.string().describe("The run ID") },
   async ({ run_id }) => {
     const data = await ocApi(`/runs/${run_id}`) as { run: unknown; tasks: Record<string, unknown>[] };
@@ -141,14 +141,14 @@ defineTool(
 
 defineTool(
   "oc_list_runs",
-  "List recent workflow runs",
+  "List recent conclave runs",
   { limit: z.number().optional().describe("Max results (default 10)") },
   async ({ limit }) => {
     const data = await ocApi(`/runs?limit=${limit ?? 10}`) as { runs: Record<string, unknown>[] };
     const summary = data.runs.map((r) => ({
       id: r.id,
       status: r.status,
-      workflowId: r.workflowId,
+      conclaveId: r.conclaveId,
       createdAt: r.createdAt,
     }));
     return { content: [{ type: "text", text: JSON.stringify(summary, null, 2) }] };
@@ -157,7 +157,7 @@ defineTool(
 
 defineTool(
   "oc_respond",
-  "Respond to a pending prompt question from a workflow. Use this to send your response so the workflow can continue.",
+  "Respond to a pending prompt question from a conclave. Use this to send your response so the conclave can continue.",
   {
     run_id: z.string().describe("The run ID"),
     node_id: z.string().describe("The prompt node ID"),
@@ -179,47 +179,47 @@ defineTool(
   }
 );
 
-// ── Dynamic workflow tools ──────────────────────────────────
+// ── Dynamic conclave tools ──────────────────────────────────
 
-const registeredWorkflowTools = new Set<string>();
+const registeredConclaveTools = new Set<string>();
 
-async function syncWorkflowTools() {
+async function syncConclaveTools() {
   try {
-    const data = await ocApi("/workflows") as { workflows: Array<Record<string, unknown>> };
+    const data = await ocApi("/conclaves") as { conclaves: Array<Record<string, unknown>> };
     const seen = new Set<string>();
-    const oldRegistered = new Set(registeredWorkflowTools);
+    const oldRegistered = new Set(registeredConclaveTools);
 
-    for (const wf of data.workflows) {
+    for (const wf of data.conclaves) {
       if (!wf.enabled) continue;
       const def = (wf.definition ?? {}) as Record<string, unknown>;
       const toolName = (def.toolName ?? wf.toolName) as string | undefined;
       if (!toolName) continue;
 
       seen.add(toolName);
-      if (!registeredWorkflowTools.has(toolName)) {
-        const description = ((def.description ?? wf.description ?? `Run workflow: ${wf.name}`) as string);
-        const workflowId = String(wf.id);
+      if (!registeredConclaveTools.has(toolName)) {
+        const description = ((def.description ?? wf.description ?? `Run conclave: ${wf.name}`) as string);
+        const conclaveId = String(wf.id);
 
         defineTool(
           toolName,
           `${description}. Always pass your current working directory as cwd so agents run in the correct project.`,
           {
-            input: z.string().optional().describe("Input data to pass to the workflow trigger"),
+            input: z.string().optional().describe("Input data to pass to the conclave trigger"),
             cwd: z.string().describe("Your current working directory — agents will run here"),
           },
           async ({ input, cwd }) => {
             const payload = { ...((input as string) ? { input } : {}), ...(cwd ? { _callerCwd: cwd } : {}) };
-            const result = await ocApi(`/workflows/${workflowId}/run`, "POST", { payload });
+            const result = await ocApi(`/conclaves/${conclaveId}/run`, "POST", { payload });
             return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
           }
         );
-        registeredWorkflowTools.add(toolName);
+        registeredConclaveTools.add(toolName);
       }
     }
 
-    for (const t of registeredWorkflowTools) {
+    for (const t of registeredConclaveTools) {
       if (!seen.has(t)) {
-        registeredWorkflowTools.delete(t);
+        registeredConclaveTools.delete(t);
         tools.delete(t);
       }
     }
@@ -232,7 +232,7 @@ async function syncWorkflowTools() {
       } catch { /* client may not support */ }
     }
   } catch (err) {
-    console.error("[channel] syncWorkflowTools error:", err);
+    console.error("[channel] syncConclaveTools error:", err);
   }
 }
 
@@ -263,8 +263,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 // ── Sync & Connect ──────────────────────────────────────────
 
-await syncWorkflowTools();
-console.error(`[channel] synced ${registeredWorkflowTools.size} workflow tools`);
+await syncConclaveTools();
+console.error(`[channel] synced ${registeredConclaveTools.size} conclave tools`);
 
 // Workaround: Bun compiled binaries on Windows buffer piped stdout.
 // Use writeSync(fd=1) to bypass Node.js stream layer entirely.
@@ -312,7 +312,7 @@ function connectWebSocket() {
           if (data.data?.status) meta.status = data.data.status;
           if (data.data?.success !== undefined) meta.success = String(data.data.success);
           if (data.data?.durationMs !== undefined) meta.duration_ms = String(data.data.durationMs);
-          if (data.data?.workflowName) meta.workflow_name = data.data.workflowName;
+          if (data.data?.conclaveName) meta.conclave_name = data.data.conclaveName;
           if (data.data?.nodeLabel) meta.node_label = data.data.nodeLabel;
           if (data.data?.senderNode) meta.sender_node = data.data.senderNode;
           if (data.data?.senderType) meta.sender_type = data.data.senderType;
@@ -347,7 +347,7 @@ function connectWebSocket() {
           const content = [
             "A user wants you to improve an agent's system prompt in OpenConclave.",
             "",
-            `Workflow ID: ${d.workflowId}`,
+            `Conclave ID: ${d.conclaveId}`,
             `Node ID: ${d.nodeId}`,
             `Node Label: ${d.nodeLabel}`,
             "",
@@ -356,7 +356,7 @@ function connectWebSocket() {
             "",
             "Please write an improved version of this system prompt — make it clearer, more effective, and well-structured.",
             "Then call `update_node` to save it:",
-            `  update_node(workflowId: "${d.workflowId}", nodeId: "${d.nodeId}", config: { systemPrompt: "your improved prompt" })`,
+            `  update_node(conclaveId: "${d.conclaveId}", nodeId: "${d.nodeId}", config: { systemPrompt: "your improved prompt" })`,
           ].join("\n");
 
           // Route improve events through channel:output so Claude Code delivers them
@@ -372,16 +372,16 @@ function connectWebSocket() {
         if (eventType === "channel:improve-description") {
           const d = data.data ?? {};
           const content = [
-            "A user wants you to improve the workflow-level Instructions for Claude in OpenConclave.",
+            "A user wants you to improve the conclave-level Instructions for Claude in OpenConclave.",
             "",
-            `Workflow ID: ${d.workflowId}`,
+            `Conclave ID: ${d.conclaveId}`,
             "",
             "Current instructions:",
             d.currentDescription || "(empty)",
             "",
             "Please write an improved version — make it clearer, more effective, and well-structured.",
-            "Then call `update_workflow` to save it:",
-            `  update_workflow(workflowId: "${d.workflowId}", description: "your improved instructions")`,
+            "Then call `update_conclave` to save it:",
+            `  update_conclave(conclaveId: "${d.conclaveId}", description: "your improved instructions")`,
           ].join("\n");
 
           await server.notification({
@@ -398,7 +398,7 @@ function connectWebSocket() {
           const content = [
             "A user wants you to write or improve code for a Code node in OpenConclave.",
             "",
-            `Workflow ID: ${d.workflowId}`,
+            `Conclave ID: ${d.conclaveId}`,
             `Node ID: ${d.nodeId}`,
             `Node Label: ${d.nodeLabel}`,
             `Runtime: ${d.runtime}`,
@@ -411,7 +411,7 @@ function connectWebSocket() {
             `The runtime is ${d.runtime}. Input from the previous node is passed via stdin and $INPUT env var. Output must go to stdout as JSON.`,
             "",
             "Then call `update_node` to save it:",
-            `  update_node(workflowId: "${d.workflowId}", nodeId: "${d.nodeId}", config: { code: "your code here" })`,
+            `  update_node(conclaveId: "${d.conclaveId}", nodeId: "${d.nodeId}", config: { code: "your code here" })`,
           ].join("\n");
 
           await server.notification({

@@ -1,10 +1,10 @@
-import type { WorkflowNode, WorkflowEdge } from "@openconclave/shared";
+import type { ConclaveNode, ConclaveEdge } from "@openconclave/shared";
 import { getIncomingEdges } from "../graph";
 
 export function executeMerge(
   nodeId: string,
-  edges: WorkflowEdge[],
-  nodeMap: Map<string, WorkflowNode>,
+  edges: ConclaveEdge[],
+  nodeMap: Map<string, ConclaveNode>,
   nodeOutputs: Map<string, unknown>
 ): unknown {
   const inEdges = getIncomingEdges(nodeId, edges);

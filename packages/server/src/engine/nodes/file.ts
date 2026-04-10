@@ -1,10 +1,10 @@
 import { dirname } from "path";
 import { readFileSync, writeFileSync, mkdirSync } from "fs";
-import type { WorkflowNode } from "@openconclave/shared";
+import type { ConclaveNode } from "@openconclave/shared";
 import { logger } from "../../lib/logger";
 import type { Workspace } from "../workspace";
 
-export function executeFile(node: WorkflowNode, input: unknown, workspace?: Workspace): unknown {
+export function executeFile(node: ConclaveNode, input: unknown, workspace?: Workspace): unknown {
   const fileConfig = node.data.config as { path: string; mode?: "read" | "write" };
   const filePath = fileConfig.path;
   const mode = fileConfig.mode ?? "read";

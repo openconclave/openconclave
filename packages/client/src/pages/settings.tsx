@@ -269,7 +269,7 @@ export function SettingsPage() {
 
             {providers.length === 0 && !showAddProvider ? (
               <p className="text-sm text-muted-foreground rounded-lg border border-border bg-card p-4">
-                No AI providers configured. Add one to use OpenAI, OpenRouter, Gemini, or any OpenAI-compatible API in your workflows.
+                No AI providers configured. Add one to use OpenAI, OpenRouter, Gemini, or any OpenAI-compatible API in your conclaves.
               </p>
             ) : (
               <div className="space-y-3">

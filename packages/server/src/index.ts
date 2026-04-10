@@ -11,8 +11,8 @@ import { getAsset, hasEmbeddedAssets } from "./embedded-assets";
 import { db } from "./db/client";
 import { runMigrations } from "./db/migrate";
 import { recoverStaleRuns } from "./engine/recovery";
-import { workflows, runs, runEvents } from "./db/schema";
-import { workflowRoutes } from "./routes/workflows";
+import { conclaves, runs, runEvents } from "./db/schema";
+import { conclaveRoutes } from "./routes/conclaves";
 import { runRoutes } from "./routes/runs";
 import { agentRoutes } from "./routes/agents";
 import { knowledgeRoutes } from "./routes/knowledge";
@@ -25,7 +25,7 @@ import { wsHandler } from "./ws/handler";
 import { setServer, broadcastRunEvent } from "./ws/broadcast";
 import { createMcpServer } from "./mcp/server";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
-import { WorkflowExecutor } from "./engine/executor";
+import { ConclaveExecutor } from "./engine/executor";
 import { getRunWorkspace } from "./engine/graph-walker";
 import { CronScheduler } from "./engine/scheduler";
 import { agentPool } from "./agent/pool";
@@ -52,7 +52,7 @@ app.route("/api/providers", providerRoutes);
 app.route("/api/ollama", ollamaRoutes);
 app.route("/api/claude-code", claudeCodeRoutes);
 app.route("/api/channel", channelRoutes);
-app.route("/api/workflows", workflowRoutes);
+app.route("/api/conclaves", conclaveRoutes);
 app.route("/api/runs", runRoutes);
 app.route("/api/agents", agentRoutes);
 app.route("/api/knowledge", knowledgeRoutes);
@@ -65,17 +65,17 @@ let server: ReturnType<typeof Bun.serve>;
 // Late-bound reference — set after TelegramTrigger is created below
 let telegramTrigger: InstanceType<typeof TelegramTrigger> | null = null;
 
-const executor = new WorkflowExecutor((event) => {
+const executor = new ConclaveExecutor((event) => {
   broadcastRunEvent(event);
   telegramTrigger?.onEvent(event);
 });
 
-// ── Workflow Run Trigger ─────────────────────────────────────
-app.post("/api/workflows/:id/run", async (c) => {
+// ── Conclave Run Trigger ─────────────────────────────────────
+app.post("/api/conclaves/:id/run", async (c) => {
   const id = Number(c.req.param("id"));
-  if (isNaN(id)) throw AppError.validation("Invalid workflow ID");
-  const wf = await db.select().from(workflows).where(eq(workflows.id, id));
-  if (!wf[0]) throw AppError.notFound("Workflow", String(id));
+  if (isNaN(id)) throw AppError.validation("Invalid conclave ID");
+  const wf = await db.select().from(conclaves).where(eq(conclaves.id, id));
+  if (!wf[0]) throw AppError.notFound("Conclave", String(id));
 
   // Body is optional — an empty body means no payload. Malformed JSON is rejected.
   const rawBody = await c.req.text();
@@ -110,7 +110,7 @@ app.post("/api/runs/:id/resume", async (c) => {
     .update(runs)
     .set({ status: "running", startedAt: new Date().toISOString(), completedAt: null, error: null })
     .where(and(eq(runs.id, id), inArray(runs.status, ["failure", "interrupted", "cancelled"])))
-    .returning({ id: runs.id, workflowId: runs.workflowId });
+    .returning({ id: runs.id, conclaveId: runs.conclaveId });
 
   if (updated.length === 0) {
     const run = await db.select().from(runs).where(eq(runs.id, id)).get();
@@ -123,10 +123,10 @@ app.post("/api/runs/:id/resume", async (c) => {
 
   const wf = await db
     .select()
-    .from(workflows)
-    .where(eq(workflows.id, updated[0].workflowId))
+    .from(conclaves)
+    .where(eq(conclaves.id, updated[0].conclaveId))
     .get();
-  if (!wf) throw AppError.notFound("Workflow", String(updated[0].workflowId));
+  if (!wf) throw AppError.notFound("Conclave", String(updated[0].conclaveId));
 
   await executor.resume(id, wf.definition as never);
   return c.json({ resumed: true, runId: id }, 200);
@@ -140,8 +140,8 @@ app.post("/api/runs/:runId/message", async (c) => {
   const run = await db.select().from(runs).where(eq(runs.id, runId)).get();
   if (!run) throw AppError.notFound("Run", String(runId));
 
-  const wf = await db.select().from(workflows).where(eq(workflows.id, run.workflowId)).get();
-  if (!wf) throw AppError.notFound("Workflow", String(run.workflowId));
+  const wf = await db.select().from(conclaves).where(eq(conclaves.id, run.conclaveId)).get();
+  if (!wf) throw AppError.notFound("Conclave", String(run.conclaveId));
 
   let body: Record<string, unknown>;
   try {
@@ -184,7 +184,7 @@ app.post("/api/runs/:runId/message", async (c) => {
   return c.json({ runId, status: "running" });
 });
 
-// ── Set working directory for a running workflow ─────────────
+// ── Set working directory for a running conclave ─────────────
 app.post("/api/runs/:runId/cwd", async (c) => {
   const runId = Number(c.req.param("runId"));
   if (isNaN(runId)) throw AppError.validation("Invalid run ID");
@@ -206,7 +206,7 @@ app.post("/api/runs/:runId/cwd", async (c) => {
   if (nodeId) {
     const run = await db.select().from(runs).where(eq(runs.id, runId)).get();
     if (run) {
-      const wf = await db.select().from(workflows).where(eq(workflows.id, run.workflowId)).get();
+      const wf = await db.select().from(conclaves).where(eq(conclaves.id, run.conclaveId)).get();
       if (wf) {
         const def = wf.definition as { nodes?: Array<{ id: string; data?: { type?: string } }> };
         const callingNode = (def.nodes ?? []).find((n) => n.id === nodeId);
@@ -226,16 +226,16 @@ app.post("/api/runs/:runId/cwd", async (c) => {
   return c.json({ ok: true, cwd: workspace.cwd });
 });
 
-// ── Workflow by toolName (for chat UI) ──────────────────────
-app.get("/api/workflows/by-tool/:toolName", async (c) => {
+// ── Conclave by toolName (for chat UI) ──────────────────────
+app.get("/api/conclaves/by-tool/:toolName", async (c) => {
   const { toolName } = c.req.param();
-  const all = await db.select().from(workflows);
+  const all = await db.select().from(conclaves);
   const match = all.find((w) => {
     const def = w.definition as Record<string, unknown>;
     return def.toolName === toolName;
   });
-  if (!match) return c.json({ error: { code: "NOT_FOUND", message: `No workflow with toolName "${toolName}"` } }, 404);
-  return c.json({ workflow: match });
+  if (!match) return c.json({ error: { code: "NOT_FOUND", message: `No conclave with toolName "${toolName}"` } }, 404);
+  return c.json({ conclave: match });
 });
 
 app.get("/api/agents/pool", (c) => c.json(agentPool.stats));
@@ -247,10 +247,10 @@ app.post("/api/triggers/telegram", async (c) => {
     throw AppError.validation("chatId and message are required strings");
   }
   const body = rawBody as { chatId: string; message: string };
-  const allWorkflows = await db.select().from(workflows);
+  const allConclaves = await db.select().from(conclaves);
 
   const triggered: string[] = [];
-  for (const wf of allWorkflows) {
+  for (const wf of allConclaves) {
     if (!wf.enabled) continue;
     const def = wf.definition as Record<string, unknown>;
     const nodes = (def.nodes ?? []) as Array<{
@@ -262,7 +262,7 @@ app.post("/api/triggers/telegram", async (c) => {
       if (node.data?.type === "trigger" && node.data?.config?.type === "telegram") {
         const triggerChatId = node.data.config.chatId;
         if (triggerChatId === body.chatId || !triggerChatId) {
-          logger.info(`Triggering workflow "${wf.name}" from Telegram`, { chatId: body.chatId });
+          logger.info(`Triggering conclave "${wf.name}" from Telegram`, { chatId: body.chatId });
           const runId = await executor.execute(def as never, body.message, node.id);
           triggered.push(runId);
         }

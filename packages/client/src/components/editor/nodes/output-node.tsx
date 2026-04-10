@@ -2,7 +2,7 @@ import { type NodeProps } from "@xyflow/react";
 import { Send } from "lucide-react";
 import { BaseNode } from "./base-node";
 import { useNodeData } from "@/hooks/use-node-data";
-import { useWorkflowStore } from "@/stores/workflow-store";
+import { useConclaveStore } from "@/stores/conclave-store";
 import type { OutputConfig } from "@openconclave/shared";
 
 const outputLabels: Record<string, string> = {
@@ -20,7 +20,7 @@ const outputOptions = [
 export function OutputNode(props: NodeProps) {
   const data = useNodeData(props);
   const config = data.config as OutputConfig;
-  const updateNodeConfig = useWorkflowStore((s) => s.updateNodeConfig);
+  const updateNodeConfig = useConclaveStore((s) => s.updateNodeConfig);
 
   return (
     <BaseNode

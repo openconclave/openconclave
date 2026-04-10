@@ -13,7 +13,7 @@ function routingParams(routeTargets: RouteTarget[]): {
   const routeList = routeTargets
     .map((r) => `  - "${r.nodeId}" → ${r.label} (${r.type})`)
     .join("\n");
-  const desc = `Route to the next workflow step. You MUST call this exactly once.\nAvailable routes:\n${routeList}`;
+  const desc = `Route to the next conclave step. You MUST call this exactly once.\nAvailable routes:\n${routeList}`;
   const params = {
     type: "object" as const,
     required: ["node_id", "content"],

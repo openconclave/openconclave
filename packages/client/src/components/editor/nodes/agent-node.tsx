@@ -4,7 +4,7 @@ import { User, X, Terminal, Server, BookOpen } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { BaseNode } from "./base-node";
 import { useNodeData } from "@/hooks/use-node-data";
-import { useWorkflowStore } from "@/stores/workflow-store";
+import { useConclaveStore } from "@/stores/conclave-store";
 import type { AgentConfig, ToolConfig } from "@openconclave/shared";
 
 const toolTypeIcons: Record<ToolConfig["toolType"], React.ElementType> = {
@@ -28,7 +28,7 @@ export function AgentNode(props: NodeProps) {
     : engine === "openai" ? config.openaiModel ?? "openai"
     : config.model ?? "sonnet";
 
-  const updateNodeConfig = useWorkflowStore((s) => s.updateNodeConfig);
+  const updateNodeConfig = useConclaveStore((s) => s.updateNodeConfig);
   const tools = config.tools ?? [];
   const [dragOver, setDragOver] = useState(false);
 

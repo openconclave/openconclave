@@ -21,12 +21,12 @@ function StatusCard({ label, value, icon: Icon, color }: CardProps) {
 }
 
 export function StatusCards({
-  workflows = 0,
+  conclaves = 0,
   activeRuns = 0,
   runningAgents = 0,
   completedToday = 0,
 }: {
-  workflows?: number;
+  conclaves?: number;
   activeRuns?: number;
   runningAgents?: number;
   completedToday?: number;
@@ -34,8 +34,8 @@ export function StatusCards({
   return (
     <div className="grid grid-cols-4 gap-4">
       <StatusCard
-        label="Workflows"
-        value={workflows}
+        label="Conclaves"
+        value={conclaves}
         icon={GitBranch}
         color="text-node-agent"
       />

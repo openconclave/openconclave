@@ -1,6 +1,6 @@
 import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
 
-export const workflows = sqliteTable("workflows", {
+export const conclaves = sqliteTable("conclaves", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull(),
   description: text("description"),
@@ -12,7 +12,7 @@ export const workflows = sqliteTable("workflows", {
 
 export const runs = sqliteTable("runs", {
   id: integer("id").primaryKey({ autoIncrement: true }),
-  workflowId: integer("workflow_id").references(() => workflows.id).notNull(),
+  conclaveId: integer("conclave_id").references(() => conclaves.id).notNull(),
   status: text("status").notNull(),
   triggerType: text("trigger_type"),
   triggerPayload: text("trigger_payload", { mode: "json" }),

@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { useWorkflowStore } from "@/stores/workflow-store";
+import { useConclaveStore } from "@/stores/conclave-store";
 import type {
   DiscussionConfig,
   AgentConfig,
@@ -18,7 +18,7 @@ interface DiscussionFieldsProps {
 }
 
 export function DiscussionFields({ nodeId, config }: DiscussionFieldsProps) {
-  const updateNodeConfig = useWorkflowStore((s) => s.updateNodeConfig);
+  const updateNodeConfig = useConclaveStore((s) => s.updateNodeConfig);
 
   // Top-level flat fields — safe for shallow merge
   const updateFlat = useCallback(

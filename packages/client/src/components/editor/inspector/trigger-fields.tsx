@@ -1,4 +1,4 @@
-import { useWorkflowStore } from "@/stores/workflow-store";
+import { useConclaveStore } from "@/stores/conclave-store";
 import { cn } from "@/lib/utils";
 import type { TriggerConfig } from "@openconclave/shared";
 import { FolderOpen } from "lucide-react";
@@ -20,7 +20,7 @@ interface TriggerFieldsProps {
 }
 
 export function TriggerFields({ nodeId, config }: TriggerFieldsProps) {
-  const updateNodeConfig = useWorkflowStore((s) => s.updateNodeConfig);
+  const updateNodeConfig = useConclaveStore((s) => s.updateNodeConfig);
   const update = (c: Partial<TriggerConfig>) => updateNodeConfig(nodeId, c);
 
   return (
@@ -58,7 +58,7 @@ export function TriggerFields({ nodeId, config }: TriggerFieldsProps) {
 
       {config.type === "chat" && (
         <p className="text-[10px] text-muted-foreground px-1">
-          Users can chat with this workflow at{" "}
+          Users can chat with this conclave at{" "}
           <span className="font-mono text-primary">{"/{toolName}/chat"}</span>. Connect an output
           edge back to this trigger to send responses to the chat.
         </p>
@@ -74,7 +74,7 @@ export function TriggerFields({ nodeId, config }: TriggerFieldsProps) {
             className={MONO_INPUT_CLASS}
           />
           <p className="mt-1 text-[10px] text-muted-foreground">
-            Messages from this chat will trigger the workflow.
+            Messages from this chat will trigger the conclave.
           </p>
         </Field>
       )}

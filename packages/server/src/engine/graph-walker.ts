@@ -4,15 +4,15 @@ import { db } from "../db/client";
 import { runs, checkpoints, agentTasks } from "../db/schema";
 import { getIncomingEdges, getOutgoingEdges } from "./graph";
 import { executeNode } from "./node-executor";
-import { normalizeWorkflowNodeTypes } from "./normalize-workflow";
+import { normalizeConclaveNodeTypes } from "./normalize-conclave";
 import { logger } from "../lib/logger";
-import { AppError, ErrorCode, MAX_WORKFLOW_ITERATIONS } from "@openconclave/shared";
-import type { WorkflowDefinition, WorkflowNode, WorkflowEdge } from "@openconclave/shared";
+import { AppError, ErrorCode, MAX_CONCLAVE_ITERATIONS } from "@openconclave/shared";
+import type { ConclaveDefinition, ConclaveNode, ConclaveEdge } from "@openconclave/shared";
 
 import type { QueueEntry, RunEvent } from "./types";
 import { Workspace } from "./workspace";
 
-// Persistent session store for chat workflows — in-memory cache keyed by runId:nodeId.
+// Persistent session store for chat conclaves — in-memory cache keyed by runId:nodeId.
 // Falls back to DB checkpoint on miss (survives server restarts).
 // Capped at MAX_PERSISTENT_SESSIONS entries; oldest entry is evicted when the limit is
 // reached to prevent unbounded memory growth on long-running servers.
@@ -50,7 +50,7 @@ export function getRunWorkspace(runId: number): Workspace | undefined {
  * standalone, then re-invoked internally by the discussion executor → double execution,
  * double LLM billing.
  */
-function isParticipantOnlyNode(nodeId: string, edges: WorkflowEdge[]): boolean {
+function isParticipantOnlyNode(nodeId: string, edges: ConclaveEdge[]): boolean {
   const outgoing = getOutgoingEdges(nodeId, edges);
   return (
     outgoing.length > 0 &&
@@ -60,16 +60,16 @@ function isParticipantOnlyNode(nodeId: string, edges: WorkflowEdge[]): boolean {
 
 export async function executeGraph(
   runId: number,
-  workflow: WorkflowDefinition,
+  conclave: ConclaveDefinition,
   emit: (event: RunEvent) => void,
   triggerPayload?: unknown,
   triggerNodeId?: string,
   resumeFromCheckpointId?: number // undefined = fresh run
 ): Promise<void> {
-  // Normalize workflow to handle legacy type names (e.g., "transform" → "code")
+  // Normalize conclave to handle legacy type names (e.g., "transform" → "code")
   // This ensures all downstream code sees consistent, current node types.
-  const normalizedWorkflow = normalizeWorkflowNodeTypes(workflow);
-  const { nodes, edges } = normalizedWorkflow;
+  const normalizedConclave = normalizeConclaveNodeTypes(conclave);
+  const { nodes, edges } = normalizedConclave;
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
   const nodeOutputs = new Map<string, unknown>();
   // Session IDs per agent — Claude: SDK session ID, non-Claude: JSONL file path
@@ -85,12 +85,12 @@ export async function executeGraph(
   // on any subsequent resume the skip path can always call resolveNextEntries correctly.
   const checkpointOutputs = new Map<string, unknown>();
 
-  // For chat workflows, restore persistent sessions from previous runs
-  const isChatWorkflow = nodes.some((n) => {
+  // For chat conclaves, restore persistent sessions from previous runs
+  const isChatConclave = nodes.some((n) => {
     const cfg = n.data.config as Record<string, unknown> | undefined;
     return n.data.type === "trigger" && (cfg?.type === "chat" || cfg?.type === "telegram");
   });
-  if (isChatWorkflow) {
+  if (isChatConclave) {
     // Restore Claude SDK sessions for chat continuation (same runId).
     // First try in-memory cache, then fall back to latest checkpoint in DB
     // (survives server restarts).
@@ -155,14 +155,14 @@ export async function executeGraph(
     triggerCfg?.workingDirectory as string | undefined,
   );
   activeWorkspaces.set(runId, workspace);
-  // Workflow context from trigger — injected into every agent's system prompt
-  const workflowContext = cleanPayload
+  // Conclave context from trigger — injected into every agent's system prompt
+  const conclaveContext = cleanPayload
     ? (typeof cleanPayload === "string" ? cleanPayload : JSON.stringify(cleanPayload))
     : null;
 
   try {
     // Find entry point
-    let entryNodes: WorkflowNode[];
+    let entryNodes: ConclaveNode[];
     if (triggerNodeId) {
       const triggerNode = nodes.find((n) => n.id === triggerNodeId);
       entryNodes = triggerNode ? [triggerNode] : [];
@@ -175,7 +175,7 @@ export async function executeGraph(
     }
 
     if (entryNodes.length === 0) {
-      throw new AppError(ErrorCode.WORKFLOW_NO_ENTRY, "No entry nodes found");
+      throw new AppError(ErrorCode.CONCLAVE_NO_ENTRY, "No entry nodes found");
     }
 
     const queue: QueueEntry[] = entryNodes.map((n) => ({
@@ -195,10 +195,10 @@ export async function executeGraph(
 
     while (queue.length > 0) {
       iterations++;
-      if (iterations > MAX_WORKFLOW_ITERATIONS) {
+      if (iterations > MAX_CONCLAVE_ITERATIONS) {
         throw new AppError(
-          ErrorCode.WORKFLOW_MAX_ITERATIONS,
-          `Exceeded max iterations (${MAX_WORKFLOW_ITERATIONS})`
+          ErrorCode.CONCLAVE_MAX_ITERATIONS,
+          `Exceeded max iterations (${MAX_CONCLAVE_ITERATIONS})`
         );
       }
 
@@ -301,8 +301,8 @@ export async function executeGraph(
             edges,
             nodeOutputs,
             agentSessions,
-            workflowContext,
-            workflow,
+            conclaveContext,
+            conclave,
             emit,
             cleanPayload,
             entry.triggeredBy,
@@ -329,8 +329,8 @@ export async function executeGraph(
       }
     }
 
-    // Persist Claude agent sessions for chat workflows
-    if (isChatWorkflow) {
+    // Persist Claude agent sessions for chat conclaves
+    if (isChatConclave) {
       for (const [nodeId, sessionId] of agentSessions) {
         const node = nodeMap.get(nodeId);
         if (node?.data.type === "agent") {
@@ -408,7 +408,7 @@ export async function executeGraph(
  * Each row is a complete accumulated snapshot (O(n²) storage for n nodes). Acceptable for
  * Phase 1. Phase 3 cleanup: delete all but the latest checkpoint row once a run succeeds.
  *
- * Never throws — a missed checkpoint must not abort workflow execution. The run falls back
+ * Never throws — a missed checkpoint must not abort conclave execution. The run falls back
  * to an earlier checkpoint (or re-executes from scratch) on the next resume.
  */
 async function writeCheckpoint(
@@ -430,7 +430,7 @@ async function writeCheckpoint(
   } catch (err) {
     logger.error("Failed to write checkpoint", { runId, nodeId, error: String(err) });
     // Intentionally not re-throwing — a missed checkpoint degrades resume granularity,
-    // but must never abort workflow execution.
+    // but must never abort conclave execution.
   }
 }
 
@@ -438,10 +438,10 @@ async function writeCheckpoint(
 
 function resolveNextEntries(
   entry: QueueEntry,
-  node: WorkflowNode,
+  node: ConclaveNode,
   output: unknown,
-  edges: WorkflowEdge[],
-  nodeMap: Map<string, WorkflowNode>,
+  edges: ConclaveEdge[],
+  nodeMap: Map<string, ConclaveNode>,
   nodeOutputs: Map<string, unknown>
 ): QueueEntry[] {
   const next: QueueEntry[] = [];

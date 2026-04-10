@@ -2,13 +2,13 @@ import { Hono } from "hono";
 import { eq, desc } from "drizzle-orm";
 
 import { db } from "../db/client";
-import { workflows, runs, agentTasks, runEvents } from "../db/schema";
+import { conclaves, runs, agentTasks, runEvents } from "../db/schema";
 import type { CronScheduler } from "../engine/scheduler";
 
 export function createDashboardRoutes(scheduler: CronScheduler) {
   return new Hono()
     .get("/", async (c) => {
-      const allWorkflows = await db.select().from(workflows);
+      const allConclaves = await db.select().from(conclaves);
       const allRuns = await db.select().from(runs).orderBy(desc(runs.createdAt));
       const allTasks = await db.select().from(agentTasks).orderBy(desc(agentTasks.createdAt));
 
@@ -32,7 +32,7 @@ export function createDashboardRoutes(scheduler: CronScheduler) {
       }
 
       return c.json({
-        totalWorkflows: allWorkflows.length,
+        totalConclaves: allConclaves.length,
         activeRuns: allRuns.filter((r) => r.status === "running").length,
         recentRuns: allRuns.slice(0, 20),
         agentTasks: allTasks.slice(0, 20),
@@ -41,7 +41,7 @@ export function createDashboardRoutes(scheduler: CronScheduler) {
         cancelledCount,
         totalRuns: allRuns.length,
         totalCost,
-        workflows: allWorkflows.map((w) => {
+        conclaves: allConclaves.map((w) => {
           const def = w.definition as Record<string, unknown> | null;
           const nodes = (def?.nodes ?? []) as Array<{ data?: { type?: string; config?: unknown } }>;
           const triggerNode = nodes.find((n) => n.data?.type === "trigger");

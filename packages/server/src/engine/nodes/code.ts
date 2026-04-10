@@ -4,7 +4,7 @@ import { resolve, dirname } from "path";
 import type { Workspace } from "../workspace";
 
 export interface CodeNodeContext {
-  workflowId: number;
+  conclaveId: number;
   runId: number;
   nodeId: string;
 }
@@ -57,7 +57,7 @@ export async function executeCode(config: CodeConfig, input: unknown, context?: 
       PYTHONUTF8: "1",
       ...(context ? {
         OC_API_URL: `http://localhost:${process.env.PORT ?? 4000}`,
-        OC_WORKFLOW_ID: String(context.workflowId),
+        OC_CONCLAVE_ID: String(context.conclaveId),
         OC_RUN_ID: String(context.runId),
         OC_NODE_ID: context.nodeId,
       } : {}),

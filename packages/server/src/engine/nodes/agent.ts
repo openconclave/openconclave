@@ -1,6 +1,6 @@
 import { join } from "path";
 import { mkdirSync, existsSync, appendFileSync } from "fs";
-import type { WorkflowNode, WorkflowEdge, AgentConfig, ResolvedAgentConfig, ToolConfig } from "@openconclave/shared";
+import type { ConclaveNode, ConclaveEdge, AgentConfig, ResolvedAgentConfig, ToolConfig } from "@openconclave/shared";
 import { executeAgent } from "../agent-executor";
 import { SESSIONS_DIR } from "../../lib/workspace";
 import type { RunEvent } from "../types";
@@ -9,12 +9,12 @@ import type { Workspace } from "../workspace";
 export async function executeAgentNode(
   runId: number,
   nodeId: string,
-  node: WorkflowNode,
-  nodeMap: Map<string, WorkflowNode>,
-  edges: WorkflowEdge[],
+  node: ConclaveNode,
+  nodeMap: Map<string, ConclaveNode>,
+  edges: ConclaveEdge[],
   nodeOutputs: Map<string, unknown>,
   agentSessions: Map<string, string>,
-  workflowContext: string | null,
+  conclaveContext: string | null,
   input: unknown,
   emit: (event: RunEvent) => void,
   workspace?: Workspace
@@ -51,7 +51,7 @@ export async function executeAgentNode(
     }
   }
 
-  // Build system prompt: agent's instructions + workflow context
+  // Build system prompt: agent's instructions + conclave context
   // Tools are read directly from agentConfig.tools[]
   const mergedConfig: ResolvedAgentConfig = {
     ...agentConfig,
@@ -63,7 +63,7 @@ export async function executeAgentNode(
 
   const systemParts: string[] = [];
   if (mergedConfig.systemPrompt) systemParts.push(mergedConfig.systemPrompt);
-  if (workflowContext) systemParts.push(`\nWorkflow context: ${workflowContext}`);
+  if (conclaveContext) systemParts.push(`\nConclave context: ${conclaveContext}`);
   const fullSystemPrompt = systemParts.join("\n\n");
 
   const chatConfig = {
@@ -90,7 +90,7 @@ export async function executeAgentNode(
       appendFileSync(sessionFile, JSON.stringify({ role: "system", content: fullSystemPrompt }) + "\n");
     }
 
-    const userContent = userMessage ?? workflowContext ?? "Start";
+    const userContent = userMessage ?? conclaveContext ?? "Start";
     appendFileSync(sessionFile, JSON.stringify({ role: "user", content: userContent }) + "\n");
 
     const agentResult = await executeAgent(runId, nodeId, chatConfig, userMessage ?? input, emit, undefined, sessionFile, workspace, edges, nodeMap);

@@ -49,7 +49,7 @@ export async function runResponsesAPI(options: OpenAIRunOptions): Promise<OpenAI
   const tools: Array<Record<string, unknown>> = [...agent.toResponsesTools()];
   const toolExecutors = agent.toolExecutors;
 
-  // Add routing tool if workflow has ≥2 branches
+  // Add routing tool if conclave has ≥2 branches
   if (options.routeTargets && options.routeTargets.length >= 1) {
     tools.push(createRoutingToolResponses(options.routeTargets));
   }

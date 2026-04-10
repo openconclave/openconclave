@@ -1,4 +1,4 @@
-import { useWorkflowStore } from "@/stores/workflow-store";
+import { useConclaveStore } from "@/stores/conclave-store";
 import type { OutputConfig, PromptConfig } from "@openconclave/shared";
 import { Field, INPUT_CLASS, MONO_INPUT_CLASS } from "./shared";
 
@@ -8,7 +8,7 @@ interface OutputFieldsProps {
 }
 
 export function OutputFields({ nodeId, config }: OutputFieldsProps) {
-  const updateNodeConfig = useWorkflowStore((s) => s.updateNodeConfig);
+  const updateNodeConfig = useConclaveStore((s) => s.updateNodeConfig);
   const update = (c: Partial<OutputConfig>) => updateNodeConfig(nodeId, c);
 
   return (
@@ -51,7 +51,7 @@ interface PromptFieldsProps {
 }
 
 export function PromptFields({ nodeId, config }: PromptFieldsProps) {
-  const updateNodeConfig = useWorkflowStore((s) => s.updateNodeConfig);
+  const updateNodeConfig = useConclaveStore((s) => s.updateNodeConfig);
 
   return (
     <>
@@ -65,7 +65,7 @@ export function PromptFields({ nodeId, config }: PromptFieldsProps) {
         />
       </Field>
       <p className="text-[10px] text-muted-foreground px-1">
-        Channel Loop: pauses workflow, sends agent's output to the connected Claude Code session,
+        Channel Loop: pauses conclave, sends agent's output to the connected Claude Code session,
         waits for response, then continues. The description is shown to the agent as the routing
         tool description.
       </p>

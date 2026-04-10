@@ -1,4 +1,4 @@
-export const MAX_WORKFLOW_ITERATIONS = 100;
+export const MAX_CONCLAVE_ITERATIONS = 100;
 export const DEFAULT_AGENT_MAX_TURNS = 25;
 export const DEFAULT_AGENT_MAX_BUDGET_USD = 1.0;
 export const DEFAULT_AGENT_POOL_SIZE = 3;

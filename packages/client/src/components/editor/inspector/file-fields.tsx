@@ -1,4 +1,4 @@
-import { useWorkflowStore } from "@/stores/workflow-store";
+import { useConclaveStore } from "@/stores/conclave-store";
 import { Field, INPUT_CLASS } from "./shared";
 
 interface FileConfig {
@@ -11,7 +11,7 @@ interface FileFieldsProps {
 }
 
 export function FileFields({ nodeId, config }: FileFieldsProps) {
-  const updateNodeConfig = useWorkflowStore((s) => s.updateNodeConfig);
+  const updateNodeConfig = useConclaveStore((s) => s.updateNodeConfig);
   const update = (c: Partial<FileConfig>) => updateNodeConfig(nodeId, c);
 
   return (

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useWorkflowStore } from "@/stores/workflow-store";
+import { useConclaveStore } from "@/stores/conclave-store";
 import type { AgentConfig, ToolConfig } from "@openconclave/shared";
 import { Terminal, Server, BookOpen, X, Sparkles, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -28,7 +28,7 @@ interface AgentFieldsProps {
 }
 
 export function AgentFields({ nodeId, config, onUpdate }: AgentFieldsProps) {
-  const updateNodeConfig = useWorkflowStore((s) => s.updateNodeConfig);
+  const updateNodeConfig = useConclaveStore((s) => s.updateNodeConfig);
   const update = onUpdate ?? ((c: Partial<AgentConfig>) => updateNodeConfig(nodeId, c));
 
   const [ollamaStatus, setOllamaStatus] = useState<OllamaStatus | null>(null);
@@ -53,18 +53,18 @@ export function AgentFields({ nodeId, config, onUpdate }: AgentFieldsProps) {
     if (pollRef.current) clearInterval(pollRef.current);
   }, []);
 
-  const workflowId = window.location.pathname.match(/\/workflows\/(\d+)/)?.[1];
+  const conclaveId = window.location.pathname.match(/\/conclaves\/(\d+)/)?.[1];
 
   const handleImprovePrompt = useCallback(async () => {
-    if (!workflowId || improving) return;
+    if (!conclaveId || improving) return;
     const sentPrompt = config.systemPrompt ?? "";
     setImproving(true);
 
     try {
       await api.post("/channel/improve-prompt", {
-        workflowId,
+        conclaveId,
         nodeId,
-        nodeLabel: useWorkflowStore.getState().nodes.find((n) => n.id === nodeId)?.data.label ?? nodeId,
+        nodeLabel: useConclaveStore.getState().nodes.find((n) => n.id === nodeId)?.data.label ?? nodeId,
         currentPrompt: sentPrompt,
       });
       toast("Sent to Claude Code — waiting for improved prompt...");
@@ -86,7 +86,7 @@ export function AgentFields({ nodeId, config, onUpdate }: AgentFieldsProps) {
         return;
       }
       try {
-        const wf = await api.get<Record<string, unknown>>(`/workflows/${workflowId}`);
+        const wf = await api.get<Record<string, unknown>>(`/conclaves/${conclaveId}`);
         const def = (wf.definition ?? wf) as Record<string, unknown>;
         const nodes = (def.nodes ?? []) as Array<Record<string, unknown>>;
         const node = nodes.find((n) => n.id === nodeId);
@@ -102,7 +102,7 @@ export function AgentFields({ nodeId, config, onUpdate }: AgentFieldsProps) {
         }
       } catch { /* ignore poll errors */ }
     }, 3000);
-  }, [workflowId, nodeId, config.systemPrompt, improving]);
+  }, [conclaveId, nodeId, config.systemPrompt, improving]);
 
   useEffect(() => {
     if (engine === "ollama" && !ollamaStatus) {
@@ -187,7 +187,7 @@ export function AgentFields({ nodeId, config, onUpdate }: AgentFieldsProps) {
               The agent receives input from the previous node as a user message. Instructions define the
               agent's role and behavior.
             </p>
-            {claudeAvailable && workflowId && (
+            {claudeAvailable && conclaveId && (
               <button
                 onClick={handleImprovePrompt}
                 disabled={improving}
@@ -364,7 +364,7 @@ export function AgentFields({ nodeId, config, onUpdate }: AgentFieldsProps) {
             />
           </Field>
           <p className="text-[10px] text-muted-foreground px-1">
-            Returns this text as output without making any LLM calls. Useful for testing workflows.
+            Returns this text as output without making any LLM calls. Useful for testing conclaves.
           </p>
         </>
       )}

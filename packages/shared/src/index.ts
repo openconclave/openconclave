@@ -17,15 +17,15 @@ export type {
   PromptConfig,
   OutputConfig,
   ToolConfig,
-  WorkflowNodeConfig,
-  WorkflowNodeData,
-  WorkflowNode,
-  WorkflowEdge,
-  WorkflowDefinition,
+  ConclaveNodeConfig,
+  ConclaveNodeData,
+  ConclaveNode,
+  ConclaveEdge,
+  ConclaveDefinition,
   DiscussionConfig,
   DiscussionModeratorConfig,
   McpServerLaunchConfig,
-} from "./types/workflow";
+} from "./types/conclave";
 
 export type { AgentTask, Run, RunEvent } from "./types/agent";
 
@@ -37,9 +37,9 @@ export type {
 } from "./types/knowledge";
 
 export type {
-  CreateWorkflowRequest,
-  UpdateWorkflowRequest,
-  WorkflowListResponse,
+  CreateConclaveRequest,
+  UpdateConclaveRequest,
+  ConclaveListResponse,
   RunListResponse,
   CheckpointInfo,
   RunDetailResponse,
@@ -57,11 +57,11 @@ export {
   transformConfigSchema,
   outputConfigSchema,
   discussionConfigSchema,
-  workflowNodeSchema,
-  workflowEdgeSchema,
-  createWorkflowSchema,
-  updateWorkflowSchema,
-} from "./schemas/workflow.schema";
+  conclaveNodeSchema,
+  conclaveEdgeSchema,
+  createConclaveSchema,
+  updateConclaveSchema,
+} from "./schemas/conclave.schema";
 
 export { runFilterSchema } from "./schemas/agent.schema";
 

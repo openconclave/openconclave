@@ -110,9 +110,9 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
     }
   }
 
-  // In-process workflow MCP server for routing, ask_user, and knowledge tools.
+  // In-process conclave MCP server for routing, ask_user, and knowledge tools.
   // Runs in the same process as the server — no subprocess spawn needed, so this
-  // works inside Bun compiled binaries (where workflow-mcp-server.ts lives at a
+  // works inside Bun compiled binaries (where conclave-mcp-server.ts lives at a
   // virtual bunfs path that a spawned `bun run` cannot reach).
   const routeTargets = options.routeTargets;
   const knowledgeBaseIds = config.knowledgeBases?.map(Number).filter((n) => !isNaN(n)) ?? [];
@@ -122,7 +122,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
   // Use ReturnType<typeof tool> is not portable across zod generics, so accept
   // heterogeneous tool shapes via a permissive element type.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const workflowTools: any[] = [];
+  const conclaveTools: any[] = [];
 
   if (routeTargets && routeTargets.length >= 1) {
     const validIds = routeTargets.map((t) => t.nodeId) as [string, ...string[]];
@@ -133,11 +133,11 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
       })
       .join("\n");
 
-    workflowTools.push(
+    conclaveTools.push(
       tool(
         "openconclave_next",
         [
-          "Choose the next step in the workflow. You MUST call this exactly once when you are done.",
+          "Choose the next step in the conclave. You MUST call this exactly once when you are done.",
           "Available routes:",
           routeDescription,
         ].join("\n"),
@@ -158,7 +158,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
   }
 
   if (promptConfig) {
-    workflowTools.push(
+    conclaveTools.push(
       tool(
         "ask_user",
         promptConfig.description ||
@@ -175,7 +175,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
               data: {
                 question,
                 waitingForResponse: true,
-                workflowName: "",
+                conclaveName: "",
                 nodeLabel: promptConfig.nodeId,
                 senderNode: promptConfig.senderNode ?? "agent",
                 senderType: "agent",
@@ -200,7 +200,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
   if (knowledgeBaseIds.length > 0) {
     const kbList = knowledgeBaseIds.join(", ");
 
-    workflowTools.push(
+    conclaveTools.push(
       tool(
         "knowledge_search",
         `Search connected knowledge bases (IDs: ${kbList}) using semantic similarity. Returns the most relevant text passages.`,
@@ -251,7 +251,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
       ),
     );
 
-    workflowTools.push(
+    conclaveTools.push(
       tool(
         "knowledge_fetch",
         "Fetch full document content or specific chunks from a knowledge base. Use after searching to get complete context.",
@@ -340,7 +340,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
       ),
     );
 
-    workflowTools.push(
+    conclaveTools.push(
       tool(
         "knowledge_add",
         "Add new text content to a connected knowledge base. The text will be chunked and embedded automatically.",
@@ -380,11 +380,11 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
     );
   }
 
-  if (workflowTools.length > 0) {
-    mcpServers["openconclave-workflow"] = createSdkMcpServer({
-      name: "openconclave-workflow",
+  if (conclaveTools.length > 0) {
+    mcpServers["openconclave-conclave"] = createSdkMcpServer({
+      name: "openconclave-conclave",
       version: "0.1.0",
-      tools: workflowTools,
+      tools: conclaveTools,
     });
   }
 
@@ -469,7 +469,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
 
     const durationMs = Date.now() - startTime;
 
-    // Read routing decision from in-process workflow tool state
+    // Read routing decision from in-process conclave tool state
     let routeTo: string | undefined;
     if (routingState.routeTo) {
       routeTo = routingState.routeTo;

@@ -3,55 +3,55 @@ import { zValidator } from "@hono/zod-validator";
 import { eq } from "drizzle-orm";
 
 import { db } from "../db/client";
-import { workflows, runs, agentTasks, runEvents, checkpoints } from "../db/schema";
+import { conclaves, runs, agentTasks, runEvents, checkpoints } from "../db/schema";
 import {
-  createWorkflowSchema,
-  updateWorkflowSchema,
+  createConclaveSchema,
+  updateConclaveSchema,
   AppError,
 } from "@openconclave/shared";
 
-export const workflowRoutes = new Hono()
+export const conclaveRoutes = new Hono()
   .get("/", async (c) => {
-    const result = await db.select().from(workflows);
-    return c.json({ workflows: result });
+    const result = await db.select().from(conclaves);
+    return c.json({ conclaves: result });
   })
 
   .get("/:id", async (c) => {
     const { id } = c.req.param();
-    const [result] = await db.select().from(workflows).where(eq(workflows.id, id));
-    if (!result) throw AppError.notFound("Workflow", id);
+    const [result] = await db.select().from(conclaves).where(eq(conclaves.id, id));
+    if (!result) throw AppError.notFound("Conclave", id);
     return c.json(result);
   })
 
-  .post("/", zValidator("json", createWorkflowSchema), async (c) => {
+  .post("/", zValidator("json", createConclaveSchema), async (c) => {
     const body = c.req.valid("json");
     const now = new Date().toISOString();
 
-    const result = await db.insert(workflows).values({
+    const result = await db.insert(conclaves).values({
       name: body.name,
       description: body.description,
       definition: { ...body, enabled: true, createdAt: now, updatedAt: now },
       enabled: true,
       createdAt: now,
       updatedAt: now,
-    }).returning({ id: workflows.id });
+    }).returning({ id: conclaves.id });
 
     const id = result[0].id;
     // Update definition with the generated ID
-    await db.update(workflows)
+    await db.update(conclaves)
       .set({ definition: { id, ...body, enabled: true, createdAt: now, updatedAt: now } })
-      .where(eq(workflows.id, id));
+      .where(eq(conclaves.id, id));
 
     return c.json({ id, ...body, enabled: true, createdAt: now, updatedAt: now }, 201);
   })
 
-  .put("/:id", zValidator("json", updateWorkflowSchema), async (c) => {
+  .put("/:id", zValidator("json", updateConclaveSchema), async (c) => {
     const id = Number(c.req.param("id"));
     const body = c.req.valid("json");
     const now = new Date().toISOString();
 
-    const [prev] = await db.select().from(workflows).where(eq(workflows.id, id));
-    if (!prev) throw AppError.notFound("Workflow", String(id));
+    const [prev] = await db.select().from(conclaves).where(eq(conclaves.id, id));
+    if (!prev) throw AppError.notFound("Conclave", String(id));
 
     const updated = {
       name: body.name ?? prev.name,
@@ -66,7 +66,7 @@ export const workflowRoutes = new Hono()
       updatedAt: now,
     };
 
-    await db.update(workflows).set(updated).where(eq(workflows.id, id));
+    await db.update(conclaves).set(updated).where(eq(conclaves.id, id));
     return c.json(updated.definition);
   })
 
@@ -74,14 +74,14 @@ export const workflowRoutes = new Hono()
     const id = Number(c.req.param("id"));
 
     // Delete related data first (cascade)
-    const workflowRuns = await db.select().from(runs).where(eq(runs.workflowId, id));
-    for (const run of workflowRuns) {
+    const conclaveRuns = await db.select().from(runs).where(eq(runs.conclaveId, id));
+    for (const run of conclaveRuns) {
       await db.delete(checkpoints).where(eq(checkpoints.runId, run.id));
       await db.delete(runEvents).where(eq(runEvents.runId, run.id));
       await db.delete(agentTasks).where(eq(agentTasks.runId, run.id));
     }
-    await db.delete(runs).where(eq(runs.workflowId, id));
-    await db.delete(workflows).where(eq(workflows.id, id));
+    await db.delete(runs).where(eq(runs.conclaveId, id));
+    await db.delete(conclaves).where(eq(conclaves.id, id));
 
     return c.json({ deleted: true });
   });

@@ -2,8 +2,8 @@ import { useState, useCallback, useRef, useEffect, useLayoutEffect } from "react
 import { createPortal } from "react-dom";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { cn } from "@/lib/utils";
-import type { WorkflowNodeData } from "@openconclave/shared";
-import { useWorkflowStore } from "@/stores/workflow-store";
+import type { ConclaveNodeData } from "@openconclave/shared";
+import { useConclaveStore } from "@/stores/conclave-store";
 
 const GRID = 20;
 const nodeRounding = "rounded-2xl";
@@ -65,7 +65,7 @@ export function BaseNode({
   showSourceHandle = true,
   sourceHandles,
 }: NodeProps & {
-  data: WorkflowNodeData;
+  data: ConclaveNodeData;
   icon: React.ElementType;
   children?: React.ReactNode;
   subtitle?: string;
@@ -75,14 +75,14 @@ export function BaseNode({
   showSourceHandle?: boolean;
   sourceHandles?: { id: string; label: string; position: number }[];
 }) {
-  const setSelectedNode = useWorkflowStore((s) => s.setSelectedNode);
-  const updateNodeData = useWorkflowStore((s) => s.updateNodeData);
-  const activeNodeIds = useWorkflowStore((s) => s.activeNodeIds);
-  const skippedNodeIds = useWorkflowStore((s) => s.skippedNodeIds);
-  const isDraggingTool = useWorkflowStore((s) => s.isDraggingTool);
+  const setSelectedNode = useConclaveStore((s) => s.setSelectedNode);
+  const updateNodeData = useConclaveStore((s) => s.updateNodeData);
+  const activeNodeIds = useConclaveStore((s) => s.activeNodeIds);
+  const skippedNodeIds = useConclaveStore((s) => s.skippedNodeIds);
+  const isDraggingTool = useConclaveStore((s) => s.isDraggingTool);
   const [editing, setEditing] = useState(false);
-  const openDropdownId = useWorkflowStore((s) => s.openDropdownId);
-  const setOpenDropdown = useWorkflowStore((s) => s.setOpenDropdown);
+  const openDropdownId = useConclaveStore((s) => s.openDropdownId);
+  const setOpenDropdown = useConclaveStore((s) => s.setOpenDropdown);
   const dropdownOpen = openDropdownId === id;
   const labelRef = useRef<HTMLSpanElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);

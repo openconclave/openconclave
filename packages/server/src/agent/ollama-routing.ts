@@ -4,7 +4,7 @@ type RouteTarget = { nodeId: string; label: string; type: string };
 
 /**
  * Creates the routing tool for Ollama agents.
- * The agent MUST call this exactly once to route to the next workflow step.
+ * The agent MUST call this exactly once to route to the next conclave step.
  */
 export function createOllamaRoutingTool(routeTargets: RouteTarget[]): {
   tool: OllamaTool;
@@ -20,7 +20,7 @@ export function createOllamaRoutingTool(routeTargets: RouteTarget[]): {
       type: "function",
       function: {
         name: "openconclave_next",
-        description: `Route to the next workflow step. You MUST call this exactly once.\nAvailable routes:\n${routeList}`,
+        description: `Route to the next conclave step. You MUST call this exactly once.\nAvailable routes:\n${routeList}`,
         parameters: {
           type: "object",
           required: ["node_id", "content"],

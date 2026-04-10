@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useWorkflowStore } from "@/stores/workflow-store";
+import { useConclaveStore } from "@/stores/conclave-store";
 import type { CodeConfig } from "@openconclave/shared";
 import { Sparkles, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -22,7 +22,7 @@ interface CodeFieldsProps {
 }
 
 export function CodeFields({ nodeId, config, onUpdate }: CodeFieldsProps) {
-  const updateNodeConfig = useWorkflowStore((s) => s.updateNodeConfig);
+  const updateNodeConfig = useConclaveStore((s) => s.updateNodeConfig);
   const update = onUpdate ?? ((c: Partial<CodeConfig>) => updateNodeConfig(nodeId, c));
 
   const [claudeAvailable, setClaudeAvailable] = useState(false);
@@ -39,18 +39,18 @@ export function CodeFields({ nodeId, config, onUpdate }: CodeFieldsProps) {
     if (pollRef.current) clearInterval(pollRef.current);
   }, []);
 
-  const workflowId = window.location.pathname.match(/\/workflows\/(\d+)/)?.[1];
+  const conclaveId = window.location.pathname.match(/\/conclaves\/(\d+)/)?.[1];
 
   const handleImproveCode = useCallback(async () => {
-    if (!workflowId || improving) return;
+    if (!conclaveId || improving) return;
     const sentCode = config.code ?? "";
     setImproving(true);
 
     try {
       await api.post("/channel/improve-code", {
-        workflowId,
+        conclaveId,
         nodeId,
-        nodeLabel: useWorkflowStore.getState().nodes.find((n) => n.id === nodeId)?.data.label ?? nodeId,
+        nodeLabel: useConclaveStore.getState().nodes.find((n) => n.id === nodeId)?.data.label ?? nodeId,
         runtime: config.runtime ?? "python",
         currentCode: sentCode,
       });
@@ -72,7 +72,7 @@ export function CodeFields({ nodeId, config, onUpdate }: CodeFieldsProps) {
         return;
       }
       try {
-        const wf = await api.get<Record<string, unknown>>(`/workflows/${workflowId}`);
+        const wf = await api.get<Record<string, unknown>>(`/conclaves/${conclaveId}`);
         const def = (wf.definition ?? wf) as Record<string, unknown>;
         const nodes = (def.nodes ?? []) as Array<Record<string, unknown>>;
         const node = nodes.find((n) => n.id === nodeId);
@@ -88,7 +88,7 @@ export function CodeFields({ nodeId, config, onUpdate }: CodeFieldsProps) {
         }
       } catch { /* ignore poll errors */ }
     }, 3000);
-  }, [workflowId, nodeId, config.code, config.runtime, improving]);
+  }, [conclaveId, nodeId, config.code, config.runtime, improving]);
 
   return (
     <>
@@ -118,7 +118,7 @@ export function CodeFields({ nodeId, config, onUpdate }: CodeFieldsProps) {
         <p className="text-[10px] text-muted-foreground flex-1">
           Input from previous node is passed via stdin and $INPUT env var. Output is stdout.
         </p>
-        {claudeAvailable && workflowId && (
+        {claudeAvailable && conclaveId && (
           <button
             onClick={handleImproveCode}
             disabled={improving}

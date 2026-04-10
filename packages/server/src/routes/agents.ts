@@ -6,9 +6,9 @@ import { resolve, join } from "path";
 import { mkdirSync, existsSync, readFileSync, unlinkSync } from "fs";
 
 import { db } from "../db/client";
-import { agentTasks, workflows, runEvents } from "../db/schema";
+import { agentTasks, conclaves, runEvents } from "../db/schema";
 import { AppError, ErrorCode } from "@openconclave/shared";
-import type { AgentConfig, ResolvedAgentConfig, WorkflowNode } from "@openconclave/shared";
+import type { AgentConfig, ResolvedAgentConfig, ConclaveNode } from "@openconclave/shared";
 import { executeAgent } from "../engine/agent-executor";
 import { invokeWithTools } from "../agent/llm-call";
 import { logger } from "../lib/logger";
@@ -23,7 +23,7 @@ const toolDefSchema = z.object({
 });
 
 const invokeSchema = z.object({
-  workflowId: z.number(),
+  conclaveId: z.number(),
   runId: z.number(),
   nodeId: z.string(),
   prompt: z.string(),
@@ -33,16 +33,16 @@ const invokeSchema = z.object({
 
 export const agentRoutes = new Hono()
   .post("/invoke", zValidator("json", invokeSchema), async (c) => {
-    const { workflowId, runId, nodeId, prompt, systemPromptOverride, tools } = c.req.valid("json");
+    const { conclaveId, runId, nodeId, prompt, systemPromptOverride, tools } = c.req.valid("json");
 
-    const [wf] = await db.select().from(workflows).where(eq(workflows.id, workflowId));
-    if (!wf) throw AppError.notFound("Workflow", String(workflowId));
+    const [wf] = await db.select().from(conclaves).where(eq(conclaves.id, conclaveId));
+    if (!wf) throw AppError.notFound("Conclave", String(conclaveId));
 
     const definition = typeof wf.definition === "string"
       ? JSON.parse(wf.definition as string)
       : wf.definition;
 
-    const node = (definition.nodes as WorkflowNode[]).find((n) => n.id === nodeId);
+    const node = (definition.nodes as ConclaveNode[]).find((n) => n.id === nodeId);
     if (!node) throw AppError.notFound("Node", nodeId);
     if (node.data.type !== "agent") {
       throw new AppError(ErrorCode.VALIDATION, `Node "${nodeId}" is not an agent`);

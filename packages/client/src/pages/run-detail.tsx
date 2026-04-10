@@ -176,7 +176,7 @@ export function RunDetailPage() {
   const [data, setData] = useState<RunDetailResponse | null>(null);
   const [loadError, setLoadError] = useState(false); // Bug #5 fix: separate error state
   const [nodeLabels, setNodeLabels] = useState<Map<string, string>>(new Map());
-  const labelsLoadedFor = useRef<number | null>(null); // Bug #3 fix: track which workflow loaded
+  const labelsLoadedFor = useRef<number | null>(null); // Bug #3 fix: track which conclave loaded
   const [chatUrl, setChatUrl] = useState<string | null>(null);
   const [expandedTasks, setExpandedTasks] = useState<number[]>([]);
   const [expandedEvents, setExpandedEvents] = useState(false);
@@ -186,14 +186,14 @@ export function RunDetailPage() {
   const path = window.location.pathname;
   const runId = path.split("/runs/")[1]?.split("/")[0]; // Bug #4 fix: handle trailing slash
 
-  // Bug #2/#3 fix: separate effect for loading workflow labels
+  // Bug #2/#3 fix: separate effect for loading conclave labels
   useEffect(() => {
-    const workflowId = data?.run.workflowId;
-    if (!workflowId || labelsLoadedFor.current === workflowId) return;
+    const conclaveId = data?.run.conclaveId;
+    if (!conclaveId || labelsLoadedFor.current === conclaveId) return;
 
-    api.get<{ definition: { nodes: Array<{ id: string; data?: { label?: string; type?: string; config?: Record<string, unknown> } }>; toolName?: string } }>(`/workflows/${workflowId}`)
+    api.get<{ definition: { nodes: Array<{ id: string; data?: { label?: string; type?: string; config?: Record<string, unknown> } }>; toolName?: string } }>(`/conclaves/${conclaveId}`)
       .then((wf) => {
-        labelsLoadedFor.current = workflowId;
+        labelsLoadedFor.current = conclaveId;
         const def = ((wf as Record<string, unknown>).definition ?? wf) as Record<string, unknown>;
         const nodes = (def.nodes as Array<{ id: string; data?: { label?: string; type?: string; config?: Record<string, unknown> } }>) ?? [];
         const labels = new Map<string, string>();
@@ -202,7 +202,7 @@ export function RunDetailPage() {
         }
         setNodeLabels(labels);
 
-        // Detect chat workflow for "Continue Chat" button
+        // Detect chat conclave for "Continue Chat" button
         const triggerNode = nodes.find((n) => n.data?.type === "trigger");
         const triggerType = triggerNode?.data?.config?.type as string | undefined;
         const toolName = def.toolName as string | undefined;
@@ -211,7 +211,7 @@ export function RunDetailPage() {
         }
       })
       .catch(() => {});
-  }, [data?.run.workflowId]);
+  }, [data?.run.conclaveId]);
 
   // Polling effect
   useEffect(() => {
@@ -461,8 +461,8 @@ export function RunDetailPage() {
                       </div>
                     </div>
                     {task.systemPrompt != null && (() => {
-                      // Hide if systemPrompt is just "Workflow context: <same as prompt>"
-                      const stripped = task.systemPrompt.replace(/^\s*Workflow context:\s*/i, "").trim();
+                      // Hide if systemPrompt is just "Conclave context: <same as prompt>"
+                      const stripped = task.systemPrompt.replace(/^\s*Conclave context:\s*/i, "").trim();
                       const promptStr = typeof task.prompt === "string" ? task.prompt.trim() : "";
                       const isJustContext = stripped === promptStr;
                       if (isJustContext) return null;

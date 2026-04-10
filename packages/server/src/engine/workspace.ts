@@ -1,7 +1,7 @@
 /**
  * Workspace — single source of truth for working directory resolution.
  *
- * Created once per workflow run from trigger config / payload.
+ * Created once per conclave run from trigger config / payload.
  * Passed through to every node executor, agent runtime, and tool.
  *
  * Centralizes:
@@ -21,7 +21,7 @@ interface McpServerConfig {
   args: string[];
 }
 
-/** Legacy hardcoded servers — used as fallback for old workflows. */
+/** Legacy hardcoded servers — used as fallback for old conclaves. */
 const LEGACY_MCP_SERVER_CONFIGS: Record<string, McpServerConfig> = {
   playwright: {
     command: "npx",
@@ -61,7 +61,7 @@ export class Workspace {
   /** The resolved working directory (absolute, normalized path). */
   cwd: string;
 
-  /** Extra directories the workflow has been granted access to. */
+  /** Extra directories the conclave has been granted access to. */
   private extraAllowedDirs: string[] = [];
 
   constructor(cwd?: string) {
@@ -118,7 +118,7 @@ export class Workspace {
   // ── Allowed directories ─────────────────────────────────────
 
   /**
-   * Set additional directories the workflow is allowed to access.
+   * Set additional directories the conclave is allowed to access.
    * These are added on top of the default cwd + parent.
    */
   setAllowedDirs(dirs: string[]): void {

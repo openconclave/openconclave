@@ -1,6 +1,6 @@
 {
   "name": "openconclave-channel",
-  "description": "OpenConclave channel — delivers workflow events and prompt questions to Claude Code sessions.",
+  "description": "OpenConclave channel — delivers conclave events and prompt questions to Claude Code sessions.",
   "version": "1.0.0",
   "author": {
     "name": "OpenConclave"

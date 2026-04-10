@@ -101,7 +101,7 @@ export interface DiscussionConfig {
    */
   prompt: string;
   moderator?: DiscussionModeratorConfig;
-  /** Optional tool registration (used by workflow tool system, not the discussion loop) */
+  /** Optional tool registration (used by conclave tool system, not the discussion loop) */
   tool?: {
     name: string;
     description: string;
@@ -138,9 +138,9 @@ export interface McpServerLaunchConfig {
     type: "streamable-http" | "sse";
     url: string;
   };
-  /** User-provided environment variable values (stored per-workflow) */
+  /** User-provided environment variable values (stored per-conclave) */
   envValues?: Record<string, string>;
-  /** User-provided argument values (stored per-workflow) */
+  /** User-provided argument values (stored per-conclave) */
   argValues?: Record<string, string>;
 }
 
@@ -158,7 +158,7 @@ export interface ToolConfig {
 // Keep backward compat alias
 export type TransformConfig = CodeConfig;
 
-export type WorkflowNodeConfig =
+export type ConclaveNodeConfig =
   | TriggerConfig
   | AgentConfig
   | ConditionConfig
@@ -171,21 +171,21 @@ export type WorkflowNodeConfig =
 
 // ── Node Data ────────────────────────────────────────────────
 
-export interface WorkflowNodeData {
+export interface ConclaveNodeData {
   [key: string]: unknown;
   label: string;
   type: NodeType;
-  config: WorkflowNodeConfig;
+  config: ConclaveNodeConfig;
 }
 
-export interface WorkflowNode {
+export interface ConclaveNode {
   id: string;
   type: NodeType;
   position: { x: number; y: number };
-  data: WorkflowNodeData;
+  data: ConclaveNodeData;
 }
 
-export interface WorkflowEdge {
+export interface ConclaveEdge {
   id: string;
   source: string;
   target: string;
@@ -194,14 +194,14 @@ export interface WorkflowEdge {
   label?: string;
 }
 
-export interface WorkflowDefinition {
+export interface ConclaveDefinition {
   id: string;
   name: string;
   description?: string;
   toolName?: string;
   inputSchema?: Record<string, unknown>;
-  nodes: WorkflowNode[];
-  edges: WorkflowEdge[];
+  nodes: ConclaveNode[];
+  edges: ConclaveEdge[];
   enabled: boolean;
   createdAt: string;
   updatedAt: string;

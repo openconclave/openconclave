@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { NodeType, KnowledgeBase, McpRegistrySearchResponse, McpRegistryServer } from "@openconclave/shared";
-import { useWorkflowStore } from "@/stores/workflow-store";
+import { useConclaveStore } from "@/stores/conclave-store";
 
 // ── Node palette items ────────────────────────────────────────
 
@@ -27,7 +27,7 @@ const paletteGroups: PaletteGroup[] = [
   {
     label: "Flow",
     nodes: [
-      { type: "trigger", label: "Trigger", icon: Zap, color: "bg-node-trigger", description: "Start a workflow" },
+      { type: "trigger", label: "Trigger", icon: Zap, color: "bg-node-trigger", description: "Start a conclave" },
       { type: "prompt", label: "Channel Loop", icon: MessageCircleQuestion, color: "bg-node-trigger", description: "Pause and ask" },
       { type: "output", label: "Output", icon: Send, color: "bg-node-trigger", description: "Send result" },
     ],
@@ -278,7 +278,7 @@ export function NodePalette() {
     e.dataTransfer.effectAllowed = "move";
   };
 
-  const setDraggingTool = useWorkflowStore((s) => s.setDraggingTool);
+  const setDraggingTool = useConclaveStore((s) => s.setDraggingTool);
 
   const onToolDragStart = (e: React.DragEvent, item: ToolItem) => {
     setDraggingTool(true);

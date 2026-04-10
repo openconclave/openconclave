@@ -9,7 +9,7 @@ import { logger } from "../lib/logger";
 export function runMigrations(): void {
   logger.debug("Running database migrations");
 
-  db.run(sql`CREATE TABLE IF NOT EXISTS workflows (
+  db.run(sql`CREATE TABLE IF NOT EXISTS conclaves (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     description TEXT,
@@ -21,7 +21,7 @@ export function runMigrations(): void {
 
   db.run(sql`CREATE TABLE IF NOT EXISTS runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    workflow_id INTEGER NOT NULL REFERENCES workflows(id),
+    conclave_id INTEGER NOT NULL REFERENCES conclaves(id),
     status TEXT NOT NULL,
     trigger_type TEXT,
     trigger_payload TEXT,
@@ -121,7 +121,7 @@ export function runMigrations(): void {
   )`);
 
   // Indexes for common queries
-  db.run(sql`CREATE INDEX IF NOT EXISTS idx_runs_workflow_id ON runs(workflow_id)`);
+  db.run(sql`CREATE INDEX IF NOT EXISTS idx_runs_conclave_id ON runs(conclave_id)`);
   db.run(sql`CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status)`);
   db.run(sql`CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at)`);
   db.run(sql`CREATE INDEX IF NOT EXISTS idx_agent_tasks_run_id ON agent_tasks(run_id)`);

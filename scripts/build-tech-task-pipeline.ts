@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Build and POST the "Tech Task Pipeline" workflow.
+ * Build and POST the "Tech Task Pipeline" conclave.
  * One-shot script — run with `bun run scripts/build-tech-task-pipeline.ts`.
  */
 
@@ -632,16 +632,16 @@ const edges = [
 
 const body = {
   name: "Tech Task Pipeline",
-  description: "Delegated technical task workflow: isolated worktree → Analyst + Researcher → Test Engineer (RED) → Implementer (GREEN) → Test Runner → Reviewer → Summarizer → Teardown → Output. Channel loops on interactive agents. Designed for bug fixes, refactors, and small features where Claude Code hands off the work and acts as the client via channel prompts.",
+  description: "Delegated technical task conclave: isolated worktree → Analyst + Researcher → Test Engineer (RED) → Implementer (GREEN) → Test Runner → Reviewer → Summarizer → Teardown → Output. Channel loops on interactive agents. Designed for bug fixes, refactors, and small features where Claude Code hands off the work and acts as the client via channel prompts.",
   toolName: "techtask",
   nodes,
   edges,
   enabled: true,
 };
 
-console.log(`Creating workflow with ${nodes.length} nodes and ${edges.length} edges...`);
+console.log(`Creating conclave with ${nodes.length} nodes and ${edges.length} edges...`);
 
-const res = await fetch(`${API}/api/workflows`, {
+const res = await fetch(`${API}/api/conclaves`, {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify(body),
@@ -653,6 +653,6 @@ if (!res.ok) {
 }
 
 const created = await res.json() as { id?: number; [key: string]: unknown };
-console.log("\nCreated workflow id:", created.id);
-console.log("URL: http://localhost:4000/workflows/" + created.id);
+console.log("\nCreated conclave id:", created.id);
+console.log("URL: http://localhost:4000/conclaves/" + created.id);
 console.log("Trigger via MCP:    techtask({ cwd: ..., input: ... })");

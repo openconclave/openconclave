@@ -19,7 +19,7 @@ const statusColors: Record<string, string> = {
 
 export function RunsPage() {
   const [runs, setRuns] = useState<RunWithMeta[]>([]);
-  const [workflows, setWorkflows] = useState<Map<string, { name: string; toolName?: string; triggerType?: string }>>(new Map());
+  const [conclaves, setConclaves] = useState<Map<string, { name: string; toolName?: string; triggerType?: string }>>(new Map());
   const [page, setPage] = useState(0);
 
   useEffect(() => {
@@ -29,17 +29,17 @@ export function RunsPage() {
       .catch(() => setRuns([]));
 
     api
-      .get<{ workflows: Array<{ id: string; name: string; definition?: Record<string, unknown> }> }>("/workflows")
+      .get<{ conclaves: Array<{ id: string; name: string; definition?: Record<string, unknown> }> }>("/conclaves")
       .then((d) => {
         const map = new Map<string, { name: string; toolName?: string; triggerType?: string }>();
-        for (const w of d.workflows) {
+        for (const w of d.conclaves) {
           const def = w.definition;
           const nodes = (def?.nodes ?? []) as Array<{ data?: { type?: string; config?: Record<string, unknown> } }>;
           const triggerNode = nodes.find((n) => n.data?.type === "trigger");
           const triggerType = triggerNode?.data?.config?.type as string | undefined;
           map.set(String(w.id), { name: w.name, toolName: def?.toolName as string | undefined, triggerType });
         }
-        setWorkflows(map);
+        setConclaves(map);
       })
       .catch(() => {});
   }, []);
@@ -66,7 +66,7 @@ export function RunsPage() {
           <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
             <Play className="h-12 w-12 mb-4 opacity-30" />
             <p className="text-lg font-medium">No runs yet</p>
-            <p className="text-sm mt-1">Trigger a workflow to see runs here.</p>
+            <p className="text-sm mt-1">Trigger a conclave to see runs here.</p>
           </div>
         ) : (
           <>
@@ -87,7 +87,7 @@ export function RunsPage() {
                       {run.status}
                     </span>
                     <span className="text-sm truncate">
-                      {workflows.get(String(run.workflowId))?.name ?? "Unknown workflow"}
+                      {conclaves.get(String(run.conclaveId))?.name ?? "Unknown conclave"}
                     </span>
                     <span className="text-[10px] font-mono text-muted-foreground/50 shrink-0">
                       #{run.id}
@@ -109,7 +109,7 @@ export function RunsPage() {
                       {run.createdAt ? new Date(run.createdAt).toLocaleString() : "—"}
                     </span>
                     {(() => {
-                      const wf = workflows.get(String(run.workflowId));
+                      const wf = conclaves.get(String(run.conclaveId));
                       if (wf?.triggerType === "chat" && wf.toolName) {
                         return (
                           <a

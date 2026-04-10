@@ -1,8 +1,8 @@
 import { logger } from "../lib/logger";
 import { db } from "../db/client";
-import { workflows, settings, runEvents } from "../db/schema";
+import { conclaves, settings, runEvents } from "../db/schema";
 import { eq } from "drizzle-orm";
-import { WorkflowExecutor } from "../engine/executor";
+import { ConclaveExecutor } from "../engine/executor";
 import { broadcastRunEvent } from "../ws/broadcast";
 import type { RunEvent } from "../engine/types";
 
@@ -12,8 +12,8 @@ async function getBotToken(): Promise<string | null> {
 }
 
 /**
- * Active Telegram chat runs — maps `chatId:workflowId` → runId.
- * When a subsequent message arrives for the same chat+workflow,
+ * Active Telegram chat runs — maps `chatId:conclaveId` → runId.
+ * When a subsequent message arrives for the same chat+conclave,
  * we continue the existing run instead of creating a new one.
  */
 const activeChatRuns = new Map<string, number>();
@@ -26,11 +26,11 @@ const activeChatRuns = new Map<string, number>();
 const runMeta = new Map<number, { chatId: string; agentNodeIds: Set<string>; nodeLabels: Map<string, string> }>();
 
 export class TelegramTrigger {
-  private executor: WorkflowExecutor;
+  private executor: ConclaveExecutor;
   private offset = 0;
   private running = false;
 
-  constructor(executor: WorkflowExecutor) {
+  constructor(executor: ConclaveExecutor) {
     this.executor = executor;
   }
 
@@ -154,16 +154,16 @@ export class TelegramTrigger {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             chat_id: chatId,
-            text: `🔮 OpenConclave\n\nYour Chat ID: ${chatId}\n\nUse this ID in the Telegram trigger settings to connect workflows to this chat.`,
+            text: `🔮 OpenConclave\n\nYour Chat ID: ${chatId}\n\nUse this ID in the Telegram trigger settings to connect conclaves to this chat.`,
           }),
         });
       }
       return;
     }
 
-    const allWorkflows = await db.select().from(workflows);
+    const allConclaves = await db.select().from(conclaves);
 
-    for (const wf of allWorkflows) {
+    for (const wf of allConclaves) {
       if (!wf.enabled) continue;
       const def = wf.definition as any;
 
@@ -218,9 +218,9 @@ export class TelegramTrigger {
     triggerNodeId: string,
     chatId: string,
     activeKey: string,
-    workflowName: string
+    conclaveName: string
   ): Promise<void> {
-    console.log(`⚡ Triggering workflow "${workflowName}" from Telegram (chat ${chatId})`);
+    console.log(`⚡ Triggering conclave "${conclaveName}" from Telegram (chat ${chatId})`);
     try {
       const runId = await this.executor.execute(def, text, triggerNodeId);
       // Collect agent node IDs and labels so we can forward their output
@@ -236,7 +236,7 @@ export class TelegramTrigger {
       activeChatRuns.set(activeKey, runId);
       runMeta.set(runId, { chatId, agentNodeIds, nodeLabels });
     } catch (err: any) {
-      console.error(`⚡ Failed to trigger "${workflowName}":`, err.message);
+      console.error(`⚡ Failed to trigger "${conclaveName}":`, err.message);
     }
   }
 

@@ -26,7 +26,7 @@ export function RunHistoryTable({ runs, onUpdate }: { runs: Run[]; onUpdate?: ()
       <div className="divide-y divide-border">
         {runs.length === 0 && (
           <p className="px-4 py-8 text-center text-sm text-muted-foreground">
-            No runs yet. Trigger a workflow to get started.
+            No runs yet. Trigger a conclave to get started.
           </p>
         )}
         {runs.map((run) => (

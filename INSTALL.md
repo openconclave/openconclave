@@ -44,8 +44,8 @@ Then `/reload-plugins`.
 
 | Plugin | What you get |
 |--------|-------------|
-| `openconclave-channel` | Workflow events + each workflow as a callable tool |
-| `openconclave-dev` | Workflow management tools (list, create, update, delete) |
+| `openconclave-channel` | Conclave events + each conclave as a callable tool |
+| `openconclave-dev` | Conclave management tools (list, create, update, delete) |
 
 ### Start Claude Code with channel events
 
@@ -53,7 +53,7 @@ Then `/reload-plugins`.
 claude --dangerously-load-development-channels plugin:openconclave-channel@openconclave
 ```
 
-This enables real-time `prompt:question` and `channel:output` events from workflows.
+This enables real-time `prompt:question` and `channel:output` events from conclaves.
 
 ## Subcommands
 

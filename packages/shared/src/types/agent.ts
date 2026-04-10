@@ -1,4 +1,4 @@
-import type { RunStatus, TaskStatus } from "./workflow";
+import type { RunStatus, TaskStatus } from "./conclave";
 
 export type { TaskStatus, RunStatus };
 
@@ -22,7 +22,7 @@ export interface AgentTask {
 
 export interface Run {
   id: number;
-  workflowId: number;
+  conclaveId: number;
   status: RunStatus;
   triggerType?: string;
   triggerPayload?: unknown;

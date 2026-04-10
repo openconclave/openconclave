@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useWorkflowStore } from "@/stores/workflow-store";
+import { useConclaveStore } from "@/stores/conclave-store";
 import { X, Trash2, Sparkles, Loader2 } from "lucide-react";
 import type {
-  WorkflowNodeData,
+  ConclaveNodeData,
   AgentConfig,
   TriggerConfig,
   ConditionConfig,
@@ -23,14 +23,14 @@ import { OutputFields, PromptFields } from "./inspector/output-fields";
 import { FileFields } from "./inspector/file-fields";
 import { DiscussionFields } from "./inspector/discussion-fields";
 
-// ── Workflow-level settings (shown when no node selected) ────
+// ── Conclave-level settings (shown when no node selected) ────
 
-function WorkflowSettings() {
-  const workflowName = useWorkflowStore((s) => s.workflowName);
-  const workflowDescription = useWorkflowStore((s) => s.workflowDescription);
-  const setWorkflowMeta = useWorkflowStore((s) => s.setWorkflowMeta);
-  const toolName = useWorkflowStore((s) => s.toolName);
-  const workflowId = window.location.pathname.match(/\/workflows\/(\d+)/)?.[1];
+function ConclaveSettings() {
+  const conclaveName = useConclaveStore((s) => s.conclaveName);
+  const conclaveDescription = useConclaveStore((s) => s.conclaveDescription);
+  const setConclaveMeta = useConclaveStore((s) => s.setConclaveMeta);
+  const toolName = useConclaveStore((s) => s.toolName);
+  const conclaveId = window.location.pathname.match(/\/conclaves\/(\d+)/)?.[1];
 
   const [claudeAvailable, setClaudeAvailable] = useState(false);
   const [improving, setImproving] = useState(false);
@@ -47,13 +47,13 @@ function WorkflowSettings() {
   }, []);
 
   const handleImprove = useCallback(async () => {
-    if (!workflowId || improving) return;
-    const sent = workflowDescription;
+    if (!conclaveId || improving) return;
+    const sent = conclaveDescription;
     setImproving(true);
 
     try {
       await api.post("/channel/improve-description", {
-        workflowId: String(workflowId),
+        conclaveId: String(conclaveId),
         currentDescription: sent,
       });
       toast("Sent to Claude Code — waiting for improved instructions...");
@@ -74,10 +74,10 @@ function WorkflowSettings() {
         return;
       }
       try {
-        const wf = await api.get<Record<string, unknown>>(`/workflows/${workflowId}`);
+        const wf = await api.get<Record<string, unknown>>(`/conclaves/${conclaveId}`);
         const dbDesc = (wf.description as string) ?? "";
         if (dbDesc && dbDesc !== sent) {
-          setWorkflowMeta(workflowName, dbDesc);
+          setConclaveMeta(conclaveName, dbDesc);
           if (pollRef.current) clearInterval(pollRef.current);
           pollRef.current = null;
           setImproving(false);
@@ -85,22 +85,22 @@ function WorkflowSettings() {
         }
       } catch { /* ignore poll errors */ }
     }, 3000);
-  }, [workflowId, workflowDescription, workflowName, improving, setWorkflowMeta]);
+  }, [conclaveId, conclaveDescription, conclaveName, improving, setConclaveMeta]);
 
   return (
     <div className="w-72 border-l border-border bg-card overflow-y-auto">
       <div className="flex items-center gap-2 border-b border-border px-4 py-3">
-        <h3 className="text-sm font-semibold">Workflow Settings</h3>
+        <h3 className="text-sm font-semibold">Conclave Settings</h3>
       </div>
 
       <div className="space-y-4 p-4">
         <Field label="Name">
           <input
             type="text"
-            value={workflowName}
-            onChange={(e) => setWorkflowMeta(e.target.value, workflowDescription)}
+            value={conclaveName}
+            onChange={(e) => setConclaveMeta(e.target.value, conclaveDescription)}
             className={INPUT_CLASS}
-            placeholder="Workflow name..."
+            placeholder="Conclave name..."
           />
         </Field>
 
@@ -110,20 +110,20 @@ function WorkflowSettings() {
             Instructions for Claude
           </label>
           <AutoTextarea
-            value={workflowDescription}
-            onChange={(e) => setWorkflowMeta(workflowName, e.target.value)}
+            value={conclaveDescription}
+            onChange={(e) => setConclaveMeta(conclaveName, e.target.value)}
             minRows={6}
             label="Instructions for Claude"
             className={INPUT_CLASS}
-            placeholder="Describe the workflow's purpose, context, and any rules Claude should follow when executing this workflow..."
+            placeholder="Describe the conclave's purpose, context, and any rules Claude should follow when executing this conclave..."
           />
         </div>
         <div className="flex items-center gap-2 px-1">
           <p className="text-[10px] text-muted-foreground flex-1">
-            Instructions help Claude understand the workflow's purpose and constraints.
+            Instructions help Claude understand the conclave's purpose and constraints.
             Be specific about the expected behavior, tone, and any rules to follow.
           </p>
-          {claudeAvailable && workflowId && (
+          {claudeAvailable && conclaveId && (
             <button
               onClick={handleImprove}
               disabled={improving}
@@ -145,17 +145,18 @@ function WorkflowSettings() {
           )}
         </div>
 
-        {toolName && (
-          <Field label="Tool Name">
-            <input
-              type="text"
-              value={toolName}
-              onChange={(e) => useWorkflowStore.setState({ toolName: e.target.value || undefined, isDirty: true })}
-              className={`${INPUT_CLASS} font-mono text-xs`}
-              placeholder="my_workflow_tool"
-            />
-          </Field>
-        )}
+        <Field label="Tool Name">
+          <input
+            type="text"
+            value={toolName ?? ""}
+            onChange={(e) => useConclaveStore.setState({ toolName: e.target.value || undefined, isDirty: true })}
+            className={`${INPUT_CLASS} font-mono text-xs`}
+            placeholder="my_conclave_tool"
+          />
+          <p className="mt-1 text-[10px] text-muted-foreground">
+            Set this to expose the conclave as an MCP tool in the channel plugin (e.g. <code>simple_chat</code>).
+          </p>
+        </Field>
       </div>
     </div>
   );
@@ -164,16 +165,16 @@ function WorkflowSettings() {
 // ── Node inspector ───────────────────────────────────────────
 
 export function NodeInspector() {
-  const nodes = useWorkflowStore((s) => s.nodes);
-  const selectedNodeId = useWorkflowStore((s) => s.selectedNodeId);
-  const setSelectedNode = useWorkflowStore((s) => s.setSelectedNode);
-  const updateNodeData = useWorkflowStore((s) => s.updateNodeData);
-  const removeNode = useWorkflowStore((s) => s.removeNode);
+  const nodes = useConclaveStore((s) => s.nodes);
+  const selectedNodeId = useConclaveStore((s) => s.selectedNodeId);
+  const setSelectedNode = useConclaveStore((s) => s.setSelectedNode);
+  const updateNodeData = useConclaveStore((s) => s.updateNodeData);
+  const removeNode = useConclaveStore((s) => s.removeNode);
 
   const selectedNode = nodes.find((n) => n.id === selectedNodeId);
-  if (!selectedNode) return <WorkflowSettings />;
+  if (!selectedNode) return <ConclaveSettings />;
 
-  const data = selectedNode.data as WorkflowNodeData;
+  const data = selectedNode.data as ConclaveNodeData;
 
   return (
     <div className="w-72 border-l border-border bg-card overflow-y-auto">

@@ -15,7 +15,7 @@ export const promptRoutes = new Hono()
     return c.json({ ok: true });
   })
 
-  // Blocking ask — used by workflow MCP server (out-of-process) for Claude agents.
+  // Blocking ask — used by conclave MCP server (out-of-process) for Claude agents.
   // Registers a prompt, emits the question event, and waits for the response.
   .post("/ask", async (c) => {
     const body = (await c.req.json()) as {
@@ -34,7 +34,7 @@ export const promptRoutes = new Hono()
       data: {
         question,
         waitingForResponse: true,
-        workflowName: "",
+        conclaveName: "",
         nodeLabel: nodeId,
         senderNode: senderNode ?? "agent",
         senderType: "agent",

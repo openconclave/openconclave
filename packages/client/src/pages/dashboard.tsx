@@ -19,17 +19,17 @@ import {
 } from "lucide-react";
 
 interface DashboardData {
-  totalWorkflows: number;
+  totalConclaves: number;
   activeRuns: number;
   totalRuns: number;
   successCount: number;
   failureCount: number;
   cancelledCount: number;
   totalCost: number;
-  recentRuns: Array<{ id: string; status: string; workflowId: string; createdAt: string }>;
-  workflows: Array<{ id: string; name: string; enabled: boolean; toolName?: string; triggerType?: string }>;
+  recentRuns: Array<{ id: string; status: string; conclaveId: string; createdAt: string }>;
+  conclaves: Array<{ id: string; name: string; enabled: boolean; toolName?: string; triggerType?: string }>;
   recentOutputs: Array<{ id: number; runId: string; nodeId: string; data: unknown; createdAt: string }>;
-  schedule: Array<{ workflowId: string; cron: string; nextRun: string; enabled: boolean }>;
+  schedule: Array<{ conclaveId: string; cron: string; nextRun: string; enabled: boolean }>;
 }
 
 const STATUS_DOTS: Record<string, string> = {
@@ -97,8 +97,8 @@ export function DashboardPage() {
         {/* Metrics Row */}
         <div className="grid grid-cols-5 gap-3">
           <MetricCard
-            label="Workflows"
-            value={data.totalWorkflows}
+            label="Conclaves"
+            value={data.totalConclaves}
             icon={GitBranch}
             accent="oklch(0.65 0.18 260)"
           />
@@ -169,9 +169,9 @@ export function DashboardPage() {
               Quick Launch
             </h3>
             <div className="space-y-1">
-              {data.workflows.map((wf) => {
+              {data.conclaves.map((wf) => {
                 const activeRun = data.recentRuns.find(
-                  (r) => String(r.workflowId) === String(wf.id) && (r.status === "running" || r.status === "queued")
+                  (r) => String(r.conclaveId) === String(wf.id) && (r.status === "running" || r.status === "queued")
                 );
                 const isChat = wf.triggerType === "chat";
                 const reload = () => api.get<DashboardData>("/dashboard").then(setData).catch(() => {});
@@ -192,7 +192,7 @@ export function DashboardPage() {
                       )} />
                     )}
                     <a
-                      href={activeRun ? `/runs/${activeRun.id}` : `/workflows/${wf.id}`}
+                      href={activeRun ? `/runs/${activeRun.id}` : `/conclaves/${wf.id}`}
                       className={cn(
                         "flex-1 text-sm truncate transition-colors group-hover:text-foreground",
                         activeRun ? "text-warning" : "text-muted-foreground"
@@ -221,7 +221,7 @@ export function DashboardPage() {
                           if (isChat && wf.toolName) {
                             window.open(`/${wf.toolName}/chat`, "_blank");
                           } else {
-                            api.post(`/workflows/${wf.id}/run`, {}).then(reload).catch(() => {});
+                            api.post(`/conclaves/${wf.id}/run`, {}).then(reload).catch(() => {});
                           }
                         }}
                         className={cn(
@@ -238,10 +238,10 @@ export function DashboardPage() {
                   </div>
                 );
               })}
-              {data.workflows.length === 0 && (
+              {data.conclaves.length === 0 && (
                 <div className="flex flex-col items-center py-6 text-muted-foreground/50">
                   <GitBranch className="h-8 w-8 mb-2" />
-                  <p className="text-xs">No workflows</p>
+                  <p className="text-xs">No conclaves</p>
                 </div>
               )}
             </div>
@@ -254,14 +254,14 @@ export function DashboardPage() {
             </h3>
             <div className="space-y-3">
               {data.schedule.filter((s) => s.enabled).map((s) => {
-                const wf = data.workflows.find((w) => w.id === s.workflowId);
+                const wf = data.conclaves.find((w) => w.id === s.conclaveId);
                 return (
-                  <div key={s.workflowId} className="flex items-start gap-3">
+                  <div key={s.conclaveId} className="flex items-start gap-3">
                     <div className="mt-1 flex h-6 w-6 items-center justify-center rounded-md bg-info/10">
                       <Clock className="h-3 w-3 text-info" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm truncate">{wf?.name ?? s.workflowId.slice(0, 8)}</p>
+                      <p className="text-sm truncate">{wf?.name ?? s.conclaveId.slice(0, 8)}</p>
                       <div className="flex items-center gap-2 mt-0.5">
                         <span className="text-[10px] font-mono text-muted-foreground bg-secondary/50 px-1.5 py-0.5 rounded">
                           {s.cron}
@@ -298,7 +298,7 @@ export function DashboardPage() {
             </div>
             <div className="divide-y divide-border/50">
               {data.recentRuns.slice(0, 8).map((run) => {
-                const wf = data.workflows.find((w) => w.id === run.workflowId);
+                const wf = data.conclaves.find((w) => w.id === run.conclaveId);
                 return (
                   <a
                     key={run.id}
@@ -307,7 +307,7 @@ export function DashboardPage() {
                   >
                     <div className={cn("h-2 w-2 rounded-full shrink-0", STATUS_DOTS[run.status] ?? STATUS_DOTS.queued)} />
                     <span className="text-sm flex-1 truncate text-muted-foreground">
-                      {wf?.name ?? run.workflowId.slice(0, 8)}
+                      {wf?.name ?? run.conclaveId.slice(0, 8)}
                     </span>
                     <span className="text-[10px] font-mono text-muted-foreground/60">
                       #{run.id}
@@ -335,15 +335,15 @@ export function DashboardPage() {
             </div>
             <div className="divide-y divide-border/50">
               {data.recentOutputs.slice(0, 5).map((out) => {
-                // Extract content from new { content, workflowName, nodeLabel } shape or legacy string
+                // Extract content from new { content, conclaveName, nodeLabel } shape or legacy string
                 const outData = out.data as Record<string, unknown> | string;
                 const content = typeof outData === "string"
                   ? outData
                   : typeof outData?.content === "string"
                     ? outData.content
                     : JSON.stringify(outData);
-                const workflowName = typeof outData === "object" && outData?.workflowName
-                  ? String(outData.workflowName)
+                const conclaveName = typeof outData === "object" && outData?.conclaveName
+                  ? String(outData.conclaveName)
                   : null;
 
                 return (
@@ -352,8 +352,8 @@ export function DashboardPage() {
                     href={`/runs/${out.runId}`}
                     className="block px-5 py-3 transition-colors hover:bg-secondary/30"
                   >
-                    {workflowName && (
-                      <p className="text-[10px] font-medium text-primary/70 mb-1">{workflowName}</p>
+                    {conclaveName && (
+                      <p className="text-[10px] font-medium text-primary/70 mb-1">{conclaveName}</p>
                     )}
                     <div className="flex items-start gap-2">
                       <Terminal className="h-3 w-3 mt-1 text-primary shrink-0" />

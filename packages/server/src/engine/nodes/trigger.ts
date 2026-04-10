@@ -1,11 +1,11 @@
-import type { WorkflowDefinition, WorkflowNode, TriggerConfig } from "@openconclave/shared";
+import type { ConclaveDefinition, ConclaveNode, TriggerConfig } from "@openconclave/shared";
 import type { RunEvent } from "../types";
 
 export function executeTrigger(
-  node: WorkflowNode,
+  node: ConclaveNode,
   input: unknown,
   triggerPayload: unknown,
-  workflow: WorkflowDefinition,
+  conclave: ConclaveDefinition,
   runId: number,
   nodeId: string,
   emit: (event: RunEvent) => void
@@ -19,7 +19,7 @@ export function executeTrigger(
       nodeId,
       data: {
         content,
-        workflowName: workflow.name,
+        conclaveName: conclave.name,
         nodeLabel: node.data.label,
       },
     });

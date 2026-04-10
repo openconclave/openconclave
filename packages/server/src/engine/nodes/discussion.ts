@@ -9,8 +9,8 @@ import type { ToolDef } from "../../agent/llm-call";
 import { renderTemplate } from "../../lib/template";
 import { executeCode } from "./code";
 import type {
-  WorkflowNode,
-  WorkflowEdge,
+  ConclaveNode,
+  ConclaveEdge,
   AgentConfig,
   CodeConfig,
   ResolvedAgentConfig,
@@ -49,19 +49,19 @@ interface ModeratorResult {
 export async function executeDiscussion(
   runId: number,
   nodeId: string,
-  node: WorkflowNode,
-  nodeMap: Map<string, WorkflowNode>,
-  edges: WorkflowEdge[],
+  node: ConclaveNode,
+  nodeMap: Map<string, ConclaveNode>,
+  edges: ConclaveEdge[],
   nodeOutputs: Map<string, unknown>,
   agentSessions: Map<string, string>,
-  workflowContext: string | null,
+  conclaveContext: string | null,
   input: unknown,
   emit: (event: RunEvent) => void,
   workspace?: Workspace,
 ): Promise<unknown> {
   // Suppress unused param warnings — retained for API consistency with other executors
   void agentSessions;
-  void workflowContext;
+  void conclaveContext;
 
   const config = node.data.config as DiscussionConfig;
 
@@ -69,7 +69,7 @@ export async function executeDiscussion(
   const participants = getIncomingEdges(nodeId, edges)
     .filter((e) => e.targetHandle === "participants")
     .map((e) => nodeMap.get(e.source))
-    .filter((n): n is WorkflowNode => n?.data.type === "agent");
+    .filter((n): n is ConclaveNode => n?.data.type === "agent");
 
   const responses: SpeechRecord[] = [];
   let transcript = "";
@@ -160,7 +160,7 @@ export async function executeDiscussion(
     const participant = participants[currentParticipantIndex];
     const agentConfig = participant.data.config as AgentConfig;
 
-    // Resolve tools from agent config — respect what the workflow setup configured
+    // Resolve tools from agent config — respect what the conclave setup configured
     const connectedTools: string[] = [];
     const connectedMcpServers: string[] = [];
     const connectedMcpTools: ToolConfig[] = [];
@@ -311,7 +311,7 @@ async function runCodeModerator(
 
   let rawResult: unknown;
   try {
-    // No context: code moderator doesn't need OC_API_URL / OC_WORKFLOW_ID
+    // No context: code moderator doesn't need OC_API_URL / OC_CONCLAVE_ID
     rawResult = await executeCode(config, moderatorInput, undefined);
   } catch {
     // Moderator errors must not surface as run failures — default to continuing

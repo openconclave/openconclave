@@ -20,7 +20,7 @@ import "@xyflow/react/dist/style.css";
 import dagre from "@dagrejs/dagre";
 import { LayoutGrid } from "lucide-react";
 
-import { useWorkflowStore } from "@/stores/workflow-store";
+import { useConclaveStore } from "@/stores/conclave-store";
 import { RoundedEdge, CustomConnectionLine, buildMiniMapPath } from "./rounded-edge";
 import type { MiniMapNodeProps } from "@xyflow/react";
 
@@ -38,7 +38,7 @@ const miniMapColors: Record<string, string> = {
 };
 
 function MiniMapNode({ x, y, width, height, id }: MiniMapNodeProps) {
-  const nodeType = useWorkflowStore.getState().nodes.find((n) => n.id === id)?.data?.type;
+  const nodeType = useConclaveStore.getState().nodes.find((n) => n.id === id)?.data?.type;
   const color = miniMapColors[nodeType ?? ""] ?? "oklch(0.65 0.18 260)";
   const rx = Math.min(width, height) * 0.2;
   return (
@@ -58,7 +58,7 @@ import { PromptNode } from "./nodes/prompt-node";
 import { OutputNode } from "./nodes/output-node";
 import { FileNode } from "./nodes/file-node";
 import { DiscussionNode } from "./nodes/discussion-node";
-import type { WorkflowNodeData, NodeType, TriggerConfig } from "@openconclave/shared";
+import type { ConclaveNodeData, NodeType, TriggerConfig } from "@openconclave/shared";
 
 const edgeTypes = {
   rounded: RoundedEdge,
@@ -79,7 +79,7 @@ const nodeTypes = {
 let nodeId = Date.now();
 
 function autoLayout() {
-  const { nodes, edges } = useWorkflowStore.getState();
+  const { nodes, edges } = useConclaveStore.getState();
   if (nodes.length === 0) return;
 
   const g = new dagre.graphlib.Graph();
@@ -115,8 +115,8 @@ function autoLayout() {
     };
   });
 
-  useWorkflowStore.getState().pushHistory();
-  useWorkflowStore.setState({ nodes: layoutedNodes, isDirty: true });
+  useConclaveStore.getState().pushHistory();
+  useConclaveStore.setState({ nodes: layoutedNodes, isDirty: true });
 }
 
 const handleToPosition: Record<string, Position> = {
@@ -127,7 +127,7 @@ const handleToPosition: Record<string, Position> = {
   full: Position.Bottom, last: Position.Bottom, summary: Position.Bottom,
 };
 
-function getHandleXY(node: Node<WorkflowNodeData>, handleId: string | null | undefined): [number, number, Position] {
+function getHandleXY(node: Node<ConclaveNodeData>, handleId: string | null | undefined): [number, number, Position] {
   const w = node.measured?.width ?? 240;
   const h = node.measured?.height ?? 80;
   const x = node.position.x;
@@ -217,8 +217,8 @@ function DraggableMiniMap() {
 }
 
 function MiniMapEdges() {
-  const nodes = useWorkflowStore((s) => s.nodes);
-  const edges = useWorkflowStore((s) => s.edges);
+  const nodes = useConclaveStore((s) => s.nodes);
+  const edges = useConclaveStore((s) => s.edges);
 
   useEffect(() => {
     const svg = document.querySelector(".react-flow__minimap svg");
@@ -251,20 +251,20 @@ function MiniMapEdges() {
   return null;
 }
 
-export function WorkflowCanvas() {
+export function ConclaveCanvas() {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
-  const reactFlowInstance = useRef<ReactFlowInstance<Node<WorkflowNodeData>> | null>(null);
+  const reactFlowInstance = useRef<ReactFlowInstance<Node<ConclaveNodeData>> | null>(null);
   const lastClickedNode = useRef<string | null>(null);
   const lastClickedEdge = useRef<string | null>(null);
   const selStart = useRef<{ x: number; y: number } | null>(null);
 
-  const nodes = useWorkflowStore((s) => s.nodes);
-  const edges = useWorkflowStore((s) => s.edges);
-  const onNodesChange = useWorkflowStore((s) => s.onNodesChange);
-  const onEdgesChange = useWorkflowStore((s) => s.onEdgesChange);
-  const onConnect = useWorkflowStore((s) => s.onConnect);
-  const pushHistory = useWorkflowStore((s) => s.pushHistory);
-  const addNode = useWorkflowStore((s) => s.addNode);
+  const nodes = useConclaveStore((s) => s.nodes);
+  const edges = useConclaveStore((s) => s.edges);
+  const onNodesChange = useConclaveStore((s) => s.onNodesChange);
+  const onEdgesChange = useConclaveStore((s) => s.onEdgesChange);
+  const onConnect = useConclaveStore((s) => s.onConnect);
+  const pushHistory = useConclaveStore((s) => s.pushHistory);
+  const addNode = useConclaveStore((s) => s.addNode);
 
   const reconnectSucceeded = useRef(false);
 
@@ -275,8 +275,8 @@ export function WorkflowCanvas() {
   const onReconnect = useCallback((oldEdge: Edge, newConnection: Connection) => {
     reconnectSucceeded.current = true;
     pushHistory();
-    const updated = reconnectEdge(oldEdge, newConnection, useWorkflowStore.getState().edges);
-    useWorkflowStore.setState({ edges: updated, isDirty: true });
+    const updated = reconnectEdge(oldEdge, newConnection, useConclaveStore.getState().edges);
+    useConclaveStore.setState({ edges: updated, isDirty: true });
   }, [pushHistory]);
 
   const onReconnectEnd = useCallback((event: MouseEvent | TouchEvent, edge: Edge, handleType: string) => {
@@ -302,7 +302,7 @@ export function WorkflowCanvas() {
 
         // Block self-connections and duplicates
         if (newSource !== newTarget) {
-          const currentEdges = useWorkflowStore.getState().edges;
+          const currentEdges = useConclaveStore.getState().edges;
           const isDuplicate = currentEdges.some(
             (e) =>
               e.id !== edge.id &&
@@ -313,7 +313,7 @@ export function WorkflowCanvas() {
           );
           if (!isDuplicate) {
             pushHistory();
-            useWorkflowStore.setState({
+            useConclaveStore.setState({
               edges: currentEdges.map((e) =>
                 e.id === edge.id
                   ? { ...e, source: newSource, target: newTarget, sourceHandle: newSourceHandle, targetHandle: newTargetHandle }
@@ -330,21 +330,21 @@ export function WorkflowCanvas() {
     // Dropped in empty space → delete edge
     setTimeout(() => {
       pushHistory();
-      useWorkflowStore.setState({
-        edges: useWorkflowStore.getState().edges.filter((e) => e.id !== edge.id),
+      useConclaveStore.setState({
+        edges: useConclaveStore.getState().edges.filter((e) => e.id !== edge.id),
         isDirty: true,
       });
     }, 0);
   }, [pushHistory]);
-  const setSelectedNode = useWorkflowStore((s) => s.setSelectedNode);
+  const setSelectedNode = useConclaveStore((s) => s.setSelectedNode);
   const zCounterRef = useRef(1);
 
   const onNodeDragStart = useCallback(() => {}, []);
 
   const [spaceHeld, setSpaceHeld] = useState(false);
   const [shiftHeld, setShiftHeld] = useState(false);
-  const undo = useWorkflowStore((s) => s.undo);
-  const redo = useWorkflowStore((s) => s.redo);
+  const undo = useConclaveStore((s) => s.undo);
+  const redo = useConclaveStore((s) => s.redo);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -391,7 +391,7 @@ export function WorkflowCanvas() {
     };
   }, [undo, redo]);
 
-  const setDraggingTool = useWorkflowStore((s) => s.setDraggingTool);
+  const setDraggingTool = useConclaveStore((s) => s.setDraggingTool);
 
   useEffect(() => {
     const onDragEnd = () => setDraggingTool(false);
@@ -430,7 +430,7 @@ export function WorkflowCanvas() {
       position.y = Math.round(position.y / 20) * 20;
 
       // Auto-number labels to ensure uniqueness — read fresh from store
-      const currentNodes = useWorkflowStore.getState().nodes;
+      const currentNodes = useConclaveStore.getState().nodes;
       const existingLabels = new Set(currentNodes.map((n) => n.data.label));
       let uniqueLabel = label;
       if (existingLabels.has(uniqueLabel)) {
@@ -446,7 +446,7 @@ export function WorkflowCanvas() {
         id,
         type: rfType,
         position,
-        data: { label: uniqueLabel, type, config } as WorkflowNodeData,
+        data: { label: uniqueLabel, type, config } as ConclaveNodeData,
       };
 
       addNode(newNode);
@@ -470,7 +470,7 @@ export function WorkflowCanvas() {
         onNodeDragStart={onNodeDragStart}
         connectionLineComponent={CustomConnectionLine}
         isValidConnection={(connection) => {
-          const { edges: currentEdges, nodes: currentNodes } = useWorkflowStore.getState();
+          const { edges: currentEdges, nodes: currentNodes } = useConclaveStore.getState();
           // Prevent self-connections
           if (connection.source === connection.target) return false;
           // Prevent duplicate edges (same source+target AND same handles)

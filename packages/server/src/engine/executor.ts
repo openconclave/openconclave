@@ -4,7 +4,7 @@ import { db } from "../db/client";
 import { runs, runEvents, checkpoints } from "../db/schema";
 import { executeGraph } from "./graph-walker";
 import { logger } from "../lib/logger";
-import type { WorkflowDefinition } from "@openconclave/shared";
+import type { ConclaveDefinition } from "@openconclave/shared";
 
 import type { RunEvent, EventCallback } from "./types";
 
@@ -13,7 +13,7 @@ export type { RunEvent, EventCallback } from "./types";
 
 // ── Executor ────────────────────────────────────────────────
 
-export class WorkflowExecutor {
+export class ConclaveExecutor {
   private readonly onEvent?: EventCallback;
 
   constructor(onEvent?: EventCallback) {
@@ -23,13 +23,13 @@ export class WorkflowExecutor {
   /** Continue an existing run with a new message (chat) */
   async executeInRun(
     runId: number,
-    workflow: WorkflowDefinition,
+    conclave: ConclaveDefinition,
     triggerPayload?: unknown,
     triggerNodeId?: string
   ): Promise<void> {
     const emit = (event: RunEvent) => this.emit(event);
 
-    executeGraph(runId, workflow, emit, triggerPayload, triggerNodeId).catch(
+    executeGraph(runId, conclave, emit, triggerPayload, triggerNodeId).catch(
       (err: unknown) => {
         const message = err instanceof Error ? err.message : String(err);
         logger.error(`Run ${runId} continued message failed`, { error: message });
@@ -38,14 +38,14 @@ export class WorkflowExecutor {
   }
 
   async execute(
-    workflow: WorkflowDefinition,
+    conclave: ConclaveDefinition,
     triggerPayload?: unknown,
     triggerNodeId?: string
   ): Promise<number> {
     const now = new Date().toISOString();
 
     const result = await db.insert(runs).values({
-      workflowId: workflow.id as number,
+      conclaveId: conclave.id as number,
       status: "running",
       triggerType: "manual",
       triggerPayload: triggerPayload ?? null,
@@ -59,7 +59,7 @@ export class WorkflowExecutor {
 
     const emit = (event: RunEvent) => this.emit(event);
 
-    executeGraph(runId, workflow, emit, triggerPayload, triggerNodeId).catch(
+    executeGraph(runId, conclave, emit, triggerPayload, triggerNodeId).catch(
       (err: unknown) => {
         const message = err instanceof Error ? err.message : String(err);
         logger.error(`Run ${runId} failed`, { error: message });
@@ -79,7 +79,7 @@ export class WorkflowExecutor {
    * If no checkpoint exists (the run failed before completing any node), executeGraph
    * runs from scratch — equivalent to a clean retry with at-least-once semantics.
    */
-  async resume(runId: number, workflow: WorkflowDefinition): Promise<void> {
+  async resume(runId: number, conclave: ConclaveDefinition): Promise<void> {
     const [latestCp] = await db
       .select()
       .from(checkpoints)
@@ -87,13 +87,13 @@ export class WorkflowExecutor {
       .orderBy(desc(checkpoints.id))
       .limit(1);
 
-    const nodes = (workflow.nodes ?? []) as Array<{ id: string; data?: { type?: string } }>;
+    const nodes = (conclave.nodes ?? []) as Array<{ id: string; data?: { type?: string } }>;
     const triggerNode = nodes.find((n) => n.data?.type === "trigger");
     const emit = (event: RunEvent) => this.emit(event);
 
     this.emit({ type: "run:started", runId });
 
-    executeGraph(runId, workflow, emit, undefined, triggerNode?.id, latestCp?.id).catch(
+    executeGraph(runId, conclave, emit, undefined, triggerNode?.id, latestCp?.id).catch(
       (err: unknown) => {
         const message = err instanceof Error ? err.message : String(err);
         logger.error(`Run ${runId} resume failed`, { error: message });

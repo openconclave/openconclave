@@ -1,16 +1,16 @@
-import type { WorkflowDefinition, WorkflowNode } from "@openconclave/shared";
+import type { ConclaveDefinition, ConclaveNode } from "@openconclave/shared";
 import { registerPrompt } from "../prompt-registry";
 import { logger } from "../../lib/logger";
 import type { RunEvent } from "../types";
 
 export async function executePrompt(
-  node: WorkflowNode,
+  node: ConclaveNode,
   input: unknown,
-  workflow: WorkflowDefinition,
+  conclave: ConclaveDefinition,
   runId: number,
   nodeId: string,
   triggeredBy: string | null | undefined,
-  nodeMap: Map<string, WorkflowNode>,
+  nodeMap: Map<string, ConclaveNode>,
   emit: (event: RunEvent) => void
 ): Promise<unknown> {
   const content = typeof input === "string" ? input : JSON.stringify(input, null, 2);
@@ -24,7 +24,7 @@ export async function executePrompt(
     data: {
       question: content,
       waitingForResponse: true,
-      workflowName: workflow.name,
+      conclaveName: conclave.name,
       nodeLabel: node.data.label,
       senderNode: senderNode?.data.label ?? triggeredBy ?? "unknown",
       senderType: senderNode?.data.type ?? "unknown",

@@ -48,7 +48,7 @@ export async function runChatCompletions(options: OpenAIRunOptions): Promise<Ope
   const activeTools: OpenAITool[] = [...(options.tools ?? []), ...agent.toChatTools()];
   const toolExecutors = agent.toolExecutors;
 
-  // Add routing tool if workflow has ≥2 branches
+  // Add routing tool if conclave has ≥2 branches
   if (options.routeTargets && options.routeTargets.length >= 1) {
     activeTools.push(createRoutingToolChat(options.routeTargets));
   }

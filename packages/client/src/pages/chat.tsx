@@ -11,24 +11,24 @@ interface ChatMessage {
   status?: "pending" | "done" | "error";
 }
 
-interface WorkflowNode {
+interface ConclaveNode {
   id: string;
   data: { label: string; type: string };
 }
 
-interface WorkflowInfo {
+interface ConclaveInfo {
   id: string;
   name: string;
   description?: string;
-  nodes: WorkflowNode[];
+  nodes: ConclaveNode[];
 }
 
 export function ChatPage() {
   const parts = window.location.pathname.split("/");
   const toolName = parts[1];
   const urlRunId = parts[3]; // /:toolName/chat/:runId — set after first message
-  const [workflow, setWorkflow] = useState<WorkflowInfo | null>(null);
-  const workflowRef = useRef<WorkflowInfo | null>(null);
+  const [conclave, setConclave] = useState<ConclaveInfo | null>(null);
+  const conclaveRef = useRef<ConclaveInfo | null>(null);
   const [chatRunId, setChatRunId] = useState<number | null>(urlRunId ? Number(urlRunId) : null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -38,26 +38,26 @@ export function ChatPage() {
   const inputRef = useRef<HTMLInputElement>(null);
   const hydratedRef = useRef(!urlRunId); // true if new chat, false until history loads
 
-  // Load workflow info
+  // Load conclave info
   useEffect(() => {
-    api.get<{ workflow: { id: string; name: string; definition: Record<string, unknown> } }>(`/workflows/by-tool/${toolName}`)
+    api.get<{ conclave: { id: string; name: string; definition: Record<string, unknown> } }>(`/conclaves/by-tool/${toolName}`)
       .then((data) => {
-        const def = data.workflow.definition;
+        const def = data.conclave.definition;
         const wf = {
-          id: data.workflow.id,
-          name: (def.name as string) ?? data.workflow.name,
+          id: data.conclave.id,
+          name: (def.name as string) ?? data.conclave.name,
           description: def.description as string | undefined,
-          nodes: (def.nodes as WorkflowNode[]) ?? [],
+          nodes: (def.nodes as ConclaveNode[]) ?? [],
         };
-        setWorkflow(wf);
-        workflowRef.current = wf;
+        setConclave(wf);
+        conclaveRef.current = wf;
       })
-      .catch(() => setError(`Workflow "${toolName}" not found`));
+      .catch(() => setError(`Conclave "${toolName}" not found`));
   }, [toolName]);
 
   // Hydrate conversation history when loading an existing run
   useEffect(() => {
-    if (!chatRunId || !workflow || hydratedRef.current) return;
+    if (!chatRunId || !conclave || hydratedRef.current) return;
 
     interface RunEvent {
       type: string;
@@ -89,7 +89,7 @@ export function ChatPage() {
           } else if (ev.type === "chat:response" && d?.content) {
             restored.push({ role: "assistant", content: d.content as string, runId: chatRunId, status: "done" });
           } else if (ev.type === "node:completed" && ev.nodeId) {
-            const node = workflow.nodes.find((n: WorkflowNode) => n.id === ev.nodeId);
+            const node = conclave.nodes.find((n: ConclaveNode) => n.id === ev.nodeId);
             if (node && node.data.type === "agent") {
               let content = typeof d === "string" ? d : JSON.stringify(d, null, 2);
               try {
@@ -129,7 +129,7 @@ export function ChatPage() {
         console.error("Failed to load conversation history:", err);
         hydratedRef.current = true; // allow WebSocket events even if hydration fails
       });
-  }, [chatRunId, workflow]);
+  }, [chatRunId, conclave]);
 
   // Listen for chat:response events via WebSocket
   useEffect(() => {
@@ -148,7 +148,7 @@ export function ChatPage() {
         // Show intermediate agent outputs
         if (data.type === "node:completed" && data.nodeId && data.runId) {
           setMessages((prev) => {
-            const node = workflowRef.current?.nodes.find((n: WorkflowNode) => n.id === data.nodeId);
+            const node = conclaveRef.current?.nodes.find((n: ConclaveNode) => n.id === data.nodeId);
             if (!node || node.data.type !== "agent") return prev;
             const content = typeof data.data === "string" ? data.data : JSON.stringify(data.data, null, 2);
             // Strip routing metadata from content
@@ -231,7 +231,7 @@ export function ChatPage() {
           setMessages((prev) => {
             const updated = prev.filter((m) => !(m.status === "pending" && m.runId === data.runId));
             if (data.data.status === "failure") {
-              updated.push({ role: "assistant", content: `Error: ${data.data.error ?? "Workflow failed"}`, runId: data.runId, status: "error" });
+              updated.push({ role: "assistant", content: `Error: ${data.data.error ?? "Conclave failed"}`, runId: data.runId, status: "error" });
             }
             return updated;
           });
@@ -253,7 +253,7 @@ export function ChatPage() {
   }, [messages]);
 
   const handleSend = async () => {
-    if (!input.trim() || !workflow || loading) return;
+    if (!input.trim() || !conclave || loading) return;
 
     const userMessage = input.trim();
     setInput("");
@@ -270,7 +270,7 @@ export function ChatPage() {
         runId = chatRunId;
       } else {
         // First message — create new run
-        const data = await api.post<{ runId: number }>(`/workflows/${workflow.id}/run`, { payload: userMessage });
+        const data = await api.post<{ runId: number }>(`/conclaves/${conclave.id}/run`, { payload: userMessage });
         runId = data.runId;
         setChatRunId(runId);
         window.history.replaceState(null, "", `/${toolName}/chat/${runId}`);
@@ -299,7 +299,7 @@ export function ChatPage() {
     );
   }
 
-  if (!workflow) {
+  if (!conclave) {
     return (
       <div className="flex items-center justify-center h-full">
         <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
@@ -312,9 +312,9 @@ export function ChatPage() {
       {/* Header */}
       <div className="border-b border-border px-6 py-4 flex items-center justify-between">
         <div>
-          <h1 className="text-lg font-semibold">{workflow.name}</h1>
-          {workflow.description && (
-          <p className="text-xs text-muted-foreground mt-0.5">{workflow.description}</p>
+          <h1 className="text-lg font-semibold">{conclave.name}</h1>
+          {conclave.description && (
+          <p className="text-xs text-muted-foreground mt-0.5">{conclave.description}</p>
         )}
         </div>
         <button

@@ -1,7 +1,7 @@
 /**
  * Registry for pending prompt responses.
  * When a Prompt node fires, it registers a pending question and waits.
- * When a response arrives (via API/MCP), the promise resolves and the workflow continues.
+ * When a response arrives (via API/MCP), the promise resolves and the conclave continues.
  */
 
 interface PendingPrompt {
