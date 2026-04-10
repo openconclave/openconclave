@@ -82,7 +82,7 @@ export async function executeAgent(
 
     for (const e of outEdges) {
       const target = nodeMap.get(e.target);
-      if (target?.data.type === "prompt") {
+      if (target?.data.type === "prompt" && !promptConnections.some(p => p.promptNodeId === e.target)) {
         promptConnections.push({ promptNodeId: e.target, promptNode: target });
       }
     }
