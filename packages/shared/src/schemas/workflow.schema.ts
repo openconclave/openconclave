@@ -129,7 +129,7 @@ export const workflowEdgeSchema = z.object({
 
 export const createWorkflowSchema = z.object({
   name: z.string().min(1).max(100),
-  description: z.string().max(500).optional(),
+  description: z.string().max(2000).optional(),
   toolName: z.string().max(50).optional(),
   nodes: z.array(workflowNodeSchema),
   edges: z.array(workflowEdgeSchema),
