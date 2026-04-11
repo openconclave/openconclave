@@ -31,7 +31,7 @@ export class AgentPool {
     return new Promise<AgentResult>((resolve, reject) => {
       const task: QueuedTask = {
         id: taskId,
-        options: { ...options, abortSignal: abortController.signal },
+        options: { ...options, abortController },
         resolve,
         reject,
         abortController,

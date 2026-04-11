@@ -27,7 +27,9 @@ function resolveCliPath(path: string): string {
     const dir = join(tmpdir(), `claude-agent-sdk-${hash}`);
     const out = join(dir, "cli.js");
     if (existsSync(out)) return out;
-    mkdirSync(dir, { recursive: true });
+    // mode 0o700 prevents other users on the host from pre-placing a malicious
+    // cli.js in this directory under a permissive umask.
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
     const tmp = join(dir, `cli.js.tmp.${process.pid}`);
     writeFileSync(tmp, content);
     try { chmodSync(tmp, 0o755); } catch {}
@@ -39,6 +41,26 @@ function resolveCliPath(path: string): string {
 }
 
 export const cliPath = resolveCliPath(embeddedCliPath);
+
+// Minimal environment for spawned Claude CLI subprocesses. Wholesale
+// `process.env` forwarding with `bypassPermissions` lets a prompt-injected
+// agent exfiltrate secrets like DATABASE_URL to third-party MCP servers.
+const ALLOWED_SUBPROCESS_ENV = new Set([
+  "PATH", "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA",
+  "TMPDIR", "TMP", "TEMP",
+  "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN",
+  "NODE_ENV", "DEBUG",
+  "OC_API_URL", "OC_WS_URL",
+  "SystemRoot", "ProgramFiles", "ProgramFiles(x86)", "windir",
+]);
+
+export function buildSubprocessEnv(extra: Record<string, string> = {}): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (ALLOWED_SUBPROCESS_ENV.has(k) && v !== undefined) out[k] = v;
+  }
+  return { ...out, ...extra };
+}
 
 export interface ThinkingBlock {
   thinking: string;
@@ -70,7 +92,7 @@ export type AgentRunOptions = {
   input?: unknown;
   workspace?: Workspace;
   env?: Record<string, string>;
-  abortSignal?: AbortSignal;
+  abortController?: AbortController;
   onOutput?: (chunk: string) => void;
 };
 
@@ -81,7 +103,7 @@ const modelMap: Record<string, string> = {
 };
 
 export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentResult> {
-  const { config, input, env, abortSignal, onOutput } = options;
+  const { config, input, env, abortController, onOutput } = options;
   const ws = options.workspace ?? new Workspace();
   const startTime = Date.now();
 
@@ -400,7 +422,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
       options: {
         pathToClaudeCodeExecutable: cliPath,
         cwd: ws.cwd,
-        env: { ...process.env, ...env } as Record<string, string>,
+        env: buildSubprocessEnv(env ?? {}),
         model: config.model && modelMap[config.model] ? modelMap[config.model] : undefined,
         systemPrompt: config.systemPrompt,
         maxTurns: config.maxTurns ?? 25,
@@ -418,6 +440,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
           ? { type: "disabled" as const }
           : { type: "enabled" as const, budgetTokens: 31999 },
         stderr: (data: string) => onOutput?.(`[CLI stderr] ${data}`),
+        abortController,
       },
     });
 

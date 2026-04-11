@@ -35,6 +35,7 @@ export interface InvokeWithToolsOptions {
   runId: number;
   nodeId: string;
   emit: (event: RunEvent) => void;
+  abortController?: AbortController;
 }
 
 export interface ToolCallResult {
@@ -113,6 +114,9 @@ export async function invokeWithTools(options: InvokeWithToolsOptions): Promise<
 
 function invokeDebug(options: InvokeWithToolsOptions): ToolCallResult {
   const tool = options.tools[0];
+  if (!tool) {
+    return { output: JSON.stringify({ debug: "no tools supplied" }) };
+  }
   const mockInput: Record<string, unknown> = {};
 
   const props = (tool.input_schema.properties ?? {}) as Record<string, Record<string, unknown>>;
@@ -197,7 +201,8 @@ async function invokeOpenAI(options: InvokeWithToolsOptions): Promise<ToolCallRe
   const providerRow = await db.select().from(settings).where(eq(settings.key, `provider:${providerId}`)).get();
   if (!providerRow) throw new Error(`Provider "${providerId}" not found`);
 
-  const provider = JSON.parse(providerRow.value) as { baseUrl: string; apiKey: string };
+  const parsed = JSON.parse(providerRow.value) as unknown;
+  const provider = providerSchema.parse(parsed);
   const model = options.config.openaiModel ?? "gpt-4o";
 
   const openaiTools = options.tools.map((t) => ({
@@ -256,14 +261,68 @@ async function invokeOpenAI(options: InvokeWithToolsOptions): Promise<ToolCallRe
   return { output: choice?.content ?? "" };
 }
 
+// ── Provider URL validation (SSRF guard) ────────────────────
+
+// Reject internal / loopback / link-local / RFC1918 hosts so a DB-stored
+// provider.baseUrl cannot coerce the server into proxying requests to cloud
+// metadata services (169.254.169.254) or internal infrastructure.
+function isPublicHttpUrl(url: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+  const host = u.hostname.toLowerCase();
+  if (host === "localhost" || host === "0.0.0.0") return false;
+  if (host === "::1" || host === "[::1]") return false;
+  if (host.startsWith("[fe80:") || host.startsWith("[fc") || host.startsWith("[fd")) return false;
+  const m = host.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (m) {
+    const a = Number(m[1]);
+    const b = Number(m[2]);
+    if (a === 127) return false;              // loopback
+    if (a === 169 && b === 254) return false; // link-local / cloud metadata
+    if (a === 10) return false;               // RFC1918
+    if (a === 192 && b === 168) return false; // RFC1918
+    if (a === 172 && b >= 16 && b <= 31) return false; // RFC1918
+  }
+  return true;
+}
+
+const providerSchema = z.object({
+  baseUrl: z.string().refine(isPublicHttpUrl, {
+    message: "baseUrl must be a public http(s) URL — internal / loopback / file URLs are blocked",
+  }),
+  apiKey: z.string().min(1),
+});
+
 // ── JSON schema → Zod shape converter ───────────────────────
 
-function jsonSchemaToZod(schema: Record<string, unknown>): z.ZodType {
+const JSON_SCHEMA_MAX_DEPTH = 20;
+
+function jsonSchemaToZod(schema: Record<string, unknown>, depth = 0): z.ZodType {
+  // Depth limit prevents caller-supplied nested schemas from exhausting the
+  // JS stack. A stack overflow under async_hooks (OTel, APM) bypasses
+  // try/catch and exits the Node process — turning a request bug into a DoS.
+  if (depth > JSON_SCHEMA_MAX_DEPTH) {
+    throw new Error(`jsonSchemaToZod: schema nesting exceeds max depth ${JSON_SCHEMA_MAX_DEPTH}`);
+  }
+
   const type = schema.type as string;
-  const enumValues = schema.enum as string[] | undefined;
+  const enumValues = schema.enum as unknown[] | undefined;
 
   if (enumValues && enumValues.length > 0) {
-    return z.enum(enumValues as [string, ...string[]]);
+    const stringValues = enumValues.filter((v): v is string => typeof v === "string");
+    if (stringValues.length === enumValues.length) {
+      return z.enum(stringValues as [string, ...string[]]);
+    }
+    // Mixed or non-string enum: z.enum doesn't accept non-strings (throws at
+    // runtime). Fall back to a union of literals.
+    const literals = enumValues.map((v) => z.literal(v as string | number | boolean));
+    if (literals.length === 1) return literals[0]!;
+    return z.union(literals as unknown as [z.ZodLiteral<string>, z.ZodLiteral<string>, ...z.ZodLiteral<string>[]]);
   }
 
   switch (type) {
@@ -279,14 +338,14 @@ function jsonSchemaToZod(schema: Record<string, unknown>): z.ZodType {
       const required = (schema.required ?? []) as string[];
       const shape: Record<string, z.ZodType> = {};
       for (const [key, propSchema] of Object.entries(props)) {
-        const zodProp = jsonSchemaToZod(propSchema);
+        const zodProp = jsonSchemaToZod(propSchema, depth + 1);
         shape[key] = required.includes(key) ? zodProp : zodProp.optional();
       }
       return z.object(shape);
     }
     case "array": {
       const items = schema.items as Record<string, unknown> | undefined;
-      return z.array(items ? jsonSchemaToZod(items) : z.unknown());
+      return z.array(items ? jsonSchemaToZod(items, depth + 1) : z.unknown());
     }
     default:
       return z.unknown();
@@ -300,8 +359,8 @@ function toolShape(inputSchema: Record<string, unknown>): Record<string, z.ZodTy
   for (const [key, propSchema] of Object.entries(props)) {
     let zodProp = jsonSchemaToZod(propSchema);
     const desc = propSchema.description as string | undefined;
-    if (desc && zodProp instanceof z.ZodString) {
-      zodProp = (zodProp as z.ZodString).describe(desc);
+    if (desc) {
+      zodProp = zodProp.describe(desc);
     }
     shape[key] = required.includes(key) ? zodProp : zodProp.optional();
   }
@@ -310,9 +369,11 @@ function toolShape(inputSchema: Record<string, unknown>): Record<string, z.ZodTy
 
 // ── Claude engine (via Agent SDK + in-process SDK MCP) ──────
 
+const DYNAMIC_TOOLS_MCP_NAME = "openconclave-dynamic-tools";
+
 async function invokeClaude(options: InvokeWithToolsOptions): Promise<ToolCallResult> {
   const { query, createSdkMcpServer, tool } = await import("@anthropic-ai/claude-agent-sdk");
-  const { cliPath } = await import("./runtime");
+  const { cliPath, buildSubprocessEnv } = await import("./runtime");
 
   const modelMap: Record<string, string> = { sonnet: "sonnet", opus: "opus", haiku: "haiku" };
   const model = options.config.model && modelMap[options.config.model]
@@ -321,7 +382,9 @@ async function invokeClaude(options: InvokeWithToolsOptions): Promise<ToolCallRe
 
   const systemPrompt = options.config.systemPrompt ?? "";
 
-  // In-process tool state captured by the tool handlers below
+  // First-wins: the caller expects the initial tool decision to be the routing
+  // signal. With maxTurns > 1, a later handler overwriting state silently loses
+  // the first choice.
   const toolState: { toolName?: string; toolInput?: Record<string, unknown> } = {};
 
   const sdkTools = options.tools.map((t) =>
@@ -330,8 +393,10 @@ async function invokeClaude(options: InvokeWithToolsOptions): Promise<ToolCallRe
       t.description,
       toolShape(t.input_schema),
       async (args: Record<string, unknown>) => {
-        toolState.toolName = t.name;
-        toolState.toolInput = args;
+        if (!toolState.toolName) {
+          toolState.toolName = t.name;
+          toolState.toolInput = args;
+        }
         return {
           content: [{ type: "text", text: `Action recorded: ${t.name}` }],
         };
@@ -339,9 +404,11 @@ async function invokeClaude(options: InvokeWithToolsOptions): Promise<ToolCallRe
     ),
   );
 
+  // mcpServers key must match the server's `name` — the SDK routes tool
+  // dispatch by key, and a mismatch silently breaks routing.
   const mcpServers = {
-    "game-tools": createSdkMcpServer({
-      name: "openconclave-dynamic-tools",
+    [DYNAMIC_TOOLS_MCP_NAME]: createSdkMcpServer({
+      name: DYNAMIC_TOOLS_MCP_NAME,
       version: VERSION,
       tools: sdkTools,
     }),
@@ -351,6 +418,7 @@ async function invokeClaude(options: InvokeWithToolsOptions): Promise<ToolCallRe
     prompt: options.prompt,
     options: {
       pathToClaudeCodeExecutable: cliPath,
+      env: buildSubprocessEnv(),
       model,
       systemPrompt,
       maxTurns: 3,
@@ -359,6 +427,7 @@ async function invokeClaude(options: InvokeWithToolsOptions): Promise<ToolCallRe
       tools: [],
       mcpServers,
       strictMcpConfig: true,
+      abortController: options.abortController,
     },
   });
 
