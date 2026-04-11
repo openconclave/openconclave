@@ -1,6 +1,6 @@
 {
   "name": "@openconclave/server",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "type": "module",
   "scripts": {
     "dev": "bun run --watch src/index.ts",

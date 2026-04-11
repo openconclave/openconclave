@@ -81,10 +81,13 @@ console.log(`  [2/4] Assets embedded (${(stats.size / 1024).toFixed(0)} KB sourc
 // ── Step 3: Cross-compile single binary per platform ────────
 console.log("  [3/4] Compiling binaries...");
 
-if (existsSync(DIST)) rmSync(DIST, { recursive: true });
-
+// Per-target wipe (not full dist/) so a File Explorer / antivirus handle on
+// the parent dir — common on Windows — doesn't block the build.
 for (const target of targets) {
   const targetDir = join(DIST, target);
+  if (existsSync(targetDir)) {
+    try { rmSync(targetDir, { recursive: true }); } catch { /* handle held — will overwrite files */ }
+  }
   mkdirSync(targetDir, { recursive: true });
 
   const outfile = join(targetDir, `oc${ext(target)}`);
