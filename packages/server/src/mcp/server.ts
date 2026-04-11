@@ -143,6 +143,51 @@ export function createMcpServer() {
   );
 
   server.tool(
+    "update_node",
+    "Update a single node's config, label, or position in a conclave without replacing the whole definition. The config is shallow-merged into the existing node config, so passing { systemPrompt: \"...\" } preserves model, tools, and other fields.",
+    {
+      conclaveId: z.string().describe("The conclave ID"),
+      nodeId: z.string().describe("The node ID to update"),
+      config: z.record(z.unknown()).optional().describe("Partial config merged into the node's data.config"),
+      label: z.string().optional().describe("New label for the node"),
+      position: z.object({ x: z.number(), y: z.number() }).optional().describe("New position for the node"),
+    },
+    async ({ conclaveId, nodeId, config, label, position }) => {
+      try {
+        const current = await ocApi(`/conclaves/${conclaveId}`) as {
+          definition: {
+            nodes: Array<{
+              id: string;
+              type: string;
+              position: { x: number; y: number };
+              data: { label: string; type: string; config: Record<string, unknown> };
+            }>;
+          };
+        };
+        const nodes = [...current.definition.nodes];
+        const idx = nodes.findIndex((n) => n.id === nodeId);
+        if (idx === -1) {
+          return { content: [{ type: "text", text: `Node "${nodeId}" not found in conclave ${conclaveId}` }], isError: true };
+        }
+        const node = nodes[idx];
+        nodes[idx] = {
+          ...node,
+          ...(position ? { position } : {}),
+          data: {
+            ...node.data,
+            ...(label !== undefined ? { label } : {}),
+            config: config ? { ...node.data.config, ...config } : node.data.config,
+          },
+        };
+        await ocApi(`/conclaves/${conclaveId}`, "PUT", { nodes });
+        return { content: [{ type: "text", text: JSON.stringify({ nodeId, updated: nodes[idx].data }, null, 2) }] };
+      } catch (e) {
+        return { content: [{ type: "text", text: e instanceof Error ? e.message : "Update failed" }], isError: true };
+      }
+    }
+  );
+
+  server.tool(
     "delete_conclave",
     "Delete a conclave by ID",
     { conclaveId: z.string().describe("The conclave ID to delete") },
