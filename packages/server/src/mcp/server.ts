@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { NODE_TYPES, NODE_TYPE_ALIASES } from "@openconclave/shared/src/constants";
+import { VERSION } from "@openconclave/shared";
 
 const OC_URL = process.env.OPENCONCLAVE_URL ?? "http://localhost:4000";
 
@@ -33,7 +34,7 @@ async function ocApi(path: string, method = "GET", body?: unknown): Promise<unkn
 export function createMcpServer() {
   const server = new McpServer({
     name: "openconclave",
-    version: "0.1.0",
+    version: VERSION,
   });
 
   // ── Conclaves ──────────────────────────────────────────────

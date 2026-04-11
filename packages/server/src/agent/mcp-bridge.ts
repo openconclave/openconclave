@@ -2,6 +2,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+import { VERSION } from "@openconclave/shared";
 import { Workspace, type McpResolvedConfig } from "../engine/workspace";
 
 /** Sanitize a server ID for use in tool name prefixes (OpenAI requires ^[a-zA-Z0-9_-]+$). */
@@ -74,7 +75,7 @@ export class McpBridge {
         }
 
         const client = new Client(
-          { name: "openconclave", version: "0.1.0" },
+          { name: "openconclave", version: VERSION },
           { capabilities: {} }
         );
 

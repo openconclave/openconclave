@@ -16,6 +16,7 @@ import { z } from "zod";
 import { db } from "../db/client";
 import { agentTasks, settings } from "../db/schema";
 import type { ResolvedAgentConfig } from "@openconclave/shared";
+import { VERSION } from "@openconclave/shared";
 import type { RunEvent } from "../engine/types";
 
 // ── Types ───────────────────────────────────────────────────
@@ -341,7 +342,7 @@ async function invokeClaude(options: InvokeWithToolsOptions): Promise<ToolCallRe
   const mcpServers = {
     "game-tools": createSdkMcpServer({
       name: "openconclave-dynamic-tools",
-      version: "0.1.0",
+      version: VERSION,
       tools: sdkTools,
     }),
   };

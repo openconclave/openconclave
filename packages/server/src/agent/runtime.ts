@@ -8,6 +8,7 @@ import { join } from "path";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import type { ResolvedAgentConfig } from "@openconclave/shared";
+import { VERSION } from "@openconclave/shared";
 import { Workspace } from "../engine/workspace";
 import { db } from "../db/client";
 import { documents, chunks } from "../db/schema";
@@ -383,7 +384,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
   if (conclaveTools.length > 0) {
     mcpServers["openconclave-conclave"] = createSdkMcpServer({
       name: "openconclave-conclave",
-      version: "0.1.0",
+      version: VERSION,
       tools: conclaveTools,
     });
   }

@@ -31,7 +31,7 @@ import { CronScheduler } from "./engine/scheduler";
 import { agentPool } from "./agent/pool";
 import { TelegramTrigger } from "./triggers/telegram";
 import { AppError } from "@openconclave/shared";
-import { API_PORT } from "@openconclave/shared";
+import { API_PORT, VERSION } from "@openconclave/shared";
 
 // ── Database ─────────────────────────────────────────────────
 runMigrations();
@@ -44,7 +44,7 @@ app.use("*", cors());
 app.use("*", errorHandler);
 
 // ── Health ───────────────────────────────────────────────────
-app.get("/api/health", (c) => c.json({ status: "ok", version: "0.1.0" }));
+app.get("/api/health", (c) => c.json({ status: "ok", version: VERSION }));
 
 // ── Routes ───────────────────────────────────────────────────
 app.route("/api/settings", settingsRoutes);
@@ -382,7 +382,7 @@ const r = "\x1b[0m";
 const d = "\x1b[2m";
 
 console.log(`
-  ${a}◆${r}  O P E N C O N C L A V E  ${d}v0.1.0${r}
+  ${a}◆${r}  O P E N C O N C L A V E  ${d}v${VERSION}${r}
 
   ${d}Open:${r}  ${a}http://localhost:${port}${r}
 `);

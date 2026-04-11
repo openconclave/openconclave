@@ -70,3 +70,4 @@ export { AppError, ErrorCode } from "./errors";
 
 // Constants
 export * from "./constants";
+export { VERSION } from "./version";

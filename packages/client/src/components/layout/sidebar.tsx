@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { VERSION } from "@openconclave/shared";
 import {
   LayoutDashboard,
   GitBranch,
@@ -58,7 +59,7 @@ export function Sidebar() {
           Server connected
         </div>
         <div className="px-3 py-1 text-[10px] text-muted-foreground/50">
-          Version 1.0.2
+          Version {VERSION}
         </div>
       </div>
     </aside>

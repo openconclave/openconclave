@@ -26,6 +26,9 @@ VERSION="${1:?usage: $0 <version>   e.g. v1.0.7}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+echo "▶ Bumping version to $VERSION"
+bun run scripts/bump-version.ts "$VERSION"
+
 ENT="$ROOT/scripts/entitlements.plist"
 if [ ! -f "$ENT" ]; then
   cat > "$ENT" <<'PLIST'

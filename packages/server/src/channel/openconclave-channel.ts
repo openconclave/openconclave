@@ -5,6 +5,7 @@ import { ListToolsRequestSchema, CallToolRequestSchema } from "@modelcontextprot
 import { writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { z } from "zod";
+import { VERSION } from "@openconclave/shared";
 
 const OC_URL = process.env.OPENCONCLAVE_URL ?? "http://localhost:4000";
 const OC_WS_URL = process.env.OPENCONCLAVE_WS_URL ?? "ws://localhost:4000";
@@ -12,7 +13,7 @@ const OC_WS_URL = process.env.OPENCONCLAVE_WS_URL ?? "ws://localhost:4000";
 // ── MCP Server ──────────────────────────────────────────────
 
 const server = new Server(
-  { name: "openconclave", version: "0.1.0" },
+  { name: "openconclave", version: VERSION },
   {
     capabilities: {
       tools: {},
