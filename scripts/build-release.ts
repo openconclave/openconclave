@@ -62,7 +62,7 @@ console.log(`  Targets: ${targets.join(", ")}\n`);
 
 // ── Step 1: Build client ────────────────────────────────────
 console.log("  [1/4] Building client...");
-await $`cd ${join(ROOT, "packages", "client")} && npx vite build`.quiet();
+await $`cd ${join(ROOT, "packages", "client")} && bunx vite build`.quiet();
 console.log("  [1/4] Client built\n");
 
 // ── Step 2: Embed client assets into server ─────────────────

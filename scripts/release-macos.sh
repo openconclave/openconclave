@@ -58,6 +58,9 @@ for ARCH in arm64 x64; do
 
   cp "$ROOT/dist/$TARGET/oc" "$OUT"
 
+  echo "▶ [$TARGET] Stripping bun's malformed LC_CODE_SIGNATURE stub"
+  python3 "$ROOT/scripts/strip-bun-sig.py" "$OUT"
+
   echo "▶ [$TARGET] Signing"
   codesign --force --timestamp --options runtime \
     --entitlements "$ENT" \
