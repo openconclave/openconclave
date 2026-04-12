@@ -2,10 +2,11 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Zap, User, GitFork, Code, Combine, MessageCircleQuestion, Send, FileText, BookOpen,
   Terminal, FileEdit, FileSearch, FolderSearch, Search, Server, ChevronDown, ChevronRight,
-  Users, Loader2,
+  Users, Loader2, Boxes,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { NodeType, KnowledgeBase, McpRegistrySearchResponse, McpRegistryServer } from "@openconclave/shared";
+import type { NodeType, KnowledgeBase, McpRegistrySearchResponse, McpRegistryServer, McpServerLaunchConfig } from "@openconclave/shared";
+import { API_PORT } from "@openconclave/shared";
 import { useConclaveStore } from "@/stores/conclave-store";
 
 // ── Node palette items ────────────────────────────────────────
@@ -76,6 +77,7 @@ interface ToolItem {
   toolName: string;
   icon: React.ElementType;
   description: string;
+  mcpLaunchConfig?: McpServerLaunchConfig;
 }
 
 const codeToolItems: ToolItem[] = [
@@ -85,6 +87,17 @@ const codeToolItems: ToolItem[] = [
   { toolType: "builtin", toolId: "Write", toolName: "Write", icon: FileEdit, description: "Write files" },
   { toolType: "builtin", toolId: "Glob", toolName: "Glob", icon: FolderSearch, description: "Find files by pattern" },
   { toolType: "builtin", toolId: "Grep", toolName: "Grep", icon: Search, description: "Search file contents" },
+];
+
+const builtinMcpItems: ToolItem[] = [
+  {
+    toolType: "mcp",
+    toolId: "openconclave",
+    toolName: "OC Tools",
+    icon: Boxes,
+    description: "Manage conclaves & runs",
+    mcpLaunchConfig: { registryName: "openconclave", remote: { type: "streamable-http", url: `http://localhost:${API_PORT}/mcp` } },
+  },
 ];
 
 // ── MCP Registry search ──────────────────────────────────────
@@ -303,6 +316,7 @@ export function NodePalette() {
       toolType: item.toolType,
       toolId: item.toolId,
       toolName: item.toolName,
+      ...(item.mcpLaunchConfig && { mcpLaunchConfig: item.mcpLaunchConfig }),
     });
     e.dataTransfer.setData("application/openconclave-tool", data);
     e.dataTransfer.effectAllowed = "copy";
@@ -363,7 +377,13 @@ export function NodePalette() {
             ))}
           </ToolGroup>
 
-          <ToolGroup label="MCP Servers">
+          <ToolGroup label="Built-in MCP">
+            {builtinMcpItems.map((item) => (
+              <DraggableToolItem key={item.toolId} item={item} onDragStart={onToolDragStart} />
+            ))}
+          </ToolGroup>
+
+          <ToolGroup label="External MCP">
             <McpRegistrySearch />
           </ToolGroup>
 
