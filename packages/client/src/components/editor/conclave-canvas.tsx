@@ -452,6 +452,46 @@ export function ConclaveCanvas() {
     [addNode]
   );
 
+  // Handle nodes dropped via custom pointer drag from the palette (issue/37).
+  // Palette sets pendingNodeDrop in the store; we consume it here where we
+  // have access to the ReactFlow instance for screenToFlowPosition.
+  const pendingNodeDrop = useConclaveStore((s) => s.pendingNodeDrop);
+  const setPendingNodeDrop = useConclaveStore((s) => s.setPendingNodeDrop);
+  useEffect(() => {
+    if (!pendingNodeDrop || !reactFlowInstance.current) return;
+
+    const { type, label, config, screenX, screenY } = pendingNodeDrop;
+    setPendingNodeDrop(null);
+
+    const center = reactFlowInstance.current.screenToFlowPosition({
+      x: screenX,
+      y: screenY,
+    });
+    // Center node on cursor: offset by half the default node size (240×80 flow px)
+    const position = {
+      x: Math.round((center.x - 120) / 20) * 20,
+      y: Math.round((center.y - 40) / 20) * 20,
+    };
+
+    const currentNodes = useConclaveStore.getState().nodes;
+    const existingLabels = new Set(currentNodes.map((n) => n.data.label));
+    let uniqueLabel = label;
+    if (existingLabels.has(uniqueLabel)) {
+      let counter = 2;
+      while (existingLabels.has(`${label} ${counter}`)) counter++;
+      uniqueLabel = `${label} ${counter}`;
+    }
+
+    const id = `${type}_${++nodeId}`;
+    const rfType = type === "output" ? "sink" : type;
+    addNode({
+      id,
+      type: rfType,
+      position,
+      data: { label: uniqueLabel, type: type as NodeType, config } as ConclaveNodeData,
+    });
+  }, [pendingNodeDrop, setPendingNodeDrop, addNode]);
+
   return (
     <div ref={reactFlowWrapper} className="flex-1">
       <ReactFlow

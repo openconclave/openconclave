@@ -73,6 +73,7 @@ interface ConclaveState {
   toolName?: string;
   isDirty: boolean;
   isDraggingTool: boolean;
+  pendingNodeDrop: { type: string; label: string; config: unknown; screenX: number; screenY: number } | null;
   openDropdownId: string | null;
   setOpenDropdown: (id: string | null) => void;
 
@@ -86,6 +87,7 @@ interface ConclaveState {
   setActiveNodes: (ids: Set<string>) => void;
   setSkippedNodes: (ids: Set<string>) => void;
   setDraggingTool: (v: boolean) => void;
+  setPendingNodeDrop: (data: ConclaveState["pendingNodeDrop"]) => void;
   pushHistory: () => void;
   addNode: (node: Node<ConclaveNodeData>) => void;
   updateNodeData: (id: string, data: Partial<ConclaveNodeData>) => void;
@@ -145,6 +147,7 @@ export const useConclaveStore = create<ConclaveState>((set, get) => {
   conclaveDescription: "",
   isDirty: false,
   isDraggingTool: false,
+  pendingNodeDrop: null,
   openDropdownId: null,
   _past: [],
   _future: [],
@@ -218,6 +221,7 @@ export const useConclaveStore = create<ConclaveState>((set, get) => {
   setActiveNodes: (ids) => set({ activeNodeIds: ids }),
   setSkippedNodes: (ids) => set({ skippedNodeIds: ids }),
   setDraggingTool: (v) => set({ isDraggingTool: v }),
+  setPendingNodeDrop: (data) => set({ pendingNodeDrop: data }),
   setOpenDropdown: (id) => set({ openDropdownId: id }),
 
   pushHistory: () => pushHistory(),

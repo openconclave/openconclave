@@ -106,6 +106,12 @@ body {
   cursor: crosshair;
 }
 
+/* Force grabbing cursor everywhere during palette node drag */
+body.oc-dragging-node,
+body.oc-dragging-node * {
+  cursor: grabbing !important;
+}
+
 /* Default arrow cursor, grabbing hand only while panning */
 .react-flow__pane {
   cursor: default !important;

@@ -264,14 +264,36 @@ export function NodePalette() {
       .catch(() => setKnowledgeBases([]));
   }, []);
 
-  const onNodeDragStart = (e: React.DragEvent, type: NodeType, label: string) => {
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const offsetX = e.clientX - rect.left;
-    const offsetY = e.clientY - rect.top;
-    const data = JSON.stringify({ type, label, config: getDefaultConfig(type), offsetX, offsetY });
-    e.dataTransfer.setData("application/openconclave-node", data);
-    e.dataTransfer.effectAllowed = "move";
-  };
+  // Custom pointer-based drag for node palette items. Replaces HTML5 DnD so
+  // we keep full cursor control (grabbing throughout, no browser arrow).
+  const setPendingNodeDrop = useConclaveStore((s) => s.setPendingNodeDrop);
+  const dragDataRef = useRef<{ type: NodeType; label: string; config: unknown } | null>(null);
+
+  const onNodePointerDown = useCallback((e: React.PointerEvent, type: NodeType, label: string) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+
+    dragDataRef.current = { type, label, config: getDefaultConfig(type) };
+    document.body.classList.add("oc-dragging-node");
+
+    const onUp = (ev: PointerEvent) => {
+      window.removeEventListener("pointerup", onUp);
+      document.body.classList.remove("oc-dragging-node");
+
+      const target = document.elementFromPoint(ev.clientX, ev.clientY);
+      const isCanvas = target?.closest(".react-flow");
+      if (isCanvas && dragDataRef.current) {
+        setPendingNodeDrop({
+          ...dragDataRef.current,
+          screenX: ev.clientX,
+          screenY: ev.clientY,
+        });
+      }
+      dragDataRef.current = null;
+    };
+
+    window.addEventListener("pointerup", onUp);
+  }, [setPendingNodeDrop]);
 
   const setDraggingTool = useConclaveStore((s) => s.setDraggingTool);
 
@@ -307,9 +329,8 @@ export function NodePalette() {
           {group.nodes.map((nt) => (
             <div
               key={nt.type}
-              draggable
-              onDragStart={(e) => onNodeDragStart(e, nt.type, nt.label)}
-              className="flex items-center gap-2.5 rounded-lg border border-border bg-secondary/50 px-3 py-2.5 cursor-grab active:cursor-grabbing hover:bg-secondary transition-colors"
+              onPointerDown={(e) => onNodePointerDown(e, nt.type, nt.label)}
+              className="flex items-center gap-2.5 rounded-lg border border-border bg-secondary/50 px-3 py-2.5 cursor-grab active:cursor-grabbing hover:bg-secondary transition-colors select-none"
             >
               <div className={cn("flex h-7 w-7 items-center justify-center shrink-0 rounded-lg", nt.color)}>
                 <nt.icon className="h-4 w-4 text-white" />
