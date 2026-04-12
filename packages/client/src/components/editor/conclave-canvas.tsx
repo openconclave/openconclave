@@ -18,7 +18,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import dagre from "@dagrejs/dagre";
-import { LayoutGrid } from "lucide-react";
+import { LayoutGrid, Map } from "lucide-react";
 
 import { useConclaveStore } from "@/stores/conclave-store";
 import { RoundedEdge, CustomConnectionLine, buildMiniMapPath } from "./rounded-edge";
@@ -142,8 +142,9 @@ function getHandleXY(node: Node<ConclaveNodeData>, handleId: string | null | und
 }
 
 const MINIMAP_POS_KEY = "oc-minimap-pos";
+const MINIMAP_VISIBLE_KEY = "oc-minimap-visible";
 
-function DraggableMiniMap() {
+function DraggableMiniMap({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   const dragging = useRef(false);
   const offset = useRef({ x: 0, y: 0 });
@@ -190,6 +191,8 @@ function DraggableMiniMap() {
     }
   }, []);
 
+  if (!visible) return null;
+
   return (
     <div
       ref={wrapperRef}
@@ -202,6 +205,13 @@ function DraggableMiniMap() {
       <div className="rounded-lg border border-border bg-card shadow-lg overflow-hidden cursor-grab active:cursor-grabbing select-none" style={{ width: 220 }}>
         <div className="flex items-center justify-between px-2 py-1 border-b border-border/50 cursor-grab active:cursor-grabbing select-none">
           <span className="text-[10px] text-muted-foreground/60 font-medium uppercase tracking-wider">Overview</span>
+          <button
+            onClick={(e) => { e.stopPropagation(); onClose(); }}
+            className="flex h-4 w-4 items-center justify-center rounded text-muted-foreground/60 hover:text-foreground transition-colors"
+            title="Hide overview"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="h-3 w-3"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          </button>
         </div>
         <div style={{ height: 150 }}>
           <MiniMap
@@ -257,6 +267,11 @@ export function ConclaveCanvas() {
   const lastClickedNode = useRef<string | null>(null);
   const lastClickedEdge = useRef<string | null>(null);
   const selStart = useRef<{ x: number; y: number } | null>(null);
+
+  const [showMinimap, setShowMinimap] = useState(() => {
+    const stored = localStorage.getItem(MINIMAP_VISIBLE_KEY);
+    return stored === null ? true : stored === "true";
+  });
 
   const nodes = useConclaveStore((s) => s.nodes);
   const edges = useConclaveStore((s) => s.edges);
@@ -623,8 +638,16 @@ export function ConclaveCanvas() {
           offset={0.5}
           color="oklch(0.25 0.01 260)"
         />
-        <Controls className="!bg-card !border-border !shadow-lg [&>button]:!bg-card [&>button]:!border-border [&>button]:!text-foreground" />
-        <DraggableMiniMap />
+        <Controls className="!bg-card !border-border !shadow-lg [&>button]:!bg-card [&>button]:!border-border [&>button]:!text-foreground">
+          <button
+            onClick={() => setShowMinimap((v) => { const next = !v; localStorage.setItem(MINIMAP_VISIBLE_KEY, String(next)); return next; })}
+            className="react-flow__controls-button"
+            title={showMinimap ? "Hide overview" : "Show overview"}
+          >
+            <Map className="h-3.5 w-3.5" style={{ fill: showMinimap ? "currentColor" : "none" }} />
+          </button>
+        </Controls>
+        <DraggableMiniMap visible={showMinimap} onClose={() => { setShowMinimap(false); localStorage.setItem(MINIMAP_VISIBLE_KEY, "false"); }} />
       </ReactFlow>
     </div>
   );
