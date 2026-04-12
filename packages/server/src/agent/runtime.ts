@@ -98,7 +98,7 @@ export type AgentRunOptions = {
   onOutput?: (chunk: string) => void;
 };
 
-const ALLOWED_MODELS = new Set(["sonnet", "opus", "haiku"]);
+export const ALLOWED_MODELS = new Set(["sonnet", "opus", "haiku"]);
 const CONCLAVE_MCP_SERVER_ID = "openconclave-conclave";
 
 export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentResult> {

@@ -27,7 +27,7 @@ export interface ToolDef {
   input_schema: Record<string, unknown>;
 }
 
-export interface InvokeWithToolsOptions {
+interface InvokeWithToolsOptions {
   engine: string;
   config: ResolvedAgentConfig;
   prompt: string;
@@ -38,13 +38,20 @@ export interface InvokeWithToolsOptions {
   abortController?: AbortController;
 }
 
-export interface ToolCallResult {
+interface ToolCallResult {
   output: string;
   tool_call?: {
     name: string;
     input: Record<string, unknown>;
   };
 }
+
+// ── Engine name constants ─────────────────────────────────────
+
+const ENGINE_DEBUG = "debug";
+const ENGINE_OLLAMA = "ollama";
+const ENGINE_OPENAI = "openai";
+const ENGINE_CLAUDE = "claude";
 
 // ── Main dispatcher ─────────────────────────────────────────
 
@@ -53,9 +60,9 @@ export async function invokeWithTools(options: InvokeWithToolsOptions): Promise<
 
   // Log agent task
   const now = new Date().toISOString();
-  const modelName = engine === "debug" ? "debug"
-    : engine === "ollama" ? (options.config.ollamaModel ?? "unknown")
-    : engine === "openai" ? (options.config.openaiModel ?? "unknown")
+  const modelName = engine === ENGINE_DEBUG ? "debug"
+    : engine === ENGINE_OLLAMA ? (options.config.ollamaModel ?? "unknown")
+    : engine === ENGINE_OPENAI ? (options.config.openaiModel ?? "unknown")
     : (options.config.model ?? "sonnet");
 
   const taskResult = await db.insert(agentTasks).values({
@@ -70,27 +77,28 @@ export async function invokeWithTools(options: InvokeWithToolsOptions): Promise<
     createdAt: now,
   }).returning({ id: agentTasks.id });
 
-  const taskId = taskResult[0].id;
-  options.emit({ type: "agent:started", runId: options.runId, nodeId: options.nodeId, data: { taskId, engine } });
-
+  let taskId!: number;
   let result: ToolCallResult;
 
   try {
+    if (!taskResult[0]) throw new Error("DB insert did not return task row");
+    taskId = taskResult[0].id;
+    options.emit({ type: "agent:started", runId: options.runId, nodeId: options.nodeId, data: { taskId, engine } });
     switch (engine) {
-      case "debug":
+      case ENGINE_DEBUG:
         result = invokeDebug(options);
         break;
-      case "ollama":
+      case ENGINE_OLLAMA:
         result = await invokeOllama(options);
         break;
-      case "openai":
+      case ENGINE_OPENAI:
         result = await invokeOpenAI(options);
         break;
-      case "claude":
+      case ENGINE_CLAUDE:
         result = await invokeClaude(options);
         break;
       default:
-        result = await invokeClaude(options);
+        throw new Error(`Unknown engine: ${engine}`);
     }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
@@ -141,6 +149,9 @@ function invokeDebug(options: InvokeWithToolsOptions): ToolCallResult {
 // ── Ollama engine ───────────────────────────────────────────
 
 const OLLAMA_URL = process.env.OLLAMA_URL ?? "http://localhost:11434";
+if (!isAcceptableOllamaUrl(OLLAMA_URL)) {
+  throw new Error(`OLLAMA_URL "${OLLAMA_URL}" is not an acceptable URL (RFC1918, link-local, and non-http(s) blocked)`);
+}
 
 async function invokeOllama(options: InvokeWithToolsOptions): Promise<ToolCallResult> {
   const model = options.config.ollamaModel ?? "qwen3:8b";
@@ -181,7 +192,7 @@ async function invokeOllama(options: InvokeWithToolsOptions): Promise<ToolCallRe
   const msg = data.message;
 
   if (msg.tool_calls && msg.tool_calls.length > 0) {
-    const tc = msg.tool_calls[0];
+    const tc = msg.tool_calls[0]!;
     return {
       output: JSON.stringify({ tool_name: tc.function.name, tool_input: tc.function.arguments }),
       tool_call: { name: tc.function.name, input: tc.function.arguments },
@@ -201,7 +212,12 @@ async function invokeOpenAI(options: InvokeWithToolsOptions): Promise<ToolCallRe
   const providerRow = await db.select().from(settings).where(eq(settings.key, `provider:${providerId}`)).get();
   if (!providerRow) throw new Error(`Provider "${providerId}" not found`);
 
-  const parsed = JSON.parse(providerRow.value) as unknown;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(providerRow.value);
+  } catch {
+    throw new Error(`Provider "${providerId}" has malformed JSON in settings`);
+  }
   const provider = providerSchema.parse(parsed);
   const model = options.config.openaiModel ?? "gpt-4o";
 
@@ -250,8 +266,15 @@ async function invokeOpenAI(options: InvokeWithToolsOptions): Promise<ToolCallRe
 
   const choice = data.choices[0]?.message;
   if (choice?.tool_calls && choice.tool_calls.length > 0) {
-    const tc = choice.tool_calls[0];
-    const args = JSON.parse(tc.function.arguments);
+    const tc = choice.tool_calls[0]!;
+    let args: Record<string, unknown>;
+    try {
+      args = JSON.parse(tc.function.arguments);
+    } catch {
+      throw new Error(
+        `OpenAI returned unparseable tool arguments for "${tc.function.name}": ${tc.function.arguments.slice(0, 200)}`
+      );
+    }
     return {
       output: JSON.stringify({ tool_name: tc.function.name, tool_input: args }),
       tool_call: { name: tc.function.name, input: args },
@@ -263,10 +286,20 @@ async function invokeOpenAI(options: InvokeWithToolsOptions): Promise<ToolCallRe
 
 // ── Provider URL validation (SSRF guard) ────────────────────
 
+// Allow loopback for local Ollama installs; block everything else isPublicHttpUrl blocks.
+export function isAcceptableOllamaUrl(url: string): boolean {
+  let u: URL;
+  try { u = new URL(url); } catch { return false; }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+  const h = u.hostname.toLowerCase();
+  if (h === "localhost" || h === "127.0.0.1" || h === "::1" || h === "[::1]") return true;
+  return isPublicHttpUrl(url);
+}
+
 // Reject internal / loopback / link-local / RFC1918 hosts so a DB-stored
 // provider.baseUrl cannot coerce the server into proxying requests to cloud
 // metadata services (169.254.169.254) or internal infrastructure.
-function isPublicHttpUrl(url: string): boolean {
+export function isPublicHttpUrl(url: string): boolean {
   let u: URL;
   try {
     u = new URL(url);
@@ -278,6 +311,7 @@ function isPublicHttpUrl(url: string): boolean {
   if (host === "localhost" || host === "0.0.0.0") return false;
   if (host === "::1" || host === "[::1]") return false;
   if (host.startsWith("[fe80:") || host.startsWith("[fc") || host.startsWith("[fd")) return false;
+  if (host.includes("::ffff:") || host.includes(":ffff:")) return false;
   const m = host.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
   if (m) {
     const a = Number(m[1]);
@@ -300,7 +334,7 @@ const providerSchema = z.object({
 
 // ── JSON schema → Zod shape converter ───────────────────────
 
-const JSON_SCHEMA_MAX_DEPTH = 20;
+const JSON_SCHEMA_MAX_DEPTH = 10;
 
 function jsonSchemaToZod(schema: Record<string, unknown>, depth = 0): z.ZodType {
   // Depth limit prevents caller-supplied nested schemas from exhausting the
@@ -373,12 +407,9 @@ const DYNAMIC_TOOLS_MCP_NAME = "openconclave-dynamic-tools";
 
 async function invokeClaude(options: InvokeWithToolsOptions): Promise<ToolCallResult> {
   const { query, createSdkMcpServer, tool } = await import("@anthropic-ai/claude-agent-sdk");
-  const { cliPath, buildSubprocessEnv } = await import("./runtime");
+  const { cliPath, buildSubprocessEnv, ALLOWED_MODELS } = await import("./runtime");
 
-  const modelMap: Record<string, string> = { sonnet: "sonnet", opus: "opus", haiku: "haiku" };
-  const model = options.config.model && modelMap[options.config.model]
-    ? modelMap[options.config.model]
-    : undefined;
+  const model = ALLOWED_MODELS.has(options.config.model ?? "") ? options.config.model : undefined;
 
   const systemPrompt = options.config.systemPrompt ?? "";
 
