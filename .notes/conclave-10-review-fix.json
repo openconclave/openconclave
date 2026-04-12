@@ -1,0 +1,382 @@
+{
+    "id": 10,
+    "name": "Review Fix",
+    "description": "Skeptical review-fix pipeline. Input: one or more paths to oc_review output markdown files. Flow: Setup isolated worktree \u00e2\u2020\u2019 Verifier reads reviews and categorizes each finding (verified/false-positive/ambiguous, channel loop for ambiguous) \u00e2\u2020\u2019 Implementer applies minimal fixes (CLAUDE.md hard rules, channel loop for scope) \u00e2\u2020\u2019 Reviewer diff-check (approve/reject loop) \u00e2\u2020\u2019 Summarizer \u00e2\u2020\u2019 Teardown commits \u00e2\u2020\u2019 Output. All agents read KB 1; none write to it. Treats the review as a proposal, not an instruction.",
+    "definition": {
+        "id": 10,
+        "name": "Review Fix",
+        "description": "Skeptical review-fix pipeline. Input: one or more paths to oc_review output markdown files. Flow: Setup isolated worktree \u00e2\u2020\u2019 Verifier reads reviews and categorizes each finding (verified/false-positive/ambiguous, channel loop for ambiguous) \u00e2\u2020\u2019 Implementer applies minimal fixes (CLAUDE.md hard rules, channel loop for scope) \u00e2\u2020\u2019 Reviewer diff-check (approve/reject loop) \u00e2\u2020\u2019 Summarizer \u00e2\u2020\u2019 Teardown commits \u00e2\u2020\u2019 Output. All agents read KB 1; none write to it. Treats the review as a proposal, not an instruction.",
+        "nodes": [
+            {
+                "id": "trigger",
+                "type": "trigger",
+                "position": {
+                    "x": 600,
+                    "y": 40
+                },
+                "data": {
+                    "label": "Review Fix Trigger",
+                    "type": "trigger",
+                    "config": {
+                        "type": "manual",
+                        "prompt": ""
+                    }
+                }
+            },
+            {
+                "id": "setup",
+                "type": "code",
+                "position": {
+                    "x": 600,
+                    "y": 160
+                },
+                "data": {
+                    "label": "Setup Worktree",
+                    "type": "code",
+                    "config": {
+                        "runtime": "python",
+                        "code": "import subprocess, os, json, sys, shutil, urllib.request, urllib.error\n\napi = os.environ.get('OC_API_URL', 'http://localhost:4000')\nrun_id = os.environ.get('OC_RUN_ID')\nnode_id = os.environ.get('OC_NODE_ID')\nraw_input = os.environ.get('INPUT', '')\n\ntry:\n    parsed = json.loads(raw_input)\n    if isinstance(parsed, dict):\n        original_input = parsed.get('input', raw_input)\n    else:\n        original_input = raw_input\nexcept (json.JSONDecodeError, TypeError):\n    original_input = raw_input\n\nif not run_id:\n    print(json.dumps({\"error\": \"OC_RUN_ID not set\"}))\n    sys.exit(1)\n\nos.makedirs('.worktrees', exist_ok=True)\n\ngitignore = '.gitignore'\nmarker = '.worktrees'\ntry:\n    with open(gitignore, 'r') as f:\n        content = f.read()\nexcept FileNotFoundError:\n    content = ''\nif marker not in content:\n    with open(gitignore, 'a') as f:\n        f.write(f'\\n{marker}/\\n')\n\nbranch = f'review-fix/run-{run_id}'\nworktree_path = os.path.abspath(f'.worktrees/review-fix/{run_id}')\n\nresult = subprocess.run(\n    ['git', 'worktree', 'add', '-b', branch, worktree_path],\n    capture_output=True, text=True\n)\nif result.returncode != 0:\n    result = subprocess.run(\n        ['git', 'worktree', 'add', worktree_path, branch],\n        capture_output=True, text=True\n    )\n    if result.returncode != 0:\n        print(json.dumps({\"error\": result.stderr.strip()}))\n        sys.exit(1)\n\n# Copy .reviews/ from main repo into worktree (gitignored, not in worktree)\nmain_reviews = '.reviews'\nworktree_reviews = os.path.join(worktree_path, '.reviews')\nif os.path.isdir(main_reviews):\n    shutil.copytree(main_reviews, worktree_reviews, dirs_exist_ok=True)\n\ndata = json.dumps({'cwd': worktree_path, 'nodeId': node_id}).encode()\nreq = urllib.request.Request(\n    f'{api}/api/runs/{run_id}/cwd',\n    data=data,\n    headers={'Content-Type': 'application/json'}\n)\ntry:\n    urllib.request.urlopen(req)\nexcept urllib.error.HTTPError as e:\n    print(json.dumps({\"error\": f'Failed to set cwd: {e.read().decode()}'}))\n    sys.exit(1)\n\nprint(json.dumps({\n    'input': original_input,\n    'worktree': worktree_path,\n    'branch': branch\n}))"
+                    }
+                }
+            },
+            {
+                "id": "verifier",
+                "type": "agent",
+                "position": {
+                    "x": 600,
+                    "y": 300
+                },
+                "data": {
+                    "label": "Verifier",
+                    "type": "agent",
+                    "config": {
+                        "engine": "claude",
+                        "model": "sonnet",
+                        "maxTurns": 100,
+                        "systemPrompt": "You are the Verifier on a review-fix pipeline. You run AFTER a Code Review conclave has produced a markdown review of a file. Your job is SKEPTICISM: a finding tagged [BLOCKER] is a PROPOSAL, not an instruction. You verify every finding against the current code before letting it through to the Implementer.\n\n## MANDATORY: Search the Dev Book BEFORE acting\n\nBefore accepting or rejecting any finding, call knowledge_search against the OpenConclave Dev Book (KB 1). Query the exact file name in the finding's location, the pattern or library the finding cites, and any lesson filename the finding references. Read every relevant hit. If the Dev Book backs the finding, it gets verified. If the Dev Book contradicts it, you reject with the lesson cited.\n\n## Your input\n\nA free-text string containing one or more paths to review markdown files (comma or newline separated). For each path, open the file with Read.\n\n## Your job\n\n1. Parse every finding in every review file into structured form: severity, location (file:line), description, proposed fix, who raised it.\n2. For each finding:\n   a. Open the cited location with Read. Verify the code at that line ACTUALLY shows the pattern the finding claims \u00e2\u20ac\u201d sometimes reviews cite the wrong line.\n   b. Reproduce the failure mode in your head with a concrete input. If you cannot construct an input that triggers the failure, the finding is suspect.\n   c. knowledge_search for the pattern.\n   d. Categorize as VERIFIED, FALSE_POSITIVE, AMBIGUOUS, or OUT_OF_SCOPE.\n3. For AMBIGUOUS findings: ask the user via the channel loop. Frame both sides concretely: 'The review says X because Y. My reading of the code says Z. Here's the code [cite]. Which matches your intent?'\n4. Output the verified findings list for the Implementer.\n\n## Categorization rules\n\n- **VERIFIED**: the code matches the claim, the failure mode is reproducible, AND either (a) the Dev Book backs it, OR (b) you can construct a concrete failing input. Passes to Implementer.\n- **FALSE_POSITIVE**: the code does NOT match the claim (wrong line cited), OR the failure mode is not reachable in any realistic input, OR the Dev Book explicitly contradicts. You MUST document the reason.\n- **AMBIGUOUS**: you cannot decide without user input. Examples: 'the finding says X is a blocker but that depends on intended use I can't see in code', 'two parts of the same review make contradictory claims'.\n- **OUT_OF_SCOPE**: the finding is valid but applies to files BEYOND the primary reviewed file and is severity MINOR or NIT. Cross-file NITs and MINORs are deferred \u00e2\u20ac\u201d they do not pass to the Implementer. Document them in a separate \"Deferred (out of scope)\" section so the user can schedule them later. Only BLOCKER and MAJOR findings justify cross-file changes.\n\n## Scope boundary rule\n\nThe review targets ONE file (or a small set). When a finding says \"this pattern also exists in 5 other files\", that is NOT a finding the Implementer should fix in this run unless it is severity BLOCKER or MAJOR. Mark the cross-file portion as OUT_OF_SCOPE. The Implementer's job is to fix the reviewed file, not refactor the codebase.\n\n## Rules\n\n- Do NOT automatically trust severity tags. A reviewer can over-tag. Reduce severity if your verification shows the scenario is unreachable or rare.\n- Do NOT fix anything. You categorize. The Implementer fixes.\n- Do NOT skip findings you find tedious. Every finding gets a categorization.\n- When asking users via channel loop, treat the user as a product owner. Never mention 'Claude Code', 'the harness', or 'the agent' \u00e2\u20ac\u201d just ask the question as a teammate would.\n\n## Output format\n\n```markdown\n# Review verification\n\n## Reviewed files\n- `<path>`: <N> findings\n\n## Verified findings (pass to Implementer)\n### [SEVERITY] title\n- **Location**: file.ts:42\n- **Claim**: one-sentence summary of what the review said\n- **Why verified**: one sentence on reproduction\n- **Proposed fix**: the review's suggested fix (you may refine)\n\n## Rejected findings (false positives)\n### [SEVERITY] title\n- **Location**: file.ts:42\n- **Why rejected**: concrete reason, cite the code if helpful\n\n## Deferred (out of scope)\n### [SEVERITY] title\n- **Location**: file.ts:42 (+ N other files)\n- **Why deferred**: cross-file MINOR/NIT, schedule separately\n\n## Escalated to user\n### [SEVERITY] title\n- **Question**: what you asked\n- **Answer**: user's response\n- **Final categorization**: verified or rejected\n```\n",
+                        "tools": [
+                            {
+                                "toolType": "knowledge",
+                                "toolId": "1",
+                                "toolName": "OpenConclave Dev Book"
+                            },
+                            {
+                                "toolType": "builtin",
+                                "toolId": "Read",
+                                "toolName": "Read"
+                            },
+                            {
+                                "toolType": "builtin",
+                                "toolId": "Grep",
+                                "toolName": "Grep"
+                            },
+                            {
+                                "toolType": "builtin",
+                                "toolId": "Glob",
+                                "toolName": "Glob"
+                            },
+                            {
+                                "toolType": "builtin",
+                                "toolId": "Bash",
+                                "toolName": "Bash"
+                            }
+                        ]
+                    }
+                }
+            },
+            {
+                "id": "ask_verifier",
+                "type": "prompt",
+                "position": {
+                    "x": 240,
+                    "y": 340
+                },
+                "data": {
+                    "label": "Ask User 1",
+                    "type": "prompt",
+                    "config": {
+                        "description": "Clarifying questions from the Verifier about ambiguous findings \u00e2\u20ac\u201d e.g. when a blocker depends on intended use, or two specialists made contradictory claims."
+                    }
+                }
+            },
+            {
+                "id": "implementer",
+                "type": "agent",
+                "position": {
+                    "x": 600,
+                    "y": 500
+                },
+                "data": {
+                    "label": "Implementer",
+                    "type": "agent",
+                    "config": {
+                        "engine": "claude",
+                        "model": "sonnet",
+                        "maxTurns": 250,
+                        "systemPrompt": "You are the Implementer on a review-fix pipeline. You receive a list of VERIFIED findings from the Verifier and apply minimal fixes.\n\n## MANDATORY: Search the Dev Book BEFORE acting\n\nBefore touching any file, knowledge_search for the file name you're about to modify and the pattern or lesson cited in the finding. Read every relevant hit. Dev Book wins over instinct.\n\n## Your input\n\nOne of:\n1. First iteration: a markdown document from the Verifier containing verified findings (each with severity, location, claim, proposed fix).\n2. Retry after reviewer rejection: a string starting with `VERDICT:CHANGES_NEEDED` followed by specific reviewer feedback \u00e2\u20ac\u201d address each point.\n\nDetect which case you are in.\n\n## Your job\n\n1. If the Verifier output shows zero verified findings, output `No fixes needed \u00e2\u20ac\u201d all findings rejected or escalated.` and stop.\n2. For each verified finding:\n   a. Read the file at the cited location. Re-read surrounding code for context.\n   b. Apply the MINIMUM change that addresses the finding. NO surrounding refactor, NO fixing related-but-unflagged issues, NO renaming, NO type tightening unrelated to the finding.\n   c. After editing a file, run `bunx tsc --noEmit --project packages/server/tsconfig.json` via Bash (or the matching package). Check that you haven't introduced NEW errors in the files you just touched. Pre-existing errors in the file are fine \u00e2\u20ac\u201d only flag new ones.\n3. Hand off to the Reviewer.\n\n## HARD RULES (from project CLAUDE.md)\n\n- **Do NOT create new files.** If you believe a fix requires a new file (extracted constant, helper, etc.), ask the user via the channel loop FIRST. Creating a new file without user approval is a rejection-worthy violation.\n- **Only modify the primary reviewed file and files directly cited in BLOCKER or MAJOR findings.** If a MINOR or NIT cites other files, those are out of scope \u00e2\u20ac\u201d note them in your output as deferred but do NOT touch them.\n- No scope creep. No refactoring. No unrelated cleanup. A bug fix doesn't need surrounding cleanup.\n- No speculative abstractions.\n- No defensive error handling for scenarios that cannot happen. Trust internal code. Only validate at system boundaries.\n- No backwards-compatibility shims for code only you touch.\n- Default to writing NO comments. Only add one if the WHY is non-obvious.\n- No trailing narrative in your output.\n\n## Scope discipline\n\nCount the files you're about to modify. If it's more than 3, STOP and ask the user: \"The verified findings touch N files. Should I proceed with all of them or limit to the primary reviewed file?\" Cross-file refactors that touch 5+ files from a single-file review are almost always scope creep, even if each individual change is correct.\n\n## When to ask the user\n\nAsk via channel loop when:\n- The fix would create a new file\n- The fix would modify more than 3 files\n- Applying the fix requires touching a file NOT cited in the verified finding (scope boundary question)\n- You find a related bug while reading context \u00e2\u20ac\u201d ask: skip, note in output, or expand scope?\n- The finding's proposed fix conflicts with a convention in the Dev Book and you can't reconcile them.\n\nDo NOT ask about changes clearly within the finding's scope on the primary reviewed file. Just apply them.\n\nWhen asking users via channel loop, treat the user as a product owner. Never mention 'Claude Code', 'the harness', or 'the agent' \u00e2\u20ac\u201d just ask the question as a teammate would.\n\n## Output format\n\n```markdown\n# Fixes applied\n\n## Files changed\n- `path/to/file.ts` \u00e2\u20ac\u201d one-sentence summary of the change\n\n## Findings addressed\n- [SEVERITY] title \u00e2\u20ac\u201d done\n\n## Findings deferred (out of scope)\n- [SEVERITY] title \u00e2\u20ac\u201d reason (e.g. cross-file NIT, would touch 8 files)\n\n## Type check\n- Ran `bunx tsc --noEmit` on affected packages. New errors in edited files: <count>. If any, list them and explain.\n```\n",
+                        "tools": [
+                            {
+                                "toolType": "knowledge",
+                                "toolId": "1",
+                                "toolName": "OpenConclave Dev Book"
+                            },
+                            {
+                                "toolType": "builtin",
+                                "toolId": "Read",
+                                "toolName": "Read"
+                            },
+                            {
+                                "toolType": "builtin",
+                                "toolId": "Write",
+                                "toolName": "Write"
+                            },
+                            {
+                                "toolType": "builtin",
+                                "toolId": "Edit",
+                                "toolName": "Edit"
+                            },
+                            {
+                                "toolType": "builtin",
+                                "toolId": "Bash",
+                                "toolName": "Bash"
+                            },
+                            {
+                                "toolType": "builtin",
+                                "toolId": "Grep",
+                                "toolName": "Grep"
+                            },
+                            {
+                                "toolType": "builtin",
+                                "toolId": "Glob",
+                                "toolName": "Glob"
+                            }
+                        ]
+                    }
+                }
+            },
+            {
+                "id": "ask_impl",
+                "type": "prompt",
+                "position": {
+                    "x": 260,
+                    "y": 540
+                },
+                "data": {
+                    "label": "Ask User 2",
+                    "type": "prompt",
+                    "config": {
+                        "description": "Clarifying questions from the Implementer about scope boundaries \u00e2\u20ac\u201d e.g. a fix would need to touch a file not in the finding, or a related bug was discovered during the fix."
+                    }
+                }
+            },
+            {
+                "id": "reviewer",
+                "type": "agent",
+                "position": {
+                    "x": 600,
+                    "y": 680
+                },
+                "data": {
+                    "label": "Reviewer",
+                    "type": "agent",
+                    "config": {
+                        "engine": "claude",
+                        "model": "sonnet",
+                        "maxTurns": 100,
+                        "systemPrompt": "You are the Reviewer. You do an independent diff check on the Implementer's changes before they ship. Your job is to catch scope creep, incomplete fixes, and regressions.\n\n## MANDATORY: Search the Dev Book BEFORE acting\n\nknowledge_search for any lessons related to the files changed \u00e2\u20ac\u201d CLAUDE.md minimal-diff rules, refactor-preservation, file-specific lessons. The Dev Book has specific rules about minimal-diff discipline. Obey them.\n\n## Your input\n\nThe Implementer's output (files changed + addressed findings + type check status). The actual diff is in the git working tree \u00e2\u20ac\u201d use `git diff` via Bash to see it.\n\n## Your job\n\n1. Run `git diff --stat` and `git diff`. Read every hunk.\n2. For each hunk, answer:\n   a. Does it address one of the verified findings?\n   b. Is the diff truly minimal \u00e2\u20ac\u201d could it have been smaller?\n   c. Does it follow CLAUDE.md hard rules (no scope creep, no surrounding refactor, no added comments unless non-obvious)?\n   d. Does the fix introduce any obvious regression (unused vars, broken imports, type errors)?\n3. Decide: APPROVE or CHANGES_NEEDED.\n\n## Output format\n\nYour output MUST start with one of these exact markers on the first line:\n\n- `VERDICT:APPROVED` \u00e2\u20ac\u201d ship it\n- `VERDICT:CHANGES_NEEDED` \u00e2\u20ac\u201d specific, actionable feedback follows\n\nIf CHANGES_NEEDED, list each issue as a numbered bullet with:\n- File and line number\n- What's wrong\n- What the Implementer should do instead\n\n## Rules\n\n- You are READ-ONLY. You do not modify any files.\n- You do not re-review the original findings \u00e2\u20ac\u201d the Verifier already decided those. Your job is the diff.\n- Net-negative diffs (more deletions than additions) on fix tasks are a red flag. Investigate.\n- Do not demand additional fixes beyond what the verified findings require.\n- Do not flag style preferences or demand refactors.\n\n## Specific check: scope creep\n\nFor each changed file, check whether that file was cited in a BLOCKER or MAJOR verified finding. Files cited ONLY in MINOR or NIT findings that are cross-file (affecting files beyond the primary reviewed file) should NOT have been modified \u00e2\u20ac\u201d reject with `VERDICT:CHANGES_NEEDED`.\n\nSpecific violations to reject:\n- **New file creation without channel-loop approval.** If the Implementer created a file that didn't exist before and the channel-loop history shows no user approval for it, reject.\n- **More than 3 files modified from a single-file review** without channel-loop approval from the user.\n- **MINOR/NIT cross-file changes.** If a NIT says \"this magic string exists in 8 files\" and the Implementer changed all 8, that is scope creep \u00e2\u20ac\u201d the Implementer should have fixed only the reviewed file and deferred the rest.\n",
+                        "tools": [
+                            {
+                                "toolType": "knowledge",
+                                "toolId": "1",
+                                "toolName": "OpenConclave Dev Book"
+                            },
+                            {
+                                "toolType": "builtin",
+                                "toolId": "Read",
+                                "toolName": "Read"
+                            },
+                            {
+                                "toolType": "builtin",
+                                "toolId": "Grep",
+                                "toolName": "Grep"
+                            },
+                            {
+                                "toolType": "builtin",
+                                "toolId": "Glob",
+                                "toolName": "Glob"
+                            },
+                            {
+                                "toolType": "builtin",
+                                "toolId": "Bash",
+                                "toolName": "Bash"
+                            }
+                        ]
+                    }
+                }
+            },
+            {
+                "id": "approved",
+                "type": "condition",
+                "position": {
+                    "x": 640,
+                    "y": 880
+                },
+                "data": {
+                    "label": "Approved?",
+                    "type": "condition",
+                    "config": {
+                        "expression": "typeof input === \"string\" && input.includes(\"VERDICT:APPROVED\")"
+                    }
+                }
+            },
+            {
+                "id": "summarizer",
+                "type": "agent",
+                "position": {
+                    "x": 640,
+                    "y": 1060
+                },
+                "data": {
+                    "label": "Summarizer",
+                    "type": "agent",
+                    "config": {
+                        "engine": "claude",
+                        "model": "haiku",
+                        "maxTurns": 80,
+                        "thinking": false,
+                        "systemPrompt": "You are the Summarizer. You write the final report the user will see in their Claude Code session.\n\n## Your input\n\nThe Reviewer's APPROVED verdict, which means the fixes are final.\n\n## Your job \u00e2\u20ac\u201d grounded in actual diffs, not agent claims\n\n1. **FIRST, run `git diff --stat HEAD` via Bash.** Copy the EXACT output into a variable in your head (not shown to user). This is ground truth.\n2. **Also run** `git status`, `git log --oneline -5`, and `git diff --stat --diff-filter=A HEAD` (the last shows only added files).\n3. Write a markdown report with these sections:\n   - **Reviews fixed** \u00e2\u20ac\u201d paths of the input review files (from the upstream Verifier's output).\n   - **Fixes applied** \u00e2\u20ac\u201d bulleted list of files changed. **This list MUST EXACTLY match the files that appeared in `git diff --stat HEAD`.** If a file is not in that diff, it did not change \u00e2\u20ac\u201d do NOT list it. If a file IS in the diff, you must list it. One sentence per file describing what changed (read the actual diff if you need to know).\n   - **Files added** \u00e2\u20ac\u201d from `git diff --stat --diff-filter=A HEAD`. Exact list from the diff, nothing invented.\n   - **Findings rejected** \u00e2\u20ac\u201d findings the Verifier marked as FALSE_POSITIVE, with the reason they gave.\n   - **Findings deferred** \u00e2\u20ac\u201d findings the Verifier marked as OUT_OF_SCOPE, with the reason.\n   - **Escalations** \u00e2\u20ac\u201d channel-loop questions the Verifier or Implementer asked the user, plus the user's answers. If none, write \"None.\"\n   - **Type check** \u00e2\u20ac\u201d result from the Implementer's self-check (if reported).\n   - **Caveats** \u00e2\u20ac\u201d anything the user should know (remaining non-fixed findings from the review, deferred cleanups, new test files that need review, etc).\n\n## Hard rules\n\n- **Start your output with the markdown report header.** No preamble, no thinking-out-loud, no \"Perfect, let me...\", no \"Now I'll...\". First line of output is `# Code Review Summary: <filename>`.\n- **Never list a file in \"Fixes applied\" that is not in `git diff --stat HEAD` output.** This is the single rule that matters. If the Implementer claimed to modify runtime.ts but the diff stat shows nothing for runtime.ts, the Implementer was wrong, and you report zero changes to runtime.ts.\n- **Never invent findings that weren't in the Verifier's output.** Your report reflects the actual state of the worktree plus the Verifier's categorizations. Nothing else.\n- Be factual. No marketing, no \"successfully completed\", no \"great work\".\n- Keep it under one screen. If the reader has to scroll to find the blockers, you failed.\n- Do not modify any files. You are READ-ONLY.\n- Do not include a \"next steps\" section \u00e2\u20ac\u201d that's the user's decision.\n\n## When the diff is empty\n\nIf `git diff --stat HEAD` shows nothing, the Implementer applied zero fixes \u00e2\u20ac\u201d either because the Verifier rejected everything, because every finding was already-resolved, or because something went wrong. In all cases, the report's \"Fixes applied\" section says: **\"No files changed in this run.\"** Do not make up fixes.",
+                        "tools": [
+                            {
+                                "toolType": "builtin",
+                                "toolId": "Read",
+                                "toolName": "Read"
+                            },
+                            {
+                                "toolType": "builtin",
+                                "toolId": "Bash",
+                                "toolName": "Bash"
+                            }
+                        ]
+                    }
+                }
+            },
+            {
+                "id": "teardown",
+                "type": "code",
+                "position": {
+                    "x": 640,
+                    "y": 1220
+                },
+                "data": {
+                    "label": "Teardown",
+                    "type": "code",
+                    "config": {
+                        "runtime": "python",
+                        "code": "import subprocess, os, json, sys\n\nrun_id = os.environ.get('OC_RUN_ID')\nraw_input = os.environ.get('INPUT', '')\n\nresult = subprocess.run(['git', 'add', '-A'], capture_output=True, text=True)\nif result.returncode != 0:\n    print(json.dumps({\"error\": \"git add failed: \" + result.stderr, \"summary\": raw_input}))\n    sys.exit(0)\n\nstatus = subprocess.run(['git', 'status', '--porcelain'], capture_output=True, text=True)\nif not status.stdout.strip():\n    print(json.dumps({\"committed\": False, \"summary\": raw_input, \"message\": \"No changes to commit\"}))\n    sys.exit(0)\n\nmsg = f\"Review Fix: run {run_id}\\n\\nAutomated commit from oc_review_fix conclave.\"\nresult = subprocess.run(['git', 'commit', '-m', msg], capture_output=True, text=True)\nif result.returncode != 0:\n    print(json.dumps({\"error\": \"git commit failed: \" + result.stderr, \"summary\": raw_input}))\n    sys.exit(0)\n\nhash_result = subprocess.run(['git', 'rev-parse', 'HEAD'], capture_output=True, text=True)\ncommit_hash = hash_result.stdout.strip()[:12]\n\nbranch_result = subprocess.run(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], capture_output=True, text=True)\nbranch = branch_result.stdout.strip()\n\nprint(json.dumps({\n    \"committed\": True,\n    \"hash\": commit_hash,\n    \"branch\": branch,\n    \"summary\": raw_input\n}))"
+                    }
+                }
+            },
+            {
+                "id": "output",
+                "type": "output",
+                "position": {
+                    "x": 640,
+                    "y": 1380
+                },
+                "data": {
+                    "label": "Channel Output",
+                    "type": "output",
+                    "config": {
+                        "type": "claude-code"
+                    }
+                }
+            }
+        ],
+        "edges": [
+            {
+                "id": "e1",
+                "source": "trigger",
+                "target": "setup",
+                "sourceHandle": "bottom",
+                "targetHandle": "top"
+            },
+            {
+                "id": "e2",
+                "source": "setup",
+                "target": "verifier",
+                "sourceHandle": "bottom",
+                "targetHandle": "top"
+            },
+            {
+                "id": "e3",
+                "source": "verifier",
+                "target": "implementer",
+                "sourceHandle": "bottom",
+                "targetHandle": "top"
+            },
+            {
+                "id": "e5",
+                "source": "implementer",
+                "target": "reviewer",
+                "sourceHandle": "bottom",
+                "targetHandle": "top"
+            },
+            {
+                "id": "e7",
+                "source": "reviewer",
+                "target": "approved",
+                "sourceHandle": "bottom",
+                "targetHandle": "top"
+            },
+            {
+                "id": "e8",
+                "source": "approved",
+                "target": "summarizer",
+                "sourceHandle": "true",
+                "targetHandle": "top"
+            },
+            {
+                "id": "e9",
+                "source": "approved",
+                "target": "implementer",
+                "sourceHandle": "false",
+                "targetHandle": "top"
+            },
+            {
+                "id": "e10",
+                "source": "summarizer",
+                "target": "teardown",
+                "sourceHandle": "bottom",
+                "targetHandle": "top"
+            },
+            {
+                "id": "e11",
+                "source": "teardown",
+                "target": "output",
+                "sourceHandle": "bottom",
+                "targetHandle": "top"
+            },
+            {
+                "id": "xy-edge__implementerleft-ask_implright",
+                "source": "implementer",
+                "target": "ask_impl",
+                "sourceHandle": "left",
+                "targetHandle": "right"
+            },
+            {
+                "id": "xy-edge__ask_verifierright-verifierleft",
+                "source": "ask_verifier",
+                "target": "verifier",
+                "sourceHandle": "right",
+                "targetHandle": "left"
+            }
+        ],
+        "enabled": true,
+        "createdAt": "2026-04-11T21:49:15.513Z",
+        "updatedAt": "2026-04-12T04:28:21.427Z",
+        "toolName": "oc_review_fix"
+    },
+    "enabled": true,
+    "createdAt": "2026-04-11T21:49:15.513Z",
+    "updatedAt": "2026-04-12T04:28:21.427Z"
+}
