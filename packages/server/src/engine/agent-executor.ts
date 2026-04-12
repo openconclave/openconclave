@@ -14,6 +14,7 @@ import { SESSIONS_DIR } from "../lib/workspace";
 import { AppError, ErrorCode } from "@openconclave/shared";
 import type { ResolvedAgentConfig, ConclaveNode, ConclaveEdge } from "@openconclave/shared";
 import { getOutgoingEdges } from "./graph";
+import { ROUTING_TOOL_NAME } from "../agent/constants";
 
 import type { RouteTarget, RunEvent } from "./types";
 import type { Workspace } from "./workspace";
@@ -187,14 +188,14 @@ export async function executeAgent(
       .join("\n");
     const routeInstruction = [
       "\n\n## ⚠️ CRITICAL: Routing (REQUIRED)",
-      "When you have finished your work, you MUST call the `openconclave_next` tool to exit.",
+      `When you have finished your work, you MUST call the \`${ROUTING_TOOL_NAME}\` tool to exit.`,
       "Do NOT keep working after your task is complete. Do NOT re-read or re-analyze files you already changed.",
-      "If you have completed the task, STOP and call `openconclave_next` immediately.",
+      `If you have completed the task, STOP and call \`${ROUTING_TOOL_NAME}\` immediately.`,
       "",
       "Available routes:",
       routeList,
       "",
-      "Call openconclave_next with `node_id` (the route) and `content` (your summary). You MUST call it exactly once.",
+      `Call ${ROUTING_TOOL_NAME} with \`node_id\` (the route) and \`content\` (your summary). You MUST call it exactly once.`,
       "Failure to call this tool means the conclave hangs forever.",
     ].join("\n");
     augmentedConfig.systemPrompt = (config.systemPrompt ?? "") + routeInstruction;
@@ -264,7 +265,7 @@ export async function executeAgent(
 
       result = await runOllamaAgent({
         model: modelName,
-        prompt: attempt === 0 ? (augmentedConfig.systemPrompt ?? "") : `Previous attempt failed: you must call openconclave_next to choose a route. Try again.`,
+        prompt: attempt === 0 ? (augmentedConfig.systemPrompt ?? "") : `Previous attempt failed: you must call ${ROUTING_TOOL_NAME} to choose a route. Try again.`,
         systemPrompt: augmentedConfig.systemPrompt,
         input,
         allowedTools: config.allowedTools,
@@ -321,7 +322,7 @@ export async function executeAgent(
     } else {
       const retryInput = attempt === 0
         ? input
-        : "You completed your task but forgot to call openconclave_next. Call it NOW to route to the next step.";
+        : `You completed your task but forgot to call ${ROUTING_TOOL_NAME}. Call it NOW to route to the next step.`;
       result = await agentPool.submit(String(taskId), {
         config: augmentedConfig,
         input: retryInput,

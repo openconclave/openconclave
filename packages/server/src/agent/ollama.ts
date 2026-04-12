@@ -12,6 +12,7 @@ import { join } from "path";
 import { SESSIONS_DIR } from "../lib/workspace";
 import { AgentBase } from "./base";
 import { createOllamaRoutingTool } from "./ollama-routing";
+import { ROUTING_TOOL_NAME } from "./constants";
 import type { ResolvedAgentConfig } from "@openconclave/shared";
 
 export type { OllamaStatus, OllamaModelInfo, OllamaRunOptions, ThinkingBlock, OllamaResult } from "./ollama-types";
@@ -138,7 +139,7 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
   if (options.routeTargets && options.routeTargets.length >= 1) {
     const routingTool = createOllamaRoutingTool(options.routeTargets);
     activeTools.push(routingTool.tool);
-    toolExecutors.set("openconclave_next", routingTool.execute);
+    toolExecutors.set(ROUTING_TOOL_NAME, routingTool.execute);
   }
 
   // Register extra dynamic tools (e.g., ask_user for channel loops)
@@ -241,7 +242,7 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
           }
 
           // Capture routing before executing
-          if (fnName === "openconclave_next" && fnArgs?.node_id) {
+          if (fnName === ROUTING_TOOL_NAME && fnArgs?.node_id) {
             routeTo = fnArgs.node_id as string;
             routeContent = (fnArgs.content as string) ?? "";
           }

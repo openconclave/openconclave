@@ -18,6 +18,7 @@ import { ingestText } from "../knowledge/ingest";
 import { registerPrompt } from "../engine/prompt-registry";
 import { broadcastRunEvent } from "../ws/broadcast";
 import { createBuiltinTools } from "./builtin-tools";
+import { ROUTING_TOOL_NAME } from "./constants";
 
 // SDK's extractFromBunfs only checks for "$bunfs" but Bun on Windows uses "B:/~BUN/".
 // Re-extract here to cover both patterns.
@@ -244,7 +245,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
 
     conclaveTools.push(
       tool(
-        "openconclave_next",
+        ROUTING_TOOL_NAME,
         [
           "Choose the next step in the conclave.",
           "Available routes:",

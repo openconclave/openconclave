@@ -1,6 +1,7 @@
 import { readFileSync, existsSync } from "fs";
 import { openaiLog } from "./openai-debug";
 import { createRoutingToolChat } from "./openai-routing-tools";
+import { ROUTING_TOOL_NAME } from "./constants";
 import { AgentBase } from "./base";
 import type { ResolvedAgentConfig } from "@openconclave/shared";
 import type { OpenAIRunOptions, OpenAIResult, OpenAITool } from "./openai-types";
@@ -157,7 +158,7 @@ export async function runChatCompletions(options: OpenAIRunOptions): Promise<Ope
           }
 
           // Check for routing
-          if (fnName === "openconclave_next" && fnArgs.node_id) {
+          if (fnName === ROUTING_TOOL_NAME && fnArgs.node_id) {
             routeTo = fnArgs.node_id as string;
             routeContent = (fnArgs.content as string) ?? "";
           }
@@ -165,7 +166,7 @@ export async function runChatCompletions(options: OpenAIRunOptions): Promise<Ope
           // Execute tool
           const executor = toolExecutors.get(fnName);
           let result: string;
-          if (fnName === "openconclave_next") {
+          if (fnName === ROUTING_TOOL_NAME) {
             result = `Routing to: ${routeTo}`;
           } else if (executor) {
             onOutput?.(`[Executing ${fnName}...]\n`);

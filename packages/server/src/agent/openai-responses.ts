@@ -1,6 +1,7 @@
 import { readFileSync, existsSync } from "fs";
 import { openaiLog } from "./openai-debug";
 import { createRoutingToolResponses } from "./openai-routing-tools";
+import { ROUTING_TOOL_NAME } from "./constants";
 import { AgentBase } from "./base";
 import type { ResolvedAgentConfig } from "@openconclave/shared";
 import type { OpenAIRunOptions, OpenAIResult } from "./openai-types";
@@ -150,14 +151,14 @@ export async function runResponsesAPI(options: OpenAIRunOptions): Promise<OpenAI
             fnArgs = {};
           }
 
-          if (item.name === "openconclave_next" && fnArgs.node_id) {
+          if (item.name === ROUTING_TOOL_NAME && fnArgs.node_id) {
             routeTo = fnArgs.node_id as string;
             routeContent = (fnArgs.content as string) ?? "";
           }
 
           const executor = toolExecutors.get(item.name as string);
           let result: string;
-          if (item.name === "openconclave_next") {
+          if (item.name === ROUTING_TOOL_NAME) {
             result = `Routing to: ${routeTo}`;
           } else if (executor) {
             onOutput?.(`[Executing ${item.name}...]\n`);

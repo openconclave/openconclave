@@ -1,6 +1,6 @@
 import type { OpenAITool } from "./openai-types";
-
-type RouteTarget = { nodeId: string; label: string; type: string };
+import type { RouteTarget } from "../engine/types";
+import { ROUTING_TOOL_NAME } from "./constants";
 
 function routingParams(routeTargets: RouteTarget[]): {
   desc: string;
@@ -28,11 +28,11 @@ function routingParams(routeTargets: RouteTarget[]): {
 /** Chat Completions format — tool nested under `function` key */
 export function createRoutingToolChat(routeTargets: RouteTarget[]): OpenAITool {
   const { desc, params } = routingParams(routeTargets);
-  return { type: "function", function: { name: "openconclave_next", description: desc, parameters: params } };
+  return { type: "function", function: { name: ROUTING_TOOL_NAME, description: desc, parameters: params } };
 }
 
 /** Responses API format — name/description at top level */
 export function createRoutingToolResponses(routeTargets: RouteTarget[]): Record<string, unknown> {
   const { desc, params } = routingParams(routeTargets);
-  return { type: "function", name: "openconclave_next", description: desc, parameters: params };
+  return { type: "function", name: ROUTING_TOOL_NAME, description: desc, parameters: params };
 }

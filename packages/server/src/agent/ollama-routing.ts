@@ -1,11 +1,7 @@
 import type { OllamaTool } from "./ollama-types";
+import type { RouteTarget } from "../engine/types";
+import { ROUTING_TOOL_NAME } from "./constants";
 
-type RouteTarget = { nodeId: string; label: string; type: string };
-
-/**
- * Creates the routing tool for Ollama agents.
- * The agent MUST call this exactly once to route to the next conclave step.
- */
 export function createOllamaRoutingTool(routeTargets: RouteTarget[]): {
   tool: OllamaTool;
   execute: (args: Record<string, unknown>) => Promise<string>;
@@ -19,8 +15,8 @@ export function createOllamaRoutingTool(routeTargets: RouteTarget[]): {
     tool: {
       type: "function",
       function: {
-        name: "openconclave_next",
-        description: `Route to the next conclave step. You MUST call this exactly once.\nAvailable routes:\n${routeList}`,
+        name: ROUTING_TOOL_NAME,
+        description: `Route to the next conclave step.\nAvailable routes:\n${routeList}`,
         parameters: {
           type: "object",
           required: ["node_id", "content"],
@@ -33,12 +29,22 @@ export function createOllamaRoutingTool(routeTargets: RouteTarget[]): {
             content: {
               type: "string",
               description: "Your output message to pass to the next node",
+              maxLength: 500_000,
             },
           },
         },
       },
     },
     execute: async (args: Record<string, unknown>) => {
+      if (typeof args.node_id !== "string" || !validIds.includes(args.node_id)) {
+        return `Error: invalid node_id "${String(args.node_id)}". Valid targets: ${validIds.join(", ")}`;
+      }
+      if (typeof args.content !== "string") {
+        return `Error: "content" must be a string`;
+      }
+      if (args.content.length > 500_000) {
+        return `Error: "content" exceeds maximum length of 500,000 characters`;
+      }
       return `ROUTE:${args.node_id}:${args.content}`;
     },
   };
