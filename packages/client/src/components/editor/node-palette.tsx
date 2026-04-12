@@ -317,69 +317,71 @@ export function NodePalette() {
   }));
 
   return (
-    <div className="w-52 border-r border-border bg-card p-3 space-y-2 overflow-y-auto">
-      <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1 mb-3">
-        Nodes
-      </h3>
-      {paletteGroups.map((group) => (
-        <div key={group.label} className="space-y-1.5">
-          <p className="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider px-1">
-            {group.label}
-          </p>
-          {group.nodes.map((nt) => (
-            <div
-              key={nt.type}
-              onPointerDown={(e) => onNodePointerDown(e, nt.type, nt.label)}
-              className="flex items-center gap-2.5 rounded-lg border border-border bg-secondary/50 px-3 py-2.5 cursor-grab active:cursor-grabbing hover:bg-secondary transition-colors select-none"
-            >
-              <div className={cn("flex h-7 w-7 items-center justify-center shrink-0 rounded-lg", nt.color)}>
-                <nt.icon className="h-4 w-4 text-white" />
-              </div>
-              <div>
-                <p className="text-sm font-medium">{nt.label}</p>
-                <p className="text-[10px] text-muted-foreground">{nt.description}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      ))}
-
-      {/* Divider */}
-      <div className="border-t border-border/60 my-3" />
-
-      {/* Tools section */}
-      <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1 mb-2">
-        Tools
-      </h3>
-      <p className="text-[9px] text-muted-foreground px-1 mb-2 leading-snug">
-        Drag and drop onto an Agent node.
-      </p>
-
-      <div className="space-y-3">
-        <ToolGroup label="Code">
-          {codeToolItems.map((item) => (
-            <DraggableToolItem key={item.toolId} item={item} onDragStart={onToolDragStart} />
-          ))}
-        </ToolGroup>
-
-        <ToolGroup label="MCP Servers">
-          <McpRegistrySearch />
-        </ToolGroup>
-
-        <ToolGroup label="Knowledge Bases" defaultOpen={knowledgeToolItems.length > 0}>
-          {knowledgeToolItems.length === 0 ? (
-            <p className="text-[9px] text-muted-foreground px-1 py-0.5">
-              No knowledge bases.{" "}
-              <a href="/knowledge" className="underline text-primary hover:text-primary/80">
-                Create one
-              </a>
+    <div className="flex border-r border-border bg-card">
+      {/* Column 1: Nodes */}
+      <div className="w-48 p-3 space-y-2 overflow-y-auto border-r border-border/40">
+        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1 mb-3">
+          Nodes
+        </h3>
+        {paletteGroups.map((group) => (
+          <div key={group.label} className="space-y-1.5">
+            <p className="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider px-1">
+              {group.label}
             </p>
-          ) : (
-            knowledgeToolItems.map((item) => (
+            {group.nodes.map((nt) => (
+              <div
+                key={nt.type}
+                onPointerDown={(e) => onNodePointerDown(e, nt.type, nt.label)}
+                className="flex items-center gap-2 rounded-lg border border-border bg-secondary/50 px-2 py-2 cursor-grab active:cursor-grabbing hover:bg-secondary transition-colors select-none"
+              >
+                <div className={cn("flex h-6 w-6 items-center justify-center shrink-0 rounded-md", nt.color)}>
+                  <nt.icon className="h-3.5 w-3.5 text-white" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs font-medium truncate">{nt.label}</p>
+                  <p className="text-[9px] text-muted-foreground truncate">{nt.description}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+
+      {/* Column 2: Tools */}
+      <div className="w-48 p-3 space-y-2 overflow-y-auto">
+        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1 mb-2">
+          Tools
+        </h3>
+        <p className="text-[9px] text-muted-foreground px-1 mb-2 leading-snug">
+          Drag and drop onto an Agent node.
+        </p>
+
+        <div className="space-y-3">
+          <ToolGroup label="Code">
+            {codeToolItems.map((item) => (
               <DraggableToolItem key={item.toolId} item={item} onDragStart={onToolDragStart} />
-            ))
-          )}
-        </ToolGroup>
+            ))}
+          </ToolGroup>
+
+          <ToolGroup label="MCP Servers">
+            <McpRegistrySearch />
+          </ToolGroup>
+
+          <ToolGroup label="Knowledge Bases" defaultOpen={knowledgeToolItems.length > 0}>
+            {knowledgeToolItems.length === 0 ? (
+              <p className="text-[9px] text-muted-foreground px-1 py-0.5">
+                No knowledge bases.{" "}
+                <a href="/knowledge" className="underline text-primary hover:text-primary/80">
+                  Create one
+                </a>
+              </p>
+            ) : (
+              knowledgeToolItems.map((item) => (
+                <DraggableToolItem key={item.toolId} item={item} onDragStart={onToolDragStart} />
+              ))
+            )}
+          </ToolGroup>
+        </div>
       </div>
     </div>
   );
