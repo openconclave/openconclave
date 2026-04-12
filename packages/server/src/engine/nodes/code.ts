@@ -1,7 +1,9 @@
 import { AppError, ErrorCode } from "@openconclave/shared";
 import type { CodeConfig } from "@openconclave/shared";
+import { existsSync } from "fs";
 import { resolve, dirname } from "path";
 import type { Workspace } from "../workspace";
+import { buildSubprocessEnv } from "../../agent/runtime";
 
 export interface CodeNodeContext {
   conclaveId: number;
@@ -19,12 +21,10 @@ function resolveGitBash(): string {
   // If we landed in mingw64, go up one more
   if (gitRoot.endsWith("mingw64")) gitRoot = dirname(gitRoot);
   const candidate = resolve(gitRoot, "usr", "bin", "bash.exe");
-  try {
-    Bun.file(candidate).size; // throws if not found
-    return candidate;
-  } catch {
-    return "bash"; // fallback
-  }
+  // Bun.file().size returns 0 for missing files — it does NOT throw
+  // (Bun issue #589). Use an explicit existence check instead.
+  if (existsSync(candidate)) return candidate;
+  return "bash"; // fallback
 }
 
 const GIT_BASH = resolveGitBash();
@@ -50,22 +50,28 @@ export async function executeCode(config: CodeConfig, input: unknown, context?: 
     stdin: new Blob([inputStr]),
     stdout: "pipe",
     stderr: "pipe",
-    env: {
-      ...process.env,
+    // Use the shared allowlist instead of wholesale process.env — otherwise
+    // ANTHROPIC_API_KEY / DATABASE_URL / session secrets leak into user code.
+    env: buildSubprocessEnv({
       INPUT: inputStr,
       PYTHONIOENCODING: "utf-8",
       PYTHONUTF8: "1",
       ...(context ? {
-        OC_API_URL: `http://localhost:${process.env.PORT ?? 4000}`,
+        OC_API_URL: process.env.OPENCONCLAVE_URL ?? "http://localhost:4000",
         OC_CONCLAVE_ID: String(context.conclaveId),
         OC_RUN_ID: String(context.runId),
         OC_NODE_ID: context.nodeId,
       } : {}),
-    },
+    }),
   });
 
-  const stdout = await new Response(proc.stdout).text();
-  const stderr = await new Response(proc.stderr).text();
+  // Drain stdout and stderr concurrently. Sequential reads deadlock when
+  // stderr exceeds the OS pipe buffer (~64KB): the subprocess blocks writing
+  // to stderr while we're still waiting on stdout, neither side advances.
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ]);
   const exitCode = await proc.exited;
 
   if (exitCode !== 0) {
