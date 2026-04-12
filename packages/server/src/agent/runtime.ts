@@ -10,6 +10,7 @@ import { z } from "zod";
 import type { ResolvedAgentConfig } from "@openconclave/shared";
 import { VERSION } from "@openconclave/shared";
 import { Workspace } from "../engine/workspace";
+import type { RouteTarget } from "../engine/types";
 import { db } from "../db/client";
 import { documents, chunks } from "../db/schema";
 import { searchMultipleKBs } from "../knowledge/search";
@@ -34,7 +35,7 @@ function resolveCliPath(path: string): string {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     const tmp = join(dir, `cli.js.tmp.${process.pid}`);
     writeFileSync(tmp, content);
-    try { chmodSync(tmp, 0o755); } catch {}
+    try { chmodSync(tmp, 0o755); } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'EPERM') throw e; }
     renameSync(tmp, out);
     return out;
   } catch {
@@ -84,11 +85,6 @@ export interface AgentResult {
   sessionId?: string;
 }
 
-export interface RouteTarget {
-  nodeId: string;
-  label: string;
-  type: string;
-}
 
 export type AgentRunOptions = {
   config: ResolvedAgentConfig;
@@ -102,11 +98,8 @@ export type AgentRunOptions = {
   onOutput?: (chunk: string) => void;
 };
 
-const modelMap: Record<string, string> = {
-  sonnet: "sonnet",
-  opus: "opus",
-  haiku: "haiku",
-};
+const ALLOWED_MODELS = new Set(["sonnet", "opus", "haiku"]);
+const CONCLAVE_MCP_SERVER_ID = "openconclave-conclave";
 
 export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentResult> {
   const { config, input, env, abortController, onOutput } = options;
@@ -244,7 +237,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
     const validIds = routeTargets.map((t) => t.nodeId) as [string, ...string[]];
     const routeDescription = routeTargets
       .map((t) => {
-        const desc = (t as { description?: string }).description;
+        const desc = t.description;
         return `  - "${t.nodeId}" → ${t.label} (${t.type})${desc ? ` — ${desc}` : ""}`;
       })
       .join("\n");
@@ -253,7 +246,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
       tool(
         "openconclave_next",
         [
-          "Choose the next step in the conclave. You MUST call this exactly once when you are done.",
+          "Choose the next step in the conclave.",
           "Available routes:",
           routeDescription,
         ].join("\n"),
@@ -262,6 +255,9 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
           content: z.string().describe("Your output message to pass to the next node"),
         },
         async ({ node_id, content }) => {
+          if (routingState.routeTo) {
+            return { isError: true, content: [{ type: "text", text: `Route already set to ${routingState.routeTo} — cannot route twice.` }] };
+          }
           routingState.routeTo = node_id;
           routingState.routeContent = content;
           const target = routeTargets.find((t) => t.nodeId === node_id);
@@ -322,7 +318,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
         `Search connected knowledge bases (IDs: ${kbList}) using semantic similarity. Returns the most relevant text passages.`,
         {
           query: z.string().describe("The search query"),
-          top_k: z.number().optional().describe("Number of results to return (default: 5)"),
+          top_k: z.number().int().min(1).max(100).optional().describe("Number of results to return (default: 5)"),
           knowledge_base_id: z
             .number()
             .optional()
@@ -462,8 +458,8 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
         "Add new text content to a connected knowledge base. The text will be chunked and embedded automatically.",
         {
           knowledge_base_id: z.number().describe(`Knowledge base ID to add to (available: ${kbList})`),
-          filename: z.string().describe("A descriptive filename for the content (e.g. 'meeting-notes-2024.txt')"),
-          content: z.string().describe("The text content to ingest"),
+          filename: z.string().max(255).describe("A descriptive filename for the content (e.g. 'meeting-notes-2024.txt')"),
+          content: z.string().max(500_000).describe("The text content to ingest"),
         },
         async ({ knowledge_base_id, filename, content }) => {
           try {
@@ -497,8 +493,8 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
   }
 
   if (conclaveTools.length > 0) {
-    mcpServers["openconclave-conclave"] = createSdkMcpServer({
-      name: "openconclave-conclave",
+    mcpServers[CONCLAVE_MCP_SERVER_ID] = createSdkMcpServer({
+      name: CONCLAVE_MCP_SERVER_ID,
       version: VERSION,
       tools: conclaveTools,
     });
@@ -526,7 +522,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
         pathToClaudeCodeExecutable: cliPath,
         cwd: ws.cwd,
         env: buildSubprocessEnv(env ?? {}),
-        model: config.model && modelMap[config.model] ? modelMap[config.model] : undefined,
+        model: ALLOWED_MODELS.has(config.model ?? "") ? config.model : undefined,
         systemPrompt: config.systemPrompt,
         maxTurns: config.maxTurns ?? 25,
         permissionMode: "bypassPermissions",
@@ -641,11 +637,13 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
           const errorMsg = resultMsg.errors?.join("\n") ?? "Agent failed";
           return {
             success: false,
-            output: "",
+            output: routingState.routeContent ?? "",
             error: errorMsg,
             costUsd: resultMsg.total_cost_usd,
             durationMs: Date.now() - startTime,
             thinking: thinkingBlocks.length > 0 ? thinkingBlocks : undefined,
+            routeTo: routingState.routeTo,
+            sessionId: resultMsg.session_id,
           };
         }
       }
