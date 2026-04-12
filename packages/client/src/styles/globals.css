@@ -95,6 +95,7 @@ body {
 .react-flow__node.dragging,
 .react-flow__node.dragging * {
   transition: none !important;
+  cursor: grabbing !important;
 }
 
 .react-flow__edge {
