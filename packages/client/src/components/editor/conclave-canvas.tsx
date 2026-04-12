@@ -465,12 +465,15 @@ export function ConclaveCanvas() {
     const { type, label, config, screenX, screenY } = pendingNodeDrop;
     setPendingNodeDrop(null);
 
-    const position = reactFlowInstance.current.screenToFlowPosition({
+    const center = reactFlowInstance.current.screenToFlowPosition({
       x: screenX,
       y: screenY,
     });
-    position.x = Math.round(position.x / 20) * 20;
-    position.y = Math.round(position.y / 20) * 20;
+    // Center node on cursor: offset by half the default node size (240×80 flow px)
+    const position = {
+      x: Math.round((center.x - 120) / 20) * 20,
+      y: Math.round((center.y - 40) / 20) * 20,
+    };
 
     const currentNodes = useConclaveStore.getState().nodes;
     const existingLabels = new Set(currentNodes.map((n) => n.data.label));
