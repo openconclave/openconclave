@@ -126,9 +126,12 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
     );
     const resolved = ws.getMcpToolConfigs(mcpTools, legacyIds);
     for (const [id, cfg] of Object.entries(resolved)) {
-      // Claude SDK only supports stdio MCP servers for external servers
       if (cfg.transport === "stdio" && cfg.command) {
         mcpServers[id] = { type: "stdio", command: cfg.command, args: cfg.args ?? [], env: cfg.env };
+      } else if (cfg.transport === "sse" && cfg.url) {
+        mcpServers[id] = { type: "sse", url: cfg.url };
+      } else if (cfg.transport === "streamable-http" && cfg.url) {
+        mcpServers[id] = { type: "http", url: cfg.url };
       }
     }
   }

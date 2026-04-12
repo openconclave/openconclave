@@ -24,7 +24,7 @@ import { promptRoutes } from "./routes/prompts";
 import { wsHandler } from "./ws/handler";
 import { setServer, broadcastRunEvent } from "./ws/broadcast";
 import { createMcpServer } from "./mcp/server";
-import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { ConclaveExecutor } from "./engine/executor";
 import { getRunWorkspace } from "./engine/graph-walker";
 import { CronScheduler } from "./engine/scheduler";
@@ -273,25 +273,25 @@ app.post("/api/triggers/telegram", async (c) => {
   return c.json({ triggered });
 });
 
-// ── MCP over SSE ─────────────────────────────────────────────
-const mcpTransports = new Map<string, SSEServerTransport>();
+// ── MCP over Streamable HTTP ────────────────────────────────
+const mcpTransports = new Map<string, WebStandardStreamableHTTPServerTransport>();
 
-app.get("/mcp/sse", async (c) => {
-  const mcpServer = createMcpServer();
-  const transport = new SSEServerTransport("/mcp/messages", c.res);
-  mcpTransports.set(transport.sessionId, transport);
-  c.res.on?.("close", () => mcpTransports.delete(transport.sessionId));
-  await mcpServer.connect(transport);
-  return c.res;
-});
+app.all("/mcp", async (c) => {
+  // Each session gets its own transport + server instance
+  const sessionId = c.req.header("mcp-session-id");
+  let transport = sessionId ? mcpTransports.get(sessionId) : undefined;
 
-app.post("/mcp/messages", async (c) => {
-  const sessionId = new URL(c.req.url).searchParams.get("sessionId");
-  const transport = sessionId ? mcpTransports.get(sessionId) : undefined;
-  if (!transport) return c.json({ error: "Session not found" }, 404);
-  const body = await c.req.json();
-  await transport.handlePostMessage(body);
-  return c.json({ ok: true });
+  if (!transport) {
+    transport = new WebStandardStreamableHTTPServerTransport({
+      sessionIdGenerator: () => crypto.randomUUID(),
+      onsessioninitialized: (id) => { mcpTransports.set(id, transport!); },
+    });
+    const mcpServer = createMcpServer();
+    await mcpServer.connect(transport);
+  }
+
+  const response = await transport.handleRequest(c.req.raw);
+  return response;
 });
 
 // ── Server ───────────────────────────────────────────────────
