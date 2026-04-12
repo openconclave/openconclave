@@ -264,14 +264,61 @@ export function NodePalette() {
       .catch(() => setKnowledgeBases([]));
   }, []);
 
-  const onNodeDragStart = (e: React.DragEvent, type: NodeType, label: string) => {
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const offsetX = e.clientX - rect.left;
-    const offsetY = e.clientY - rect.top;
-    const data = JSON.stringify({ type, label, config: getDefaultConfig(type), offsetX, offsetY });
-    e.dataTransfer.setData("application/openconclave-node", data);
-    e.dataTransfer.effectAllowed = "move";
-  };
+  // Custom pointer-based drag for node palette items. Replaces HTML5 DnD so
+  // we keep full cursor control (grabbing throughout, no browser arrow).
+  const setPendingNodeDrop = useConclaveStore((s) => s.setPendingNodeDrop);
+  const ghostRef = useRef<HTMLDivElement | null>(null);
+  const dragDataRef = useRef<{ type: NodeType; label: string; config: unknown } | null>(null);
+
+  const onNodePointerDown = useCallback((e: React.PointerEvent, type: NodeType, label: string) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+
+    dragDataRef.current = { type, label, config: getDefaultConfig(type) };
+
+    const ghost = document.createElement("div");
+    ghost.textContent = label;
+    ghost.className = "fixed pointer-events-none z-[9999] rounded-lg border border-border bg-card/90 px-3 py-2 text-sm font-medium shadow-lg backdrop-blur-sm";
+    ghost.style.left = `${e.clientX - 40}px`;
+    ghost.style.top = `${e.clientY - 16}px`;
+    document.body.appendChild(ghost);
+    ghostRef.current = ghost;
+
+    document.body.style.cursor = "grabbing";
+    document.body.style.userSelect = "none";
+
+    const onMove = (ev: PointerEvent) => {
+      if (ghostRef.current) {
+        ghostRef.current.style.left = `${ev.clientX - 40}px`;
+        ghostRef.current.style.top = `${ev.clientY - 16}px`;
+      }
+    };
+
+    const onUp = (ev: PointerEvent) => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      if (ghostRef.current) {
+        ghostRef.current.remove();
+        ghostRef.current = null;
+      }
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+
+      const target = document.elementFromPoint(ev.clientX, ev.clientY);
+      const isCanvas = target?.closest(".react-flow");
+      if (isCanvas && dragDataRef.current) {
+        setPendingNodeDrop({
+          ...dragDataRef.current,
+          screenX: ev.clientX,
+          screenY: ev.clientY,
+        });
+      }
+      dragDataRef.current = null;
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }, [setPendingNodeDrop]);
 
   const setDraggingTool = useConclaveStore((s) => s.setDraggingTool);
 
@@ -307,9 +354,8 @@ export function NodePalette() {
           {group.nodes.map((nt) => (
             <div
               key={nt.type}
-              draggable
-              onDragStart={(e) => onNodeDragStart(e, nt.type, nt.label)}
-              className="flex items-center gap-2.5 rounded-lg border border-border bg-secondary/50 px-3 py-2.5 cursor-grab active:cursor-grabbing hover:bg-secondary transition-colors"
+              onPointerDown={(e) => onNodePointerDown(e, nt.type, nt.label)}
+              className="flex items-center gap-2.5 rounded-lg border border-border bg-secondary/50 px-3 py-2.5 cursor-grab active:cursor-grabbing hover:bg-secondary transition-colors select-none"
             >
               <div className={cn("flex h-7 w-7 items-center justify-center shrink-0 rounded-lg", nt.color)}>
                 <nt.icon className="h-4 w-4 text-white" />
