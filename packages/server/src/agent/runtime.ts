@@ -2,6 +2,7 @@ import { query, createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk"
 import type { SDKMessage, McpServerConfig } from "@anthropic-ai/claude-agent-sdk";
 import embeddedCliPath from "@anthropic-ai/claude-agent-sdk/embed";
 import { createHash } from "crypto";
+import { execFileSync } from "child_process";
 import { mkdirSync, readFileSync, existsSync, chmodSync, renameSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -20,9 +21,20 @@ import { broadcastRunEvent } from "../ws/broadcast";
 import { createBuiltinTools } from "./builtin-tools";
 import { ROUTING_TOOL_NAME } from "./constants";
 
+function findSystemClaude(): string | undefined {
+  try {
+    const cmd = process.platform === "win32" ? "where" : "which";
+    const result = execFileSync(cmd, ["claude"], { encoding: "utf8", timeout: 3000 }).trim();
+    const bin = result.split(/\r?\n/)[0];
+    if (bin && existsSync(bin)) return bin;
+  } catch { /* not installed */ }
+}
+
 // SDK's extractFromBunfs only checks for "$bunfs" but Bun on Windows uses "B:/~BUN/".
 // Re-extract here to cover both patterns.
 function resolveCliPath(path: string): string {
+  const system = findSystemClaude();
+  if (system) return system;
   if (!path.includes("$bunfs") && !path.includes("~BUN")) return path;
   let out: string | undefined;
   try {
@@ -49,6 +61,7 @@ function resolveCliPath(path: string): string {
 }
 
 export const cliPath = resolveCliPath(embeddedCliPath);
+console.log(`[claude-cli] ${cliPath.includes("cli.js") ? "embedded" : "system"}: ${cliPath}`);
 
 // Minimal environment for spawned Claude CLI subprocesses. Wholesale
 // `process.env` forwarding with `bypassPermissions` lets a prompt-injected
@@ -109,8 +122,10 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
 
   // Build the prompt
   let prompt: string;
+  const INPUT_MAX_BYTES = 100_000;
   if (input !== undefined && input !== null && input !== "") {
-    prompt = typeof input === "string" ? input : JSON.stringify(input, null, 2);
+    const raw = typeof input === "string" ? input : JSON.stringify(input, null, 2);
+    prompt = raw.length > INPUT_MAX_BYTES ? raw.slice(0, INPUT_MAX_BYTES) + "\n...[truncated]" : raw;
   } else {
     prompt = "Start";
   }
@@ -146,8 +161,9 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
   // path-resolution walks .git upward and escapes git worktrees to the main repo.
   // See issue #30.
   const ocBuiltins = createBuiltinTools(ws);
-  const ocFsTools = [
-    tool(
+  const allowedSet = new Set(config.allowedTools ?? []);
+  const OC_TOOL_MAP: Record<string, () => ReturnType<typeof tool>> = {
+    Read: () => tool(
       "read",
       "Read the contents of a file from disk and return it as text. Use this before editing a file so you know its exact current state, and any time you need to inspect source code, configuration, logs, or review output. Paths are resolved against your working directory unless absolute.",
       {
@@ -157,7 +173,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
         content: [{ type: "text" as const, text: await ocBuiltins.read_file!.execute({ path }) }],
       }),
     ),
-    tool(
+    Write: () => tool(
       "write",
       "Create a new file or completely replace an existing file's contents. The entire file is overwritten — for surgical changes to an existing file, use `edit` instead. Parent directories are created if missing. Returns confirmation on success.",
       {
@@ -168,7 +184,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
         content: [{ type: "text" as const, text: await ocBuiltins.write_file!.execute({ path, content }) }],
       }),
     ),
-    tool(
+    Edit: () => tool(
       "edit",
       "Modify an existing file by replacing an exact substring. Prefer this over `write` for any change to an already-existing file — it keeps diffs minimal and preserves surrounding code. old_string must match the file character-for-character including all whitespace, newlines, and indentation. If old_string appears more than once, either widen it with more surrounding context to make it unique, or set replace_all to true to replace every occurrence.",
       {
@@ -181,7 +197,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
         content: [{ type: "text" as const, text: await ocBuiltins.edit!.execute({ path, old_string, new_string, replace_all }) }],
       }),
     ),
-    tool(
+    Grep: () => tool(
       "grep",
       "Search file contents across the codebase for a JavaScript-flavor regular expression. Returns matches as `path:line:content`. Skips node_modules, .git, dist, build, .worktrees, and files larger than 2MB. Use this to locate symbol definitions, call sites, error messages, or any text pattern. For finding files by name (not content), use `glob` instead.",
       {
@@ -195,7 +211,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
         content: [{ type: "text" as const, text: await ocBuiltins.grep!.execute(args as Record<string, unknown>) }],
       }),
     ),
-    tool(
+    Glob: () => tool(
       "glob",
       "List files whose paths match a glob pattern. Returns sorted paths relative to the search base. Use this to discover files by name or extension — for example, finding every test file (`**/*.test.ts`), every component (`packages/*/src/components/**/*.tsx`), or every config (`**/tsconfig*.json`). For searching file *contents*, use `grep` instead.",
       {
@@ -206,7 +222,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
         content: [{ type: "text" as const, text: await ocBuiltins.glob!.execute(args as Record<string, unknown>) }],
       }),
     ),
-    tool(
+    Bash: () => tool(
       "bash",
       "Run a shell command in your working directory. Returns combined stdout/stderr with the exit code. Use this for git operations (status, diff, log, branch, commit), running tests, build commands, package managers, or any shell action. For reading/writing individual files, prefer the dedicated `read`/`write`/`edit` tools — they give cleaner output and stricter error reporting.",
       {
@@ -216,12 +232,19 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
         content: [{ type: "text" as const, text: await ocBuiltins.bash!.execute({ command }) }],
       }),
     ),
-  ];
-  mcpServers["oc"] = createSdkMcpServer({
-    name: "oc",
-    version: VERSION,
-    tools: ocFsTools,
-  });
+  };
+
+  const ocFsTools = Object.entries(OC_TOOL_MAP)
+    .filter(([name]) => allowedSet.has(name))
+    .map(([, factory]) => factory());
+
+  if (ocFsTools.length > 0) {
+    mcpServers["oc"] = createSdkMcpServer({
+      name: "oc",
+      version: VERSION,
+      tools: ocFsTools,
+    });
+  }
 
   // In-process conclave MCP server for routing, ask_user, and knowledge tools.
   // Runs in the same process as the server — no subprocess spawn needed, so this
@@ -237,7 +260,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const conclaveTools: any[] = [];
 
-  if (routeTargets && routeTargets.length >= 1) {
+  if (routeTargets && routeTargets.length >= 2) {
     const validIds = routeTargets.map((t) => t.nodeId) as [string, ...string[]];
     const routeDescription = routeTargets
       .map((t) => {
@@ -321,7 +344,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
         "knowledge_search",
         `Search connected knowledge bases (IDs: ${kbList}) using semantic similarity. Returns the most relevant text passages.`,
         {
-          query: z.string().describe("The search query"),
+          query: z.string().max(2000).describe("The search query"),
           top_k: z.number().int().min(1).max(100).optional().describe("Number of results to return (default: 5)"),
           knowledge_base_id: z
             .number()
@@ -354,7 +377,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
             const formatted = results
               .map(
                 (r, i) =>
-                  `[${i + 1}] (score: ${r.score.toFixed(3)}) [${r.documentName} chunk ${r.chunkIndex}]\n${r.content}`,
+                  `[${i + 1}] (score: ${r.score.toFixed(3)}) [${r.documentName} chunk ${r.chunkIndex}] (doc_id: ${r.documentId}, kb: ${r.knowledgeBaseId})\n${r.content}`,
               )
               .join("\n\n---\n\n");
 
@@ -515,9 +538,8 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
     // other builtins (WebSearch, WebFetch, LSP, etc.) declared by the
     // agent are kept. If the agent declared nothing, we pass [] so the
     // CLI preset doesn't sneak the bugged Read/Write/Edit back in.
-    const OC_REPLACED_BUILTINS = new Set(["Read", "Write", "Edit", "Grep", "Glob", "Bash"]);
     const passthroughTools = (config.allowedTools ?? []).filter(
-      (t) => !OC_REPLACED_BUILTINS.has(t),
+      (t) => !(t in OC_TOOL_MAP),
     );
 
     const agentQuery = query({
@@ -680,6 +702,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
       output: "",
       error: message,
       durationMs: Date.now() - startTime,
+      routeTo: routingState.routeTo,
     };
   }
 }
