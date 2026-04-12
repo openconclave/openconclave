@@ -6,8 +6,6 @@ import {
   Play,
   Settings,
   Brain,
-  PanelLeftClose,
-  PanelLeft,
 } from "lucide-react";
 
 const navItems = [
@@ -17,6 +15,15 @@ const navItems = [
   { label: "Knowledge", icon: Brain, href: "/knowledge" },
   { label: "Settings", icon: Settings, href: "/settings" },
 ];
+
+function SidebarToggleIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <rect x="3" y="3" width="18" height="18" rx="3" />
+      <line x1="9" y1="3" x2="9" y2="21" />
+    </svg>
+  );
+}
 
 interface SidebarProps {
   open: boolean;
@@ -29,28 +36,38 @@ export function Sidebar({ open, onToggle }: SidebarProps) {
   return (
     <aside
       className={cn(
-        "flex h-full flex-col border-r border-border bg-card transition-all duration-200 ease-in-out overflow-hidden",
+        "flex h-full flex-col border-r border-border bg-card transition-all duration-200 ease-in-out",
         open ? "w-60" : "w-14"
       )}
     >
-      <div className="flex h-14 items-center justify-between border-b border-border px-3 shrink-0">
-        <div className="flex items-center gap-2">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-sm">
+      <div className="flex h-14 items-center border-b border-border px-3 shrink-0">
+        {open ? (
+          <>
+            <div className="flex items-center gap-2 flex-1 min-w-0">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-sm">
+                OC
+              </div>
+              <span className="text-lg font-semibold tracking-tight whitespace-nowrap">
+                OpenConclave
+              </span>
+            </div>
+            <button
+              onClick={onToggle}
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
+              title="Collapse sidebar"
+            >
+              <SidebarToggleIcon className="h-4 w-4" />
+            </button>
+          </>
+        ) : (
+          <button
+            onClick={onToggle}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-sm mx-auto"
+            title="Expand sidebar"
+          >
             OC
-          </div>
-          {open && (
-            <span className="text-lg font-semibold tracking-tight whitespace-nowrap">
-              OpenConclave
-            </span>
-          )}
-        </div>
-        <button
-          onClick={onToggle}
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
-          title={open ? "Collapse sidebar" : "Expand sidebar"}
-        >
-          {open ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeft className="h-4 w-4" />}
-        </button>
+          </button>
+        )}
       </div>
 
       <nav className="flex-1 space-y-1 p-2">
