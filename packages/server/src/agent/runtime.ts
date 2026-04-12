@@ -16,16 +16,18 @@ import { searchMultipleKBs } from "../knowledge/search";
 import { ingestText } from "../knowledge/ingest";
 import { registerPrompt } from "../engine/prompt-registry";
 import { broadcastRunEvent } from "../ws/broadcast";
+import { createBuiltinTools } from "./builtin-tools";
 
 // SDK's extractFromBunfs only checks for "$bunfs" but Bun on Windows uses "B:/~BUN/".
 // Re-extract here to cover both patterns.
 function resolveCliPath(path: string): string {
   if (!path.includes("$bunfs") && !path.includes("~BUN")) return path;
+  let out: string | undefined;
   try {
     const content = readFileSync(path);
     const hash = createHash("sha256").update(content).digest("hex").slice(0, 16);
     const dir = join(tmpdir(), `claude-agent-sdk-${hash}`);
-    const out = join(dir, "cli.js");
+    out = join(dir, "cli.js");
     if (existsSync(out)) return out;
     // mode 0o700 prevents other users on the host from pre-placing a malicious
     // cli.js in this directory under a permissive umask.
@@ -36,6 +38,10 @@ function resolveCliPath(path: string): string {
     renameSync(tmp, out);
     return out;
   } catch {
+    // Honest-race recovery: if another process already extracted the file
+    // (their renameSync won, ours threw EPERM), return the existing file
+    // instead of falling back to the unresolvable bunfs path.
+    if (out && existsSync(out)) return out;
     return path;
   }
 }
@@ -132,6 +138,93 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
       }
     }
   }
+
+  // Workspace filesystem tools, served in-process under the "oc" MCP server.
+  // The model sees them as mcp__oc__read / mcp__oc__write / mcp__oc__edit /
+  // mcp__oc__grep / mcp__oc__glob / mcp__oc__bash.
+  //
+  // These wrap OC's existing createBuiltinTools(workspace), which resolves every
+  // path via workspace.resolve() and therefore stays inside the run's cwd.
+  // They replace the Claude Code CLI's builtin Read/Write/Edit/Grep/Glob, whose
+  // path-resolution walks .git upward and escapes git worktrees to the main repo.
+  // See issue #30.
+  const ocBuiltins = createBuiltinTools(ws);
+  const ocFsTools = [
+    tool(
+      "read",
+      "Read the contents of a file from disk and return it as text. Use this before editing a file so you know its exact current state, and any time you need to inspect source code, configuration, logs, or review output. Paths are resolved against your working directory unless absolute.",
+      {
+        path: z.string().describe("File path — relative to your working directory, or absolute. Example: 'packages/server/src/index.ts'"),
+      },
+      async ({ path }) => ({
+        content: [{ type: "text" as const, text: await ocBuiltins.read_file!.execute({ path }) }],
+      }),
+    ),
+    tool(
+      "write",
+      "Create a new file or completely replace an existing file's contents. The entire file is overwritten — for surgical changes to an existing file, use `edit` instead. Parent directories are created if missing. Returns confirmation on success.",
+      {
+        path: z.string().describe("File path — relative to your working directory, or absolute"),
+        content: z.string().describe("Full file contents to write. Overwrites any existing file at this path."),
+      },
+      async ({ path, content }) => ({
+        content: [{ type: "text" as const, text: await ocBuiltins.write_file!.execute({ path, content }) }],
+      }),
+    ),
+    tool(
+      "edit",
+      "Modify an existing file by replacing an exact substring. Prefer this over `write` for any change to an already-existing file — it keeps diffs minimal and preserves surrounding code. old_string must match the file character-for-character including all whitespace, newlines, and indentation. If old_string appears more than once, either widen it with more surrounding context to make it unique, or set replace_all to true to replace every occurrence.",
+      {
+        path: z.string().describe("File path — relative to your working directory, or absolute"),
+        old_string: z.string().describe("Exact text to find. Whitespace, newlines, and indentation must match the file verbatim."),
+        new_string: z.string().describe("Replacement text. Pass an empty string to delete old_string."),
+        replace_all: z.boolean().optional().describe("Replace every occurrence. Default false — requires one unique match or the call errors."),
+      },
+      async ({ path, old_string, new_string, replace_all }) => ({
+        content: [{ type: "text" as const, text: await ocBuiltins.edit!.execute({ path, old_string, new_string, replace_all }) }],
+      }),
+    ),
+    tool(
+      "grep",
+      "Search file contents across the codebase for a JavaScript-flavor regular expression. Returns matches as `path:line:content`. Skips node_modules, .git, dist, build, .worktrees, and files larger than 2MB. Use this to locate symbol definitions, call sites, error messages, or any text pattern. For finding files by name (not content), use `glob` instead.",
+      {
+        pattern: z.string().describe("JavaScript regex. Example: 'export function \\\\w+' or 'TODO[^\\\\n]*'"),
+        path: z.string().optional().describe("Subdirectory to search in. Default: your working directory."),
+        glob: z.string().optional().describe("File-glob filter to restrict which files are searched. Example: '*.ts' or '**/*.{ts,tsx}'. Default: '**/*'."),
+        ignore_case: z.boolean().optional().describe("Case-insensitive match. Default false."),
+        max_results: z.number().int().optional().describe("Maximum number of match lines to return. Default 100."),
+      },
+      async (args) => ({
+        content: [{ type: "text" as const, text: await ocBuiltins.grep!.execute(args as Record<string, unknown>) }],
+      }),
+    ),
+    tool(
+      "glob",
+      "List files whose paths match a glob pattern. Returns sorted paths relative to the search base. Use this to discover files by name or extension — for example, finding every test file (`**/*.test.ts`), every component (`packages/*/src/components/**/*.tsx`), or every config (`**/tsconfig*.json`). For searching file *contents*, use `grep` instead.",
+      {
+        pattern: z.string().describe("Glob pattern. Examples: '**/*.ts', 'src/**/*.tsx', 'packages/*/package.json'"),
+        path: z.string().optional().describe("Subdirectory to search in. Default: your working directory."),
+      },
+      async (args) => ({
+        content: [{ type: "text" as const, text: await ocBuiltins.glob!.execute(args as Record<string, unknown>) }],
+      }),
+    ),
+    tool(
+      "bash",
+      "Run a shell command in your working directory. Returns combined stdout/stderr with the exit code. Use this for git operations (status, diff, log, branch, commit), running tests, build commands, package managers, or any shell action. For reading/writing individual files, prefer the dedicated `read`/`write`/`edit` tools — they give cleaner output and stricter error reporting.",
+      {
+        command: z.string().describe("Shell command to execute. Example: 'git status', 'bun test packages/server', 'ls -la src/'"),
+      },
+      async ({ command }) => ({
+        content: [{ type: "text" as const, text: await ocBuiltins.bash!.execute({ command }) }],
+      }),
+    ),
+  ];
+  mcpServers["oc"] = createSdkMcpServer({
+    name: "oc",
+    version: VERSION,
+    tools: ocFsTools,
+  });
 
   // In-process conclave MCP server for routing, ask_user, and knowledge tools.
   // Runs in the same process as the server — no subprocess spawn needed, so this
@@ -417,6 +510,16 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
     let costUsd: number | undefined;
     let sessionId: string | undefined;
 
+    // Filter out filesystem builtins — they're replaced by our in-process
+    // mcp__oc__* tools above, which honor workspace.cwd correctly. Any
+    // other builtins (WebSearch, WebFetch, LSP, etc.) declared by the
+    // agent are kept. If the agent declared nothing, we pass [] so the
+    // CLI preset doesn't sneak the bugged Read/Write/Edit back in.
+    const OC_REPLACED_BUILTINS = new Set(["Read", "Write", "Edit", "Grep", "Glob", "Bash"]);
+    const passthroughTools = (config.allowedTools ?? []).filter(
+      (t) => !OC_REPLACED_BUILTINS.has(t),
+    );
+
     const agentQuery = query({
       prompt,
       options: {
@@ -428,9 +531,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
         maxTurns: config.maxTurns ?? 25,
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
-        tools: config.allowedTools?.length
-          ? config.allowedTools
-          : { type: "preset" as const, preset: "claude_code" as const },
+        tools: passthroughTools,
         mcpServers,
         // Isolate agent from user's personal MCP servers (Gmail, Sknet, etc.)
         // Only servers explicitly passed in mcpServers above will be available.
