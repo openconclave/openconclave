@@ -62,10 +62,10 @@ export function Sidebar({ open, onToggle }: SidebarProps) {
         ) : (
           <button
             onClick={onToggle}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-sm mx-auto"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors mx-auto"
             title="Expand sidebar"
           >
-            OC
+            <SidebarToggleIcon className="h-4 w-4" />
           </button>
         )}
       </div>
