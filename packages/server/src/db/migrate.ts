@@ -134,4 +134,68 @@ export function runMigrations(): void {
   db.run(sql`CREATE INDEX IF NOT EXISTS idx_checkpoints_run_id ON checkpoints(run_id)`);
 
   logger.debug("Database migrations complete");
+
+  // Seed example conclaves on fresh install
+  const [{ count }] = db.all<{ count: number }>(sql`SELECT COUNT(*) as count FROM conclaves`);
+  if (count === 0) {
+    seedExampleConclaves();
+  }
+}
+
+function seedExampleConclaves(): void {
+  const now = new Date().toISOString();
+
+  const helloWorldDef = {
+    name: "[Example] Hello World",
+    description: "A minimal conclave: trigger → agent → output. Run it to see how nodes execute in sequence.",
+    toolName: "hello_world",
+    nodes: [
+      {
+        id: "trigger_1",
+        type: "trigger",
+        position: { x: 300, y: 80 },
+        data: {
+          label: "Start",
+          type: "trigger",
+          config: { type: "manual", prompt: "Say hello and introduce yourself in one sentence." },
+        },
+      },
+      {
+        id: "agent_1",
+        type: "agent",
+        position: { x: 300, y: 280 },
+        data: {
+          label: "Greeter",
+          type: "agent",
+          config: {
+            engine: "claude",
+            model: "haiku",
+            systemPrompt: "You are a friendly assistant. Respond to the user's prompt warmly and concisely.",
+          },
+        },
+      },
+      {
+        id: "output_1",
+        type: "output",
+        position: { x: 300, y: 480 },
+        data: {
+          label: "Result",
+          type: "output",
+          config: { type: "log", config: {} },
+        },
+      },
+    ],
+    edges: [
+      { id: "e1", source: "trigger_1", target: "agent_1", sourceHandle: "bottom", targetHandle: "top" },
+      { id: "e2", source: "agent_1", target: "output_1", sourceHandle: "bottom", targetHandle: "top" },
+    ],
+    enabled: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  db.run(sql`INSERT INTO conclaves (name, description, definition, enabled, created_at, updated_at)
+    VALUES (${helloWorldDef.name}, ${helloWorldDef.description}, ${JSON.stringify(helloWorldDef)}, 1, ${now}, ${now})`);
+
+  logger.info("Seeded example conclave: Hello World");
 }
