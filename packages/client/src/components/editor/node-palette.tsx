@@ -267,7 +267,6 @@ export function NodePalette() {
   // Custom pointer-based drag for node palette items. Replaces HTML5 DnD so
   // we keep full cursor control (grabbing throughout, no browser arrow).
   const setPendingNodeDrop = useConclaveStore((s) => s.setPendingNodeDrop);
-  const ghostRef = useRef<HTMLDivElement | null>(null);
   const dragDataRef = useRef<{ type: NodeType; label: string; config: unknown } | null>(null);
 
   const onNodePointerDown = useCallback((e: React.PointerEvent, type: NodeType, label: string) => {
@@ -275,34 +274,11 @@ export function NodePalette() {
     e.preventDefault();
 
     dragDataRef.current = { type, label, config: getDefaultConfig(type) };
-
-    const ghost = document.createElement("div");
-    ghost.textContent = label;
-    ghost.className = "fixed pointer-events-none z-[9999] rounded-lg border border-border bg-card/90 px-3 py-2 text-sm font-medium shadow-lg backdrop-blur-sm";
-    ghost.style.left = `${e.clientX - 40}px`;
-    ghost.style.top = `${e.clientY - 16}px`;
-    document.body.appendChild(ghost);
-    ghostRef.current = ghost;
-
-    document.body.style.cursor = "grabbing";
-    document.body.style.userSelect = "none";
-
-    const onMove = (ev: PointerEvent) => {
-      if (ghostRef.current) {
-        ghostRef.current.style.left = `${ev.clientX - 40}px`;
-        ghostRef.current.style.top = `${ev.clientY - 16}px`;
-      }
-    };
+    document.body.classList.add("oc-dragging-node");
 
     const onUp = (ev: PointerEvent) => {
-      window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
-      if (ghostRef.current) {
-        ghostRef.current.remove();
-        ghostRef.current = null;
-      }
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
+      document.body.classList.remove("oc-dragging-node");
 
       const target = document.elementFromPoint(ev.clientX, ev.clientY);
       const isCanvas = target?.closest(".react-flow");
@@ -316,7 +292,6 @@ export function NodePalette() {
       dragDataRef.current = null;
     };
 
-    window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
   }, [setPendingNodeDrop]);
 
