@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { type NodeProps } from "@xyflow/react";
 import { User, X, Terminal, Server, BookOpen } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -6,6 +6,10 @@ import { BaseNode } from "./base-node";
 import { useNodeData } from "@/hooks/use-node-data";
 import { useConclaveStore } from "@/stores/conclave-store";
 import type { AgentConfig, ToolConfig } from "@openconclave/shared";
+
+// Max rows of tool pills shown inside the node. Beyond this, surplus pills
+// collapse into a single "+K more" button that opens the inspector.
+const MAX_TOOL_ROWS = 3;
 
 const toolTypeIcons: Record<ToolConfig["toolType"], React.ElementType> = {
   builtin: Terminal,
@@ -29,8 +33,47 @@ export function AgentNode(props: NodeProps) {
     : config.model ?? "sonnet";
 
   const updateNodeConfig = useConclaveStore((s) => s.updateNodeConfig);
+  const setSelectedNode = useConclaveStore((s) => s.setSelectedNode);
   const tools = config.tools ?? [];
   const [dragOver, setDragOver] = useState(false);
+
+  // Row-capped pill rendering: show as many pills as fit in MAX_TOOL_ROWS,
+  // then collapse the remainder into "+K more". Measurement-driven so pills
+  // of varying widths (long tool names) are respected.
+  const toolsContainerRef = useRef<HTMLDivElement>(null);
+  const [visibleCount, setVisibleCount] = useState(tools.length);
+
+  // Reset to full count whenever the tool list itself changes
+  useLayoutEffect(() => {
+    setVisibleCount(tools.length);
+  }, [tools]);
+
+  // Shrink visibleCount by 1 per render pass until pill rows fit under cap.
+  // Converges in O(overflow) renders, stops as soon as rows ≤ MAX_TOOL_ROWS.
+  useLayoutEffect(() => {
+    const container = toolsContainerRef.current;
+    if (!container || visibleCount === 0) return;
+    const children = container.children;
+    if (children.length === 0) return;
+    const tops = new Set<number>();
+    for (let i = 0; i < children.length; i++) {
+      tops.add((children[i] as HTMLElement).offsetTop);
+    }
+    if (tops.size > MAX_TOOL_ROWS && visibleCount > 1) {
+      setVisibleCount((v) => v - 1);
+    }
+  }, [visibleCount, tools]);
+
+  const hiddenCount = tools.length - visibleCount;
+  const shownTools = tools.slice(0, visibleCount);
+
+  const openInspectorToTools = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      setSelectedNode(props.id);
+    },
+    [props.id, setSelectedNode]
+  );
 
   const addTool = useCallback(
     (tool: ToolConfig) => {
@@ -87,10 +130,10 @@ export function AgentNode(props: NodeProps) {
         {config.systemPrompt && (
           <p className="truncate text-[10px]">{config.systemPrompt}</p>
         )}
-        {/* Tool chips */}
+        {/* Tool chips — measured to fit MAX_TOOL_ROWS, surplus collapses to +K */}
         {tools.length > 0 && (
-          <div className="flex flex-wrap gap-1 mt-1">
-            {tools.map((tool, i) => {
+          <div ref={toolsContainerRef} className="flex flex-wrap gap-1 mt-1">
+            {shownTools.map((tool, i) => {
               const Icon = toolTypeIcons[tool.toolType];
               return (
                 <span
@@ -114,6 +157,15 @@ export function AgentNode(props: NodeProps) {
                 </span>
               );
             })}
+            {hiddenCount > 0 && (
+              <button
+                onClick={openInspectorToTools}
+                className="inline-flex items-center rounded-full px-2 py-0.5 text-[9px] font-medium text-muted-foreground bg-muted hover:bg-muted/80 transition-colors nodrag"
+                title={`${hiddenCount} more tool${hiddenCount === 1 ? "" : "s"} — click to view all`}
+              >
+                +{hiddenCount} more
+              </button>
+            )}
           </div>
         )}
         {/* Drop zone indicator */}

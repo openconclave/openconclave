@@ -120,18 +120,42 @@ export function BaseNode({
   const toolHighlight = isDraggingTool && isAgent;
   const toolDim = isDraggingTool && !isAgent;
 
-  // Snap node height to nearest multiple of 2×GRID (40px)
-  // so that left/right handles at 50% always land on a grid dot
+  // Snap node height to nearest multiple of 2×GRID (40px) so that left/right
+  // handles at 50% always land on a grid dot. Observe the inner wrapper
+  // (natural height) instead of the outer div (forced height) — otherwise
+  // content growth inside doesn't trigger the observer.
   const nodeRef = useRef<HTMLDivElement>(null);
+  const innerRef = useRef<HTMLDivElement>(null);
   const SNAP = GRID * 2;
   useLayoutEffect(() => {
-    const el = nodeRef.current;
-    if (!el) return;
-    el.style.height = "";
-    const h = el.offsetHeight;
-    el.style.height = `${Math.ceil(h / SNAP) * SNAP}px`;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data.label, data.type]);
+    const outer = nodeRef.current;
+    const inner = innerRef.current;
+    if (!outer || !inner) return;
+
+    let raf = 0;
+    let current = 0;
+    const snap = () => {
+      const natural = inner.offsetHeight;
+      const snapped = Math.ceil(natural / SNAP) * SNAP;
+      if (snapped !== current) {
+        current = snapped;
+        outer.style.height = `${snapped}px`;
+      }
+    };
+
+    snap();
+
+    const ro = new ResizeObserver(() => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(snap);
+    });
+    ro.observe(inner);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+    };
+  }, []);
 
   return (
     <div
@@ -155,6 +179,7 @@ export function BaseNode({
 
       <Handle type="source" id="right" position={Position.Right} style={{ top: "50%", transform: "translate(50%, -50%)" }} className={cn(handleBase, handleColors[2])} />
 
+      <div ref={innerRef}>
       <div className="flex items-center gap-2.5 px-3 py-2.5">
         <div
           className={cn(
@@ -237,12 +262,13 @@ export function BaseNode({
       </div>
 
       {/* Divider + Content */}
-      <div className="border-t border-border/40 flex-1">
+      <div className="border-t border-border/40">
         {children && (
           <div className="px-3 py-2 text-xs text-muted-foreground">
             {children}
           </div>
         )}
+      </div>
       </div>
 
       {/* Bottom handle */}
