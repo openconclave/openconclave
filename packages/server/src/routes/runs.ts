@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, inArray } from "drizzle-orm";
 
 import { db } from "../db/client";
 import { runs, agentTasks, runEvents, checkpoints } from "../db/schema";
@@ -9,7 +9,14 @@ import { AppError } from "@openconclave/shared";
 export const runRoutes = new Hono()
   .get("/", async (c) => {
     const allRuns = await db.select().from(runs).orderBy(desc(runs.createdAt)).limit(50);
-    const allTasks = await db.select().from(agentTasks);
+    const runIds = allRuns.map((r) => r.id);
+    // Filter tasks to only the 50 runs we're rendering. Previously this
+    // selected every row in agent_tasks unbounded, which got linearly slower
+    // as the DB grew and competed with active INSERT/UPDATE writes during
+    // agent runs.
+    const allTasks = runIds.length > 0
+      ? await db.select().from(agentTasks).where(inArray(agentTasks.runId, runIds))
+      : [];
 
     const costByRun = new Map<number, number>();
     const durationByRun = new Map<number, number>();
