@@ -265,10 +265,7 @@ export function NodePalette() {
   }, []);
 
   const onNodeDragStart = (e: React.DragEvent, type: NodeType, label: string) => {
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const offsetX = e.clientX - rect.left;
-    const offsetY = e.clientY - rect.top;
-    const data = JSON.stringify({ type, label, config: getDefaultConfig(type), offsetX, offsetY });
+    const data = JSON.stringify({ type, label, config: getDefaultConfig(type) });
     e.dataTransfer.setData("application/openconclave-node", data);
     e.dataTransfer.effectAllowed = "move";
   };

@@ -410,19 +410,22 @@ export function ConclaveCanvas() {
       const raw = e.dataTransfer.getData("application/openconclave-node");
       if (!raw) return;
 
-      let parsed: { type: NodeType; label: string; config: unknown; offsetX?: number; offsetY?: number };
+      let parsed: { type: NodeType; label: string; config: unknown };
       try {
         parsed = JSON.parse(raw) as typeof parsed;
       } catch {
         return;
       }
-      const { type, label, config, offsetX = 0, offsetY = 0 } = parsed;
+      const { type, label, config } = parsed;
 
       if (!reactFlowInstance.current) return;
 
+      // Drop top-left exactly at the cursor in flow coords. Any screen-pixel
+      // offset (from palette-icon grab position) would be correct at zoom 1
+      // but drift at other zooms, since screen→flow scales by the zoom factor.
       const position = reactFlowInstance.current.screenToFlowPosition({
-        x: e.clientX - offsetX,
-        y: e.clientY - offsetY,
+        x: e.clientX,
+        y: e.clientY,
       });
 
       // Snap to grid
