@@ -284,8 +284,8 @@ export function ConclaveCanvas() {
 
     // React Flow's onReconnect doesn't fire with custom edges —
     // manually check if cursor is over a handle and reconnect
-    const clientX = "clientX" in event ? event.clientX : event.changedTouches[0].clientX;
-    const clientY = "clientY" in event ? event.clientY : event.changedTouches[0].clientY;
+    const clientX = "clientX" in event ? event.clientX : event.changedTouches[0]!.clientX;
+    const clientY = "clientY" in event ? event.clientY : event.changedTouches[0]!.clientY;
     const els = document.elementsFromPoint(clientX, clientY);
     const handleEl = els.find((e) => e.classList.contains("react-flow__handle")) as HTMLElement | null;
 
@@ -337,12 +337,10 @@ export function ConclaveCanvas() {
     }, 0);
   }, [pushHistory]);
   const setSelectedNode = useConclaveStore((s) => s.setSelectedNode);
-  const zCounterRef = useRef(1);
-
   const onNodeDragStart = useCallback(() => {}, []);
 
   const [spaceHeld, setSpaceHeld] = useState(false);
-  const [shiftHeld, setShiftHeld] = useState(false);
+  const [, setShiftHeld] = useState(false);
   const undo = useConclaveStore((s) => s.undo);
   const redo = useConclaveStore((s) => s.redo);
 

@@ -84,7 +84,7 @@ interface EditorModalProps {
   className?: string;
   onClose: () => void;
   placeholder?: string;
-  spellCheck?: boolean;
+  spellCheck?: boolean | "true" | "false";
 }
 
 function EditorModal({ value, onChange, label, className, onClose, ...rest }: EditorModalProps) {

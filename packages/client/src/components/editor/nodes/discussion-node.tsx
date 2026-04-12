@@ -80,7 +80,6 @@ export function DiscussionNode(props: NodeProps) {
   const data = useNodeData(props);
   const config = data.config as DiscussionConfig;
 
-  const setSelectedNode = useConclaveStore((s) => s.setSelectedNode);
   const updateNodeData = useConclaveStore((s) => s.updateNodeData);
   const activeNodeIds = useConclaveStore((s) => s.activeNodeIds);
   const isDraggingTool = useConclaveStore((s) => s.isDraggingTool);

@@ -330,7 +330,7 @@ export const useConclaveStore = create<ConclaveState>((set, get) => {
   undo: () => {
     const { _past, nodes, edges } = get();
     if (_past.length === 0) return;
-    const prev = _past[_past.length - 1];
+    const prev = _past[_past.length - 1]!;
     set({
       nodes: prev.nodes,
       edges: prev.edges,
@@ -343,7 +343,7 @@ export const useConclaveStore = create<ConclaveState>((set, get) => {
   redo: () => {
     const { _future, nodes, edges } = get();
     if (_future.length === 0) return;
-    const next = _future[_future.length - 1];
+    const next = _future[_future.length - 1]!;
     set({
       nodes: next.nodes,
       edges: next.edges,

@@ -75,7 +75,6 @@ export function BaseNode({
   showSourceHandle?: boolean;
   sourceHandles?: { id: string; label: string; position: number }[];
 }) {
-  const setSelectedNode = useConclaveStore((s) => s.setSelectedNode);
   const updateNodeData = useConclaveStore((s) => s.updateNodeData);
   const activeNodeIds = useConclaveStore((s) => s.activeNodeIds);
   const skippedNodeIds = useConclaveStore((s) => s.skippedNodeIds);

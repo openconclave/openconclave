@@ -14,7 +14,7 @@ export function Header({
       <div className="flex items-center gap-0 min-w-0">
         {breadcrumb && breadcrumb.length > 0 && (
           <nav className="flex items-center gap-1.5 mr-3 shrink-0">
-            {breadcrumb.map((item, i) => (
+            {breadcrumb.map((item) => (
               <span key={item.href} className="flex items-center gap-1.5">
                 <a
                   href={item.href}

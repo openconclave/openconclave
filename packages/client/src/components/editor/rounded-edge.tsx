@@ -30,10 +30,10 @@ function dirVec(p: Position): Pt {
  */
 function roundedPath(pts: Pt[]): string {
   if (pts.length < 2) return "";
-  let d = `M ${pts[0][0]} ${pts[0][1]}`;
+  let d = `M ${pts[0]![0]} ${pts[0]![1]}`;
 
   for (let i = 1; i < pts.length - 1; i++) {
-    const prev = pts[i - 1], curr = pts[i], next = pts[i + 1];
+    const prev = pts[i - 1]!, curr = pts[i]!, next = pts[i + 1]!;
     const dx1 = prev[0] - curr[0], dy1 = prev[1] - curr[1];
     const dx2 = next[0] - curr[0], dy2 = next[1] - curr[1];
     const len1 = Math.abs(dx1) + Math.abs(dy1);
@@ -55,7 +55,8 @@ function roundedPath(pts: Pt[]): string {
     d += ` L ${asx} ${asy} A ${cr} ${cr} 0 0 ${sweep} ${aex} ${aey}`;
   }
 
-  d += ` L ${pts[pts.length - 1][0]} ${pts[pts.length - 1][1]}`;
+  const last = pts[pts.length - 1]!;
+  d += ` L ${last[0]} ${last[1]}`;
   return d;
 }
 
