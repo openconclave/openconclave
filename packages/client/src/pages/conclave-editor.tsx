@@ -6,7 +6,7 @@ import { NodeInspector } from "@/components/editor/node-inspector";
 import { useConclaveStore, edgeStyle } from "@/stores/conclave-store";
 import { api } from "@/lib/api";
 import { wsClient } from "@/lib/ws";
-import { Save, Play, Square, MessageSquare, PanelLeftClose, PanelLeft } from "lucide-react";
+import { Save, Play, Square, MessageSquare } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
 function toSnakeCase(s: string): string {
@@ -22,7 +22,6 @@ export function ConclaveEditorPage() {
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
-  const [paletteOpen, setPaletteOpen] = useState(true);
   const setActiveNodes = useConclaveStore((s) => s.setActiveNodes);
   const setSkippedNodes = useConclaveStore((s) => s.setSkippedNodes);
 
@@ -350,16 +349,7 @@ export function ConclaveEditorPage() {
         }
       />
       <div className="flex flex-1 overflow-hidden">
-        <div className={`transition-all duration-200 ease-in-out overflow-hidden ${paletteOpen ? "w-52" : "w-0"}`}>
-          <NodePalette />
-        </div>
-        <button
-          onClick={() => setPaletteOpen((v) => !v)}
-          className="flex items-center justify-center w-5 shrink-0 border-r border-border bg-card hover:bg-secondary transition-colors"
-          title={paletteOpen ? "Hide palette" : "Show palette"}
-        >
-          {paletteOpen ? <PanelLeftClose className="h-3.5 w-3.5 text-muted-foreground" /> : <PanelLeft className="h-3.5 w-3.5 text-muted-foreground" />}
-        </button>
+        <NodePalette />
         <ConclaveCanvas />
         <NodeInspector />
       </div>
