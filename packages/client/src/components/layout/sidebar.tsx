@@ -33,15 +33,24 @@ export function Sidebar({ open, onToggle }: SidebarProps) {
         open ? "w-60" : "w-14"
       )}
     >
-      <div className="flex h-14 items-center gap-2 border-b border-border px-3 shrink-0">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-sm">
-          OC
+      <div className="flex h-14 items-center justify-between border-b border-border px-3 shrink-0">
+        <div className="flex items-center gap-2">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-sm">
+            OC
+          </div>
+          {open && (
+            <span className="text-lg font-semibold tracking-tight whitespace-nowrap">
+              OpenConclave
+            </span>
+          )}
         </div>
-        {open && (
-          <span className="text-lg font-semibold tracking-tight whitespace-nowrap">
-            OpenConclave
-          </span>
-        )}
+        <button
+          onClick={onToggle}
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
+          title={open ? "Collapse sidebar" : "Expand sidebar"}
+        >
+          {open ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeft className="h-4 w-4" />}
+        </button>
       </div>
 
       <nav className="flex-1 space-y-1 p-2">
@@ -81,13 +90,6 @@ export function Sidebar({ open, onToggle }: SidebarProps) {
             </div>
           </>
         )}
-        <button
-          onClick={onToggle}
-          className="flex w-full items-center justify-center rounded-md px-2.5 py-2 text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
-          title={open ? "Collapse sidebar" : "Expand sidebar"}
-        >
-          {open ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeft className="h-4 w-4" />}
-        </button>
       </div>
     </aside>
   );
