@@ -16,21 +16,61 @@ const navItems = [
   { label: "Settings", icon: Settings, href: "/settings" },
 ];
 
-export function Sidebar() {
+function SidebarToggleIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <rect x="2" y="4" width="20" height="16" rx="3" />
+      <line x1="9" y1="4" x2="9" y2="20" />
+    </svg>
+  );
+}
+
+interface SidebarProps {
+  open: boolean;
+  onToggle: () => void;
+}
+
+export function Sidebar({ open, onToggle }: SidebarProps) {
   const currentPath = window.location.pathname;
 
   return (
-    <aside className="flex h-full w-60 flex-col border-r border-border bg-card">
-      <div className="flex h-14 items-center gap-2 border-b border-border px-4">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-sm">
-          OC
-        </div>
-        <span className="text-lg font-semibold tracking-tight">
-          OpenConclave
-        </span>
+    <aside
+      className={cn(
+        "flex h-full flex-col border-r border-border bg-card transition-all duration-200 ease-in-out",
+        open ? "w-60" : "w-14"
+      )}
+    >
+      <div className="flex h-14 items-center border-b border-border px-3 shrink-0">
+        {open ? (
+          <>
+            <div className="flex items-center gap-2 flex-1 min-w-0">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-sm">
+                OC
+              </div>
+              <span className="text-lg font-semibold tracking-tight whitespace-nowrap">
+                OpenConclave
+              </span>
+            </div>
+            <button
+              onClick={onToggle}
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
+              title="Collapse sidebar"
+            >
+              <SidebarToggleIcon className="h-4 w-4" />
+            </button>
+          </>
+        ) : (
+          <button
+            onClick={onToggle}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors mx-auto"
+            title="Expand sidebar"
+          >
+            <SidebarToggleIcon className="h-4 w-4" />
+          </button>
+        )}
       </div>
 
-      <nav className="flex-1 space-y-1 p-3">
+      <nav className="flex-1 space-y-1 p-2">
         {navItems.map((item) => {
           const isActive =
             currentPath === item.href ||
@@ -39,28 +79,34 @@ export function Sidebar() {
             <a
               key={item.href}
               href={item.href}
+              title={open ? undefined : item.label}
               className={cn(
-                "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                "flex items-center gap-3 rounded-md px-2.5 py-2 text-sm font-medium transition-colors",
                 isActive
                   ? "bg-accent text-accent-foreground"
-                  : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                  : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+                !open && "justify-center"
               )}
             >
-              <item.icon className="h-4 w-4" />
-              {item.label}
+              <item.icon className="h-4 w-4 shrink-0" />
+              {open && item.label}
             </a>
           );
         })}
       </nav>
 
-      <div className="border-t border-border p-3">
-        <div className="flex items-center gap-2 rounded-md px-3 py-2 text-xs text-muted-foreground">
-          <div className="h-2 w-2 rounded-full bg-success" />
-          Server connected
-        </div>
-        <div className="px-3 py-1 text-[10px] text-muted-foreground/50">
-          Version {VERSION}
-        </div>
+      <div className="border-t border-border p-2 space-y-1">
+        {open && (
+          <>
+            <div className="flex items-center gap-2 rounded-md px-2.5 py-2 text-xs text-muted-foreground">
+              <div className="h-2 w-2 rounded-full bg-success shrink-0" />
+              Server connected
+            </div>
+            <div className="px-2.5 py-1 text-[10px] text-muted-foreground/50">
+              Version {VERSION}
+            </div>
+          </>
+        )}
       </div>
     </aside>
   );
