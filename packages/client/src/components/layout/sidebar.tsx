@@ -6,11 +6,12 @@ import {
   Play,
   Settings,
   Brain,
+  Plus,
 } from "lucide-react";
 
 const navItems = [
   { label: "Dashboard", icon: LayoutDashboard, href: "/" },
-  { label: "Conclaves", icon: GitBranch, href: "/conclaves" },
+  { label: "Conclaves", icon: GitBranch, href: "/conclaves", quickAction: { href: "/conclaves/new", title: "New conclave" } },
   { label: "Runs", icon: Play, href: "/runs" },
   { label: "Knowledge", icon: Brain, href: "/knowledge" },
   { label: "Settings", icon: Settings, href: "/settings" },
@@ -76,21 +77,31 @@ export function Sidebar({ open, onToggle }: SidebarProps) {
             currentPath === item.href ||
             (item.href !== "/" && currentPath.startsWith(item.href));
           return (
-            <a
-              key={item.href}
-              href={item.href}
-              title={open ? undefined : item.label}
-              className={cn(
-                "flex items-center gap-3 rounded-md px-2.5 py-2 text-sm font-medium transition-colors",
-                isActive
-                  ? "bg-accent text-accent-foreground"
-                  : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
-                !open && "justify-center"
+            <div key={item.href} className="group relative">
+              <a
+                href={item.href}
+                title={open ? undefined : item.label}
+                className={cn(
+                  "flex items-center gap-3 rounded-md px-2.5 py-2 text-sm font-medium transition-colors",
+                  isActive
+                    ? "bg-accent text-accent-foreground"
+                    : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+                  !open && "justify-center"
+                )}
+              >
+                <item.icon className="h-4 w-4 shrink-0" />
+                {open && item.label}
+              </a>
+              {open && item.quickAction && (
+                <a
+                  href={item.quickAction.href}
+                  title={item.quickAction.title}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 flex h-5 w-5 items-center justify-center rounded text-muted-foreground/0 group-hover:text-muted-foreground hover:!text-foreground hover:bg-accent/50 transition-all"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                </a>
               )}
-            >
-              <item.icon className="h-4 w-4 shrink-0" />
-              {open && item.label}
-            </a>
+            </div>
           );
         })}
       </nav>
