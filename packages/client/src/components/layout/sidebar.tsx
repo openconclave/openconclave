@@ -19,8 +19,8 @@ const navItems = [
 function SidebarToggleIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
-      <rect x="3" y="3" width="18" height="18" rx="3" />
-      <line x1="9" y1="3" x2="9" y2="21" />
+      <rect x="2" y="4" width="20" height="16" rx="3" />
+      <line x1="9" y1="4" x2="9" y2="20" />
     </svg>
   );
 }
