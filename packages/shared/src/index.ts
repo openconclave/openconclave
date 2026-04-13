@@ -46,6 +46,10 @@ export type {
   DashboardResponse,
   McpRegistryServer,
   McpRegistrySearchResponse,
+  ConclaveExportRole,
+  ConclaveExportKB,
+  ConclaveExportPayload,
+  ConclaveImportRequest,
 } from "./types/api";
 
 // Schemas

@@ -4,10 +4,10 @@ import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Position } from "@xyflow/react";
 import { buildMiniMapPath } from "@/components/editor/rounded-edge";
-import type { ConclaveDefinition } from "@openconclave/shared";
+import type { ConclaveDefinition, ConclaveExportPayload } from "@openconclave/shared";
 
 type ConclaveRow = { id: string; name: string; description?: string; enabled: boolean; definition: ConclaveDefinition };
-import { GitBranch, Play, Clock, Trash2, Square, Loader2, Power, MessageSquare, ChevronDown, LayoutGrid, List } from "lucide-react";
+import { GitBranch, Play, Clock, Trash2, Square, Loader2, Power, MessageSquare, ChevronDown, LayoutGrid, List, Download, Upload } from "lucide-react";
 
 const previewColors: Record<string, string> = {
   trigger: "oklch(0.65 0.18 170)",
@@ -156,6 +156,177 @@ function InlineName({ name, onRename }: { name: string; onRename: (name: string)
   );
 }
 
+async function exportConclave(e: React.MouseEvent, id: string) {
+  e.preventDefault();
+  e.stopPropagation();
+  try {
+    const res = await fetch(`/api/conclaves/${id}/export`);
+    if (!res.ok) throw new Error("Export failed");
+    const blob = await res.blob();
+    const disposition = res.headers.get("Content-Disposition") ?? "";
+    const match = disposition.match(/filename="(.+)"/);
+    const filename = match?.[1] ?? "conclave.json";
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast("Exported", "success");
+  } catch (err) {
+    toast(`Export failed: ${(err as Error).message}`, "error");
+  }
+}
+
+// ── Import Dialog ───────────────────────────────────────────
+
+interface ProviderInfo {
+  id: string;
+  name: string;
+}
+
+function ImportDialog({
+  payload,
+  onClose,
+  onImported,
+}: {
+  payload: ConclaveExportPayload;
+  onClose: () => void;
+  onImported: () => void;
+}) {
+  const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const [mappings, setMappings] = useState<Record<string, { engine?: string; model?: string; ollamaModel?: string; providerId?: string; openaiModel?: string }>>({});
+  const [importing, setImporting] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/providers").then((r) => r.json()).then((d: { providers: ProviderInfo[] }) => {
+      setProviders(d.providers ?? []);
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const initial: typeof mappings = {};
+    for (const role of payload.roles) {
+      initial[role.id] = { ...role.original };
+    }
+    setMappings(initial);
+  }, [payload.roles]);
+
+  const updateMapping = (roleId: string, engine: string, extra?: Record<string, string>) => {
+    setMappings((prev) => ({
+      ...prev,
+      [roleId]: { engine, ...extra },
+    }));
+  };
+
+  const handleImport = async () => {
+    setImporting(true);
+    try {
+      await api.post("/conclaves/import", { payload, roleMappings: mappings });
+      toast(`Imported "${payload.conclave.name}"`, "success");
+      onImported();
+      onClose();
+    } catch (err) {
+      toast(`Import failed: ${(err as Error).message}`, "error");
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-background/80 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative rounded-xl border border-border bg-card p-6 shadow-2xl w-[520px] max-h-[80vh] overflow-y-auto animate-in zoom-in-95 fade-in duration-150">
+        <h3 className="text-lg font-semibold">Import Conclave</h3>
+        <p className="mt-1 text-sm text-muted-foreground">
+          "{payload.conclave.name}" &mdash; {payload.conclave.nodes.length} nodes, exported from OC v{payload.ocVersion}
+        </p>
+
+        {payload.roles.length > 0 && (
+          <div className="mt-5">
+            <h4 className="text-sm font-medium mb-3">Map provider roles</h4>
+            <div className="space-y-3">
+              {payload.roles.map((role) => (
+                <div key={role.id} className="rounded-lg border border-border p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-medium">{role.label}</span>
+                    <span className="text-xs text-muted-foreground">{role.nodeIds.length} node{role.nodeIds.length > 1 ? "s" : ""}</span>
+                  </div>
+                  <select
+                    value={mappings[role.id]?.engine ?? "claude"}
+                    onChange={(e) => updateMapping(role.id, e.target.value)}
+                    className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm"
+                  >
+                    <option value="claude">Claude</option>
+                    <option value="ollama">Ollama</option>
+                    <option value="openai">OpenAI-compatible</option>
+                    <option value="debug">Debug</option>
+                  </select>
+
+                  {mappings[role.id]?.engine === "claude" && (
+                    <select
+                      value={mappings[role.id]?.model ?? "sonnet"}
+                      onChange={(e) => updateMapping(role.id, "claude", { model: e.target.value })}
+                      className="mt-2 w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm"
+                    >
+                      <option value="sonnet">Sonnet</option>
+                      <option value="opus">Opus</option>
+                      <option value="haiku">Haiku</option>
+                    </select>
+                  )}
+
+                  {mappings[role.id]?.engine === "openai" && providers.length > 0 && (
+                    <select
+                      value={mappings[role.id]?.providerId ?? ""}
+                      onChange={(e) => updateMapping(role.id, "openai", { providerId: e.target.value })}
+                      className="mt-2 w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm"
+                    >
+                      <option value="">Select provider...</option>
+                      {providers.map((p) => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {payload.knowledgeBases.length > 0 && (
+          <div className="mt-5">
+            <h4 className="text-sm font-medium mb-2">Knowledge bases (created empty)</h4>
+            <div className="space-y-1">
+              {payload.knowledgeBases.map((kb) => (
+                <div key={kb.originalId} className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <span className="w-2 h-2 rounded-full bg-info" />
+                  {kb.name}{kb.description && ` — ${kb.description}`}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="mt-6 flex justify-end gap-3">
+          <button
+            onClick={onClose}
+            className="rounded-md px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-secondary transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleImport}
+            disabled={importing}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+          >
+            {importing ? "Importing..." : "Import"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 type SortBy = "name" | "created" | "modified";
 type SortOrder = "asc" | "desc";
 type ViewMode = "grid" | "list";
@@ -168,6 +339,8 @@ export function ConclavesPage() {
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [sortOpen, setSortOpen] = useState(false);
+  const [importPayload, setImportPayload] = useState<ConclaveExportPayload | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const load = () => {
     api
@@ -263,6 +436,26 @@ export function ConclavesPage() {
       .catch((err: Error) => toast(`Failed: ${err.message}`, "error"));
   };
 
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const payload = JSON.parse(reader.result as string) as ConclaveExportPayload;
+        if (payload.formatVersion !== 1 || !payload.conclave) {
+          toast("Invalid conclave file format", "error");
+          return;
+        }
+        setImportPayload(payload);
+      } catch {
+        toast("Failed to parse JSON file", "error");
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  };
+
   const sortLabels: Record<SortBy, string> = { name: "Alphabetical", created: "Date created", modified: "Last modified" };
 
   const sortedConclaves = [...conclaves].sort((a, b) => {
@@ -354,6 +547,22 @@ export function ConclavesPage() {
                 <List className="h-4 w-4" />
               </button>
             </div>
+
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+              title="Import conclave from file"
+            >
+              <Upload className="h-3.5 w-3.5" />
+              Import
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".json"
+              className="hidden"
+              onChange={handleFileSelect}
+            />
 
             <NewButton
               label="New Conclave"
@@ -459,6 +668,13 @@ export function ConclavesPage() {
                     )}
                     <div className="flex-1" />
                     <button
+                      onClick={(e) => exportConclave(e, wf.id)}
+                      className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground/50 hover:bg-primary/15 hover:text-primary transition-colors"
+                      title="Export conclave"
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                    </button>
+                    <button
                       onClick={(e) => toggleEnabled(e, wf)}
                       className={cn(
                         "flex h-7 w-7 items-center justify-center rounded-md transition-colors",
@@ -484,6 +700,14 @@ export function ConclavesPage() {
           </div>
         )}
       </div>
+
+      {importPayload && (
+        <ImportDialog
+          payload={importPayload}
+          onClose={() => setImportPayload(null)}
+          onImported={load}
+        />
+      )}
     </>
   );
 }

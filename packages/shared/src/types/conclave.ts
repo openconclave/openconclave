@@ -200,6 +200,7 @@ export interface ConclaveDefinition {
   description?: string;
   toolName?: string;
   inputSchema?: Record<string, unknown>;
+  version?: string;
   nodes: ConclaveNode[];
   edges: ConclaveEdge[];
   enabled: boolean;

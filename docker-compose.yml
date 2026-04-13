@@ -1,0 +1,29 @@
+services:
+  openconclave:
+    build: .
+    container_name: openconclave
+    ports:
+      - "4080:4000"
+    volumes:
+      - oc-data:/data
+    environment:
+      - PORT=4000
+      # Uncomment and set your API keys:
+      # - ANTHROPIC_API_KEY=sk-ant-...
+      # - OPENAI_API_KEY=sk-...
+      # Point to Ollama sidecar (uncomment ollama service below):
+      # - OLLAMA_URL=http://ollama:11434
+    restart: unless-stopped
+
+  # Uncomment to run Ollama alongside OC:
+  # ollama:
+  #   image: ollama/ollama
+  #   container_name: ollama
+  #   ports:
+  #     - "11434:11434"
+  #   volumes:
+  #     - ollama-data:/root/.ollama
+
+volumes:
+  oc-data:
+  # ollama-data:

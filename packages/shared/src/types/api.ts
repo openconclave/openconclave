@@ -40,6 +40,54 @@ export type DashboardResponse = {
   agentTasks: AgentTask[];
 };
 
+// ── Import / Export ─────────────────────────────────────────
+
+export type ConclaveExportRole = {
+  id: string;
+  label: string;
+  original: {
+    engine?: string;
+    model?: string;
+    ollamaModel?: string;
+    providerId?: string;
+    openaiModel?: string;
+  };
+  nodeIds: string[];
+};
+
+export type ConclaveExportKB = {
+  originalId: string;
+  name: string;
+  description?: string;
+};
+
+export type ConclaveExportPayload = {
+  formatVersion: 1;
+  ocVersion: string;
+  exportedAt: string;
+  conclave: {
+    name: string;
+    description?: string;
+    toolName?: string;
+    version?: string;
+    nodes: ConclaveDefinition["nodes"];
+    edges: ConclaveDefinition["edges"];
+  };
+  roles: ConclaveExportRole[];
+  knowledgeBases: ConclaveExportKB[];
+};
+
+export type ConclaveImportRequest = {
+  payload: ConclaveExportPayload;
+  roleMappings: Record<string, {
+    engine?: string;
+    model?: string;
+    ollamaModel?: string;
+    providerId?: string;
+    openaiModel?: string;
+  }>;
+};
+
 // ── MCP Registry ────────────────────────────────────────────
 
 export type McpRegistryServer = {

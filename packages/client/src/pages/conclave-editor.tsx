@@ -6,7 +6,7 @@ import { NodeInspector } from "@/components/editor/node-inspector";
 import { useConclaveStore, edgeStyle } from "@/stores/conclave-store";
 import { api } from "@/lib/api";
 import { wsClient } from "@/lib/ws";
-import { Save, Play, Square, MessageSquare } from "lucide-react";
+import { Save, Play, Square, MessageSquare, Download } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
 function toSnakeCase(s: string): string {
@@ -336,6 +336,34 @@ export function ConclaveEditorPage() {
                   })()}
                 </button>
               )
+            )}
+            {!isNew && (
+              <button
+                onClick={async () => {
+                  try {
+                    const res = await fetch(`/api/conclaves/${existingId}/export`);
+                    if (!res.ok) throw new Error("Export failed");
+                    const blob = await res.blob();
+                    const disposition = res.headers.get("Content-Disposition") ?? "";
+                    const match = disposition.match(/filename="(.+)"/);
+                    const filename = match?.[1] ?? "conclave.json";
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = filename;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                    toast("Exported", "success");
+                  } catch (err) {
+                    toast(`Export failed: ${(err as Error).message}`, "error");
+                  }
+                }}
+                className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+                title="Export conclave"
+              >
+                <Download className="h-4 w-4" />
+                Export
+              </button>
             )}
             <button
               onClick={handleSave}

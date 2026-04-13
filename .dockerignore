@@ -1,0 +1,12 @@
+node_modules
+dist
+.openconclave
+.git
+.reviews
+.worktrees
+.notes
+.claude
+*.exe
+*.db
+*.db-wal
+*.db-shm
