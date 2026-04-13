@@ -86,16 +86,16 @@ export async function ingestText(
     })
     .returning({ id: documents.id });
 
-  const documentId = docResult[0].id;
+  const documentId = docResult[0]!.id;
 
   // Insert chunks with embeddings
   for (let i = 0; i < textChunks.length; i++) {
     await db.insert(chunks).values({
       documentId,
       knowledgeBaseId,
-      content: textChunks[i],
+      content: textChunks[i]!,
       metadata: { chunkIndex: i, filename } as Record<string, unknown>,
-      embedding: JSON.stringify(embeddings[i]),
+      embedding: JSON.stringify(embeddings[i]!),
       chunkIndex: i,
     });
   }

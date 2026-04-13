@@ -55,14 +55,14 @@ export function getPendingPrompts(): Array<{
   return [...pending.values()].map(({ resolve, ...rest }) => rest);
 }
 
-export function getPendingPromptForRun(runId: string): PendingPrompt | undefined {
+export function getPendingPromptForRun(runId: number): PendingPrompt | undefined {
   for (const entry of pending.values()) {
     if (entry.runId === runId) return entry;
   }
   return undefined;
 }
 
-export function clearPromptsForRun(runId: string): number {
+export function clearPromptsForRun(runId: number): number {
   let cleared = 0;
   for (const [key, entry] of pending) {
     if (entry.runId === runId) {

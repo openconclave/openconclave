@@ -136,8 +136,8 @@ export function runMigrations(): void {
   logger.debug("Database migrations complete");
 
   // Seed example conclaves on fresh install
-  const [{ count }] = db.all<{ count: number }>(sql`SELECT COUNT(*) as count FROM conclaves`);
-  if (count === 0) {
+  const countResult = db.all<{ count: number }>(sql`SELECT COUNT(*) as count FROM conclaves`);
+  if (countResult[0]?.count === 0) {
     seedExampleConclaves();
   }
 }

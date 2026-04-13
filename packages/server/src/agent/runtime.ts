@@ -162,7 +162,8 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
   // See issue #30.
   const ocBuiltins = createBuiltinTools(ws);
   const allowedSet = new Set(config.allowedTools ?? []);
-  const OC_TOOL_MAP: Record<string, () => ReturnType<typeof tool>> = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const OC_TOOL_MAP: Record<string, () => any> = {
     Read: () => tool(
       "read",
       "Read the contents of a file from disk and return it as text. Use this before editing a file so you know its exact current state, and any time you need to inspect source code, configuration, logs, or review output. Paths are resolved against your working directory unless absolute.",

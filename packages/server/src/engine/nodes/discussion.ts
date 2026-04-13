@@ -60,6 +60,7 @@ export async function executeDiscussion(
   workspace?: Workspace,
 ): Promise<unknown> {
   // Suppress unused param warnings — retained for API consistency with other executors
+  void nodeOutputs;
   void agentSessions;
   void conclaveContext;
 
@@ -161,7 +162,7 @@ export async function executeDiscussion(
       break;
     }
 
-    const participant = participants[currentParticipantIndex];
+    const participant = participants[currentParticipantIndex]!;
     const agentConfig = participant.data.config as AgentConfig;
 
     // Resolve tools from agent config — respect what the conclave setup configured

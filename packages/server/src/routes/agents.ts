@@ -2,9 +2,6 @@ import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
-import { resolve, join } from "path";
-import { mkdirSync, existsSync, readFileSync, unlinkSync } from "fs";
-
 import { db } from "../db/client";
 import { agentTasks, conclaves, runEvents } from "../db/schema";
 import { AppError, ErrorCode } from "@openconclave/shared";
@@ -12,7 +9,6 @@ import type { AgentConfig, ResolvedAgentConfig, ConclaveNode } from "@openconcla
 import { executeAgent } from "../engine/agent-executor";
 import { invokeWithTools } from "../agent/llm-call";
 import { logger } from "../lib/logger";
-import { TMP_DIR } from "../lib/workspace";
 import { broadcastRunEvent } from "../ws/broadcast";
 import type { RunEvent } from "../engine/types";
 
@@ -106,7 +102,7 @@ export const agentRoutes = new Hono()
 
   .get("/tasks/:id/logs", async (c) => {
     const { id } = c.req.param();
-    const [task] = await db.select().from(agentTasks).where(eq(agentTasks.id, id));
+    const [task] = await db.select().from(agentTasks).where(eq(agentTasks.id, Number(id)));
     if (!task) throw AppError.notFound("Task", id);
     return c.json(task);
   });

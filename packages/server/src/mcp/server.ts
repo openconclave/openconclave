@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { NODE_TYPES, NODE_TYPE_ALIASES } from "@openconclave/shared/src/constants";
+import { NODE_TYPE_ALIASES } from "@openconclave/shared/src/constants";
 import { VERSION } from "@openconclave/shared";
 
 const OC_URL = process.env.OPENCONCLAVE_URL ?? "http://localhost:4000";
@@ -45,7 +45,7 @@ export function createMcpServer() {
     {},
     async () => {
       const data = await ocApi("/conclaves") as { conclaves: unknown[] };
-      const summary = data.conclaves.map((w: Record<string, unknown>) => ({
+      const summary = (data.conclaves as Record<string, unknown>[]).map((w) => ({
         id: w.id,
         name: w.name,
         description: w.description,
@@ -170,8 +170,8 @@ export function createMcpServer() {
         if (idx === -1) {
           return { content: [{ type: "text", text: `Node "${nodeId}" not found in conclave ${conclaveId}` }], isError: true };
         }
-        const node = nodes[idx];
-        nodes[idx] = {
+        const node = nodes[idx]!;
+        const updatedNode = {
           ...node,
           ...(position ? { position } : {}),
           data: {
@@ -180,8 +180,9 @@ export function createMcpServer() {
             config: config ? { ...node.data.config, ...config } : node.data.config,
           },
         };
+        nodes[idx] = updatedNode;
         await ocApi(`/conclaves/${conclaveId}`, "PUT", { nodes });
-        return { content: [{ type: "text", text: JSON.stringify({ nodeId, updated: nodes[idx].data }, null, 2) }] };
+        return { content: [{ type: "text", text: JSON.stringify({ nodeId, updated: updatedNode.data }, null, 2) }] };
       } catch (e) {
         return { content: [{ type: "text", text: e instanceof Error ? e.message : "Update failed" }], isError: true };
       }

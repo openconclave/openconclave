@@ -19,6 +19,7 @@ export async function executeAgentNode(
   emit: (event: RunEvent) => void,
   workspace?: Workspace
 ): Promise<unknown> {
+  void nodeOutputs;
   // Read tools directly from agent config
   const agentConfig = node.data.config as AgentConfig;
   const connectedTools: string[] = [];

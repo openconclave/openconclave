@@ -67,8 +67,8 @@ export const knowledgeRoutes = new Hono()
       })
       .returning();
 
-    logger.info(`Created knowledge base "${body.name}"`, { id: result[0].id });
-    return c.json({ data: result[0] }, 201);
+    logger.info(`Created knowledge base "${body.name}"`, { id: result[0]!.id });
+    return c.json({ data: result[0]! }, 201);
   })
 
   // ── Get knowledge base details ────────────────────────────

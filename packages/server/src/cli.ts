@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+export {};
 /**
  * Unified CLI entry point for OpenConclave.
  *

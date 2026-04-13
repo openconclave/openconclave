@@ -66,7 +66,7 @@ function transformServer(raw: Record<string, unknown>): McpRegistryServer | null
   // Pick the first remote endpoint
   const remotes = server.remotes as Array<Record<string, unknown>> | undefined;
   if (remotes && remotes.length > 0) {
-    const remote = remotes[0];
+    const remote = remotes[0]!;
     launchConfig.remote = {
       type: (remote.type as "streamable-http" | "sse") ?? "streamable-http",
       url: remote.url as string,

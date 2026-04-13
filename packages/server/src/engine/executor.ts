@@ -45,7 +45,7 @@ export class ConclaveExecutor {
     const now = new Date().toISOString();
 
     const result = await db.insert(runs).values({
-      conclaveId: conclave.id as number,
+      conclaveId: Number(conclave.id),
       status: "running",
       triggerType: "manual",
       triggerPayload: triggerPayload ?? null,
@@ -53,7 +53,7 @@ export class ConclaveExecutor {
       createdAt: now,
     }).returning({ id: runs.id });
 
-    const runId = result[0].id;
+    const runId = result[0]!.id;
 
     this.emit({ type: "run:started", runId });
 

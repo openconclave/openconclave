@@ -158,7 +158,7 @@ export class McpBridge {
   }
 
   async disconnect(): Promise<void> {
-    for (const [id, client] of this.clients) {
+    for (const [, client] of this.clients) {
       try {
         await client.close();
       } catch {}

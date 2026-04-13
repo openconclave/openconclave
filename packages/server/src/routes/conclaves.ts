@@ -18,7 +18,7 @@ export const conclaveRoutes = new Hono()
 
   .get("/:id", async (c) => {
     const { id } = c.req.param();
-    const [result] = await db.select().from(conclaves).where(eq(conclaves.id, id));
+    const [result] = await db.select().from(conclaves).where(eq(conclaves.id, Number(id)));
     if (!result) throw AppError.notFound("Conclave", id);
     return c.json(result);
   })
@@ -36,7 +36,7 @@ export const conclaveRoutes = new Hono()
       updatedAt: now,
     }).returning({ id: conclaves.id });
 
-    const id = result[0].id;
+    const id = result[0]!.id;
     // Update definition with the generated ID
     await db.update(conclaves)
       .set({ definition: { id, ...body, enabled: true, createdAt: now, updatedAt: now } })

@@ -92,9 +92,14 @@ app.post("/api/conclaves/:id/run", async (c) => {
   const nodes = (definition.nodes ?? []) as Array<{ id: string; data?: { type?: string } }>;
   const triggerNode = nodes.find((n) => n.data?.type === "trigger");
 
+  const rawPayload = body.payload;
+  const safePayload =
+    rawPayload !== null && typeof rawPayload === "object" && !Array.isArray(rawPayload)
+      ? (({ _callerCwd: _, ...rest }) => rest)(rawPayload as Record<string, unknown>)
+      : rawPayload;
   const runId = await executor.execute(
     definition as never,
-    body.payload,
+    safePayload,
     triggerNode?.id
   );
 
@@ -121,12 +126,13 @@ app.post("/api/runs/:id/resume", async (c) => {
     );
   }
 
+  const updatedRow = updated[0]!;
   const wf = await db
     .select()
     .from(conclaves)
-    .where(eq(conclaves.id, updated[0].conclaveId))
+    .where(eq(conclaves.id, updatedRow.conclaveId))
     .get();
-  if (!wf) throw AppError.notFound("Conclave", String(updated[0].conclaveId));
+  if (!wf) throw AppError.notFound("Conclave", String(updatedRow.conclaveId));
 
   await executor.resume(id, wf.definition as never);
   return c.json({ resumed: true, runId: id }, 200);
@@ -249,7 +255,7 @@ app.post("/api/triggers/telegram", async (c) => {
   const body = rawBody as { chatId: string; message: string };
   const allConclaves = await db.select().from(conclaves);
 
-  const triggered: string[] = [];
+  const triggered: number[] = [];
   for (const wf of allConclaves) {
     if (!wf.enabled) continue;
     const def = wf.definition as Record<string, unknown>;
@@ -344,7 +350,7 @@ if (hasEmbeddedAssets) {
     }
     const asset = getAsset(path) ?? getAsset("/index.html");
     if (!asset) return c.notFound();
-    return c.body(asset.body, { headers: { "Content-Type": asset.type } });
+    return c.body(asset.body.buffer as ArrayBuffer, { headers: { "Content-Type": asset.type } });
   });
 } else if (existsSync(publicDir)) {
   logger.debug(`Serving static files from ${publicDir}`);

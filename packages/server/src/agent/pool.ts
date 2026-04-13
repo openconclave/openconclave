@@ -57,7 +57,7 @@ export class AgentPool {
     // Check queue
     const idx = this.queue.findIndex((t) => t.id === taskId);
     if (idx !== -1) {
-      const task = this.queue.splice(idx, 1)[0];
+      const task = this.queue.splice(idx, 1)[0]!;
       task.reject(new Error("Task cancelled"));
       return true;
     }
@@ -66,7 +66,7 @@ export class AgentPool {
   }
 
   cancelAll() {
-    for (const [id, controller] of this.running) {
+    for (const [, controller] of this.running) {
       controller.abort();
     }
     this.running.clear();

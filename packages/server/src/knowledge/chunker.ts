@@ -13,9 +13,9 @@ function splitOn(text: string, separator: string): string[] {
   const result: string[] = [];
   for (let i = 0; i < parts.length; i++) {
     if (i < parts.length - 1) {
-      result.push(parts[i] + separator);
+      result.push(parts[i]! + separator);
     } else {
-      result.push(parts[i]);
+      result.push(parts[i]!);
     }
   }
   return result.filter((p) => p.length > 0);
@@ -35,7 +35,7 @@ function recursiveSplit(text: string, chunkSize: number, separatorIndex: number)
     return result;
   }
 
-  const separator = SEPARATORS[separatorIndex];
+  const separator = SEPARATORS[separatorIndex]!;
   const parts = splitOn(text, separator);
 
   if (parts.length <= 1) {
@@ -87,10 +87,10 @@ export function chunkText(text: string, chunkSize: number, chunkOverlap: number)
   }
 
   // Apply overlap: prepend the tail of the previous chunk
-  const result: string[] = [rawChunks[0]];
+  const result: string[] = [rawChunks[0]!];
 
   for (let i = 1; i < rawChunks.length; i++) {
-    const prevChunk = rawChunks[i - 1];
+    const prevChunk = rawChunks[i - 1]!;
     const overlapText = prevChunk.slice(Math.max(0, prevChunk.length - chunkOverlap));
     const combined = overlapText + rawChunks[i];
     result.push(combined);

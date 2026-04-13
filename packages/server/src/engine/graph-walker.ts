@@ -85,7 +85,9 @@ export async function executeGraph(
   // on any subsequent resume the skip path can always call resolveNextEntries correctly.
   const checkpointOutputs = new Map<string, unknown>();
 
-  // For chat conclaves, restore persistent sessions from previous runs
+  // For chat conclaves, restore persistent sessions from previous runs.
+  // Telegram is included because each inbound message reuses the same runId — the Claude SDK
+  // session must be restored so agent turns remain contextually connected across messages.
   const isChatConclave = nodes.some((n) => {
     const cfg = n.data.config as Record<string, unknown> | undefined;
     return n.data.type === "trigger" && (cfg?.type === "chat" || cfg?.type === "telegram");
@@ -253,12 +255,8 @@ export async function executeGraph(
         }
       }
 
-      if (ready.length === 0 && pendingInputs.size === 0) {
-        break;
-      }
-      if (ready.length === 0) {
-        break;
-      }
+      if (ready.length === 0 && pendingInputs.size === 0) break;
+      if (ready.length === 0 && pendingInputs.size > 0) throw new AppError(ErrorCode.CONCLAVE_MERGE_DEADLOCK, "BFS queue drained with pending merge inputs — unreachable merge node detected");
 
       // Pre-compute skip decisions synchronously before launching the async batch.
       // Doing the delete here (single-threaded) prevents a race where the same node ID
@@ -290,7 +288,8 @@ export async function executeGraph(
               checkpointOutputs.get(entry.nodeId),
               edges,
               nodeMap,
-              nodeOutputs
+              nodeOutputs,
+              pendingInputs
             );
           }
 
@@ -302,24 +301,22 @@ export async function executeGraph(
             nodeOutputs,
             agentSessions,
             conclaveContext,
-            conclave,
+            normalizedConclave,
             emit,
             cleanPayload,
             entry.triggeredBy,
             workspace
           );
 
-          // ORDERING INVARIANT: checkpoint MUST come before resolveNextEntries.
-          // For condition nodes, resolveNextEntries calls nodeOutputs.set(nodeId, passthrough),
-          // overwriting the raw {__conditionResult, __passthrough} output. Same for agent routing
-          // nodes that strip __routeTo. If checkpoint ran after, it would store the mutated value.
-          // checkpointOutputs is a separate map that only ever holds raw executeNode outputs —
-          // it is never touched by resolveNextEntries, so subsequent checkpoints are always safe.
+          // checkpointOutputs.set MUST come before resolveNextEntries — resolveNextEntries
+          // mutates nodeOutputs for condition/routing nodes. checkpointOutputs preserves raw values.
+          // completedNodes.add + writeCheckpoint come AFTER so a validation error in
+          // resolveNextEntries (e.g. unknown __routeTo) does not poison the checkpoint.
           checkpointOutputs.set(entry.nodeId, output);
+          const nextEntries = resolveNextEntries(entry, node, output, edges, nodeMap, nodeOutputs, pendingInputs);
           completedNodes.add(entry.nodeId);
           await writeCheckpoint(runId, entry.nodeId, checkpointOutputs, completedNodes, agentSessions);
-
-          return resolveNextEntries(entry, node, output, edges, nodeMap, nodeOutputs);
+          return nextEntries;
         })
       );
 
@@ -377,6 +374,11 @@ export async function executeGraph(
       return;
     }
 
+    const [currentRun] = await db.select().from(runs).where(eq(runs.id, runId));
+    if (currentRun?.status === "cancelled") {
+      emit({ type: "run:completed", runId, data: { status: "cancelled" } });
+      return;
+    }
     await db
       .update(runs)
       .set({ status: "success", completedAt: now })
@@ -385,6 +387,8 @@ export async function executeGraph(
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     const now = new Date().toISOString();
+    const [cancelCheck] = await db.select().from(runs).where(eq(runs.id, runId));
+    if (cancelCheck?.status === "cancelled") return;
     await db
       .update(runs)
       .set({ status: "failure", completedAt: now, error: message })
@@ -434,6 +438,45 @@ async function writeCheckpoint(
   }
 }
 
+// ── Dead-branch propagation ──────────────────────────────────
+
+// When a condition prunes a branch, any merge node downstream of the pruned
+// path will never receive that parent's input and would stall forever.
+// Walk forward from the pruned start node and pre-satisfy pendingInputs so
+// the merge can fire once all live parents arrive.
+function propagateDeadBranch(
+  prunedStart: string,
+  edges: ConclaveEdge[],
+  nodeMap: Map<string, ConclaveNode>,
+  pendingInputs: Map<string, Map<string, unknown>>
+): void {
+  const visited = new Set<string>();
+  const stack: Array<{ nodeId: string; lastBeforeMerge: string }> = [
+    { nodeId: prunedStart, lastBeforeMerge: prunedStart },
+  ];
+
+  while (stack.length > 0) {
+    const { nodeId, lastBeforeMerge } = stack.pop()!;
+    if (visited.has(nodeId)) continue;
+    visited.add(nodeId);
+
+    const node = nodeMap.get(nodeId);
+    if (!node) continue;
+
+    if (node.data.type === "merge") {
+      if (!pendingInputs.has(nodeId)) {
+        pendingInputs.set(nodeId, new Map());
+      }
+      pendingInputs.get(nodeId)!.set(lastBeforeMerge, undefined);
+      continue;
+    }
+
+    for (const edge of getOutgoingEdges(nodeId, edges)) {
+      stack.push({ nodeId: edge.target, lastBeforeMerge: nodeId });
+    }
+  }
+}
+
 // ── Next-node resolution ────────────────────────────────────
 
 function resolveNextEntries(
@@ -442,7 +485,8 @@ function resolveNextEntries(
   output: unknown,
   edges: ConclaveEdge[],
   nodeMap: Map<string, ConclaveNode>,
-  nodeOutputs: Map<string, unknown>
+  nodeOutputs: Map<string, unknown>,
+  pendingInputs: Map<string, Map<string, unknown>>
 ): QueueEntry[] {
   const next: QueueEntry[] = [];
 
@@ -466,6 +510,8 @@ function resolveNextEntries(
         next.push({ nodeId: edge.target, triggeredBy: entry.nodeId });
       } else if (!edge.sourceHandle) {
         next.push({ nodeId: edge.target, triggeredBy: entry.nodeId });
+      } else {
+        propagateDeadBranch(edge.target, edges, nodeMap, pendingInputs);
       }
     }
   } else if (node.data.type === "agent" && outgoing.length >= 2) {
@@ -475,8 +521,15 @@ function resolveNextEntries(
       return target?.data.type !== "prompt";
     });
 
-    // If filtering reduced to <2 edges, treat as simple forward (no routing needed)
+    // If filtering reduced to <2 edges, treat as simple forward (no routing needed).
+    // Unwrap any routing metadata the agent may have emitted so downstream gets clean output.
     if (forwardEdges.length < 2) {
+      try {
+        const parsed = typeof output === "string" ? JSON.parse(output) : output;
+        if (parsed?.__routeTo) {
+          nodeOutputs.set(entry.nodeId, parsed.content ?? output);
+        }
+      } catch { /* not JSON */ }
       for (const edge of forwardEdges) {
         next.push({ nodeId: edge.target, triggeredBy: entry.nodeId });
       }
@@ -498,13 +551,7 @@ function resolveNextEntries(
     }
 
     if (routeTo) {
-      // Route to the chosen edge — match by node ID or label (case-insensitive)
-      const routeLower = routeTo.toLowerCase();
-      const targetEdge = outgoing.find((e) => {
-        if (e.target === routeTo) return true;
-        const targetNode = nodeMap.get(e.target);
-        return targetNode?.data.label?.toLowerCase() === routeLower;
-      });
+      const targetEdge = outgoing.find((e) => e.target === routeTo);
       if (targetEdge) {
         next.push({ nodeId: targetEdge.target, triggeredBy: entry.nodeId });
       } else {

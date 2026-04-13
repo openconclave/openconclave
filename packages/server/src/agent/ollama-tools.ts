@@ -11,8 +11,8 @@ export type OllamaBuiltinTool = {
  * Extends the shared builtin tools (bash, read_file, write_file)
  * with Ollama-specific tools (send_telegram).
  */
-export function createOllamaBuiltinTools(cwd?: string): Record<string, OllamaBuiltinTool> {
-  const shared = createBuiltinTools(cwd) as Record<string, OllamaBuiltinTool>;
+export function createOllamaBuiltinTools(): Record<string, OllamaBuiltinTool> {
+  const shared = createBuiltinTools() as Record<string, OllamaBuiltinTool>;
 
   return {
     ...shared,

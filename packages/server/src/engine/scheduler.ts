@@ -3,10 +3,10 @@ import { db } from "../db/client";
 import { conclaves } from "../db/schema";
 import { eq } from "drizzle-orm";
 import { ConclaveExecutor } from "./executor";
-import type { ConclaveDefinition, ConclaveNode, TriggerConfig } from "@openconclave/shared";
+import type { ConclaveDefinition, TriggerConfig } from "@openconclave/shared";
 
 type ScheduledJob = {
-  conclaveId: string;
+  conclaveId: number;
   triggerNodeId: string;
   cron: string;
   nextRun: Date;
@@ -19,8 +19,9 @@ function parseCron(cron: string, from: Date): Date | null {
   if (parts.length !== 5) return null;
 
   const [minPart, hourPart, dayPart, monthPart, weekdayPart] = parts;
+  if (!minPart || !hourPart || !dayPart || !monthPart || !weekdayPart) return null;
 
-  const match = (part: string, value: number, max: number): boolean => {
+  const match = (part: string, value: number): boolean => {
     if (part === "*") return true;
     // Handle */N step values
     if (part.startsWith("*/")) {
@@ -45,11 +46,11 @@ function parseCron(cron: string, from: Date): Date | null {
     const weekday = next.getDay();
 
     if (
-      match(minPart, min, 59) &&
-      match(hourPart, hour, 23) &&
-      match(dayPart, day, 31) &&
-      match(monthPart, month, 12) &&
-      match(weekdayPart, weekday, 6)
+      match(minPart, min) &&
+      match(hourPart, hour) &&
+      match(dayPart, day) &&
+      match(monthPart, month) &&
+      match(weekdayPart, weekday)
     ) {
       return next;
     }
@@ -61,7 +62,7 @@ function parseCron(cron: string, from: Date): Date | null {
 }
 
 export class CronScheduler {
-  private jobs = new Map<string, ScheduledJob>();
+  private jobs = new Map<number, ScheduledJob>();
   private timer: ReturnType<typeof setInterval> | null = null;
   private executor: ConclaveExecutor;
   private checkIntervalMs: number;
@@ -71,7 +72,7 @@ export class CronScheduler {
     this.checkIntervalMs = checkIntervalMs;
   }
 
-  getSchedule(): { conclaveId: string; cron: string; nextRun: string; enabled: boolean }[] {
+  getSchedule(): { conclaveId: number; cron: string; nextRun: string; enabled: boolean }[] {
     return Array.from(this.jobs.values()).map((j) => ({
       conclaveId: j.conclaveId,
       cron: j.cron,
@@ -101,7 +102,7 @@ export class CronScheduler {
 
   async sync() {
     const allConclaves = await db.select().from(conclaves);
-    const activeIds = new Set<string>();
+    const activeIds = new Set<number>();
 
     for (const wf of allConclaves) {
       if (!wf.enabled) continue;
@@ -157,12 +158,12 @@ export class CronScheduler {
 
       try {
         const wf = await db.select().from(conclaves).where(eq(conclaves.id, id));
-        if (!wf.length || !wf[0].enabled) {
+        if (!wf.length || !wf[0]!.enabled) {
           job.enabled = false;
           continue;
         }
 
-        const def = wf[0].definition as unknown as ConclaveDefinition;
+        const def = wf[0]!.definition as unknown as ConclaveDefinition;
         await this.executor.execute(def, { cronTrigger: true, scheduledAt: now.toISOString() }, job.triggerNodeId);
       } catch (err: any) {
         console.error(`⏰ Failed to trigger conclave ${id}:`, err.message);

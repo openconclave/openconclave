@@ -66,9 +66,9 @@ export async function executeNode(
     }
     input = inputs.length === 1 ? inputs[0] : inputs;
   } else if (dataIncomingEdges.length === 1) {
-    input = nodeOutputs.get(dataIncomingEdges[0].source);
+    const edge = dataIncomingEdges[0]!;
+    input = nodeOutputs.get(edge.source);
     // Apply discussion output filtering based on sourceHandle
-    const edge = dataIncomingEdges[0];
     const srcNode = nodeMap.get(edge.source);
     if (srcNode?.data.type === "discussion" && input && edge.sourceHandle) {
       input = filterDiscussionOutput(input, edge.sourceHandle);
@@ -92,7 +92,7 @@ export async function executeNode(
         break;
       case "code":
         output = await executeCode(node.data.config as CodeConfig, input, {
-          conclaveId: conclave.id!,
+          conclaveId: Number(conclave.id),
           runId,
           nodeId,
         }, workspace);

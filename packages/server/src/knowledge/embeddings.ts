@@ -22,7 +22,7 @@ export async function generateEmbedding(model: string, text: string): Promise<nu
     throw new Error("Ollama returned no embeddings");
   }
 
-  return data.embeddings[0];
+  return data.embeddings[0]!;
 }
 
 /**

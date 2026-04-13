@@ -215,7 +215,7 @@ export async function executeAgent(
     createdAt: now,
   }).returning({ id: agentTasks.id });
 
-  const taskId = taskResult[0].id;
+  const taskId = taskResult[0]!.id;
 
   emit({ type: "agent:started", runId, nodeId, data: { taskId, engine } });
 

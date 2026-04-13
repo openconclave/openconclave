@@ -7,7 +7,7 @@
  */
 
 import type { ResolvedAgentConfig } from "@openconclave/shared";
-import { createBuiltinTools, TOOL_NAME_MAP, type BuiltinTool, type ToolDef } from "./builtin-tools";
+import { createBuiltinTools, TOOL_NAME_MAP, type BuiltinTool } from "./builtin-tools";
 import { McpBridge } from "./mcp-bridge";
 import { logger } from "../lib/logger";
 import { Workspace } from "../engine/workspace";
