@@ -25,3 +25,5 @@ scripts/entitlements.plist
 
 .worktrees/
 .reviews/
+
+.cwd-test/

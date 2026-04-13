@@ -63,22 +63,28 @@ function resolveCliPath(path: string): string {
 export const cliPath = resolveCliPath(embeddedCliPath);
 console.log(`[claude-cli] ${cliPath.includes("cli.js") ? "embedded" : "system"}: ${cliPath}`);
 
-// Minimal environment for spawned Claude CLI subprocesses. Wholesale
-// `process.env` forwarding with `bypassPermissions` lets a prompt-injected
-// agent exfiltrate secrets like DATABASE_URL to third-party MCP servers.
-const ALLOWED_SUBPROCESS_ENV = new Set([
-  "PATH", "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA",
-  "TMPDIR", "TMP", "TEMP",
-  "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN",
-  "NODE_ENV", "DEBUG",
-  "OC_API_URL", "OC_WS_URL",
-  "SystemRoot", "ProgramFiles", "ProgramFiles(x86)", "windir",
-]);
+// Block secrets from spawned Claude CLI subprocesses. A prompt-injected
+// agent with `bypassPermissions` can exfiltrate env vars via MCP servers.
+// Strategy: pass everything EXCEPT vars matching secret-like patterns.
+const BLOCKED_ENV_PATTERNS = [
+  /secret/i,
+  /password/i,
+  /credential/i,
+  /private.?key/i,
+  /^database.?url$/i,
+  /^redis.?url$/i,
+  /^mongo.?uri$/i,
+  /_(key|token)$/i,
+];
+
+function isBlockedEnvKey(key: string): boolean {
+  return BLOCKED_ENV_PATTERNS.some((p) => p.test(key));
+}
 
 export function buildSubprocessEnv(extra: Record<string, string> = {}): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) {
-    if (ALLOWED_SUBPROCESS_ENV.has(k) && v !== undefined) out[k] = v;
+    if (!isBlockedEnvKey(k) && v !== undefined) out[k] = v;
   }
   return { ...out, ...extra };
 }

@@ -92,14 +92,9 @@ app.post("/api/conclaves/:id/run", async (c) => {
   const nodes = (definition.nodes ?? []) as Array<{ id: string; data?: { type?: string } }>;
   const triggerNode = nodes.find((n) => n.data?.type === "trigger");
 
-  const rawPayload = body.payload;
-  const safePayload =
-    rawPayload !== null && typeof rawPayload === "object" && !Array.isArray(rawPayload)
-      ? (({ _callerCwd: _, ...rest }) => rest)(rawPayload as Record<string, unknown>)
-      : rawPayload;
   const runId = await executor.execute(
     definition as never,
-    safePayload,
+    body.payload,
     triggerNode?.id
   );
 
