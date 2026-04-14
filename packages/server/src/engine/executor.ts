@@ -104,19 +104,25 @@ export class ConclaveExecutor {
   // ── Events ──────────────────────────────────────────────
 
   private emit(event: RunEvent): void {
-    const now = new Date().toISOString();
-    db.insert(runEvents)
-      .values({
-        runId: event.runId,
-        nodeId: event.nodeId,
-        type: event.type,
-        data: event.data ?? null,
-        createdAt: now,
-      })
-      .catch((err: unknown) => {
-        const message = err instanceof Error ? err.message : String(err);
-        logger.error("Failed to persist event", { error: message });
-      });
+    // Skip DB persistence for high-frequency streaming events — they're only
+    // useful for the live WebSocket feed. The final output is captured in
+    // agent_tasks.output when the task completes. Persisting every chunk
+    // saturates the event loop with synchronous bun:sqlite writes (issue #29).
+    if (event.type !== "agent:output") {
+      const now = new Date().toISOString();
+      db.insert(runEvents)
+        .values({
+          runId: event.runId,
+          nodeId: event.nodeId,
+          type: event.type,
+          data: event.data ?? null,
+          createdAt: now,
+        })
+        .catch((err: unknown) => {
+          const message = err instanceof Error ? err.message : String(err);
+          logger.error("Failed to persist event", { error: message });
+        });
+    }
 
     this.onEvent?.(event);
   }
