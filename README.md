@@ -102,7 +102,15 @@ Drag nodes, draw connections, write system prompts.
 
 - **Ollama** — for local models and embeddings: `ollama pull nomic-embed-text`
 - **API keys** (optional) — `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or any OpenAI-compatible provider
-- **Claude Code** (optional) — for MCP plugin: `claude plugin install github:openconclave/claude-plugin`
+- **Claude Code** (optional) — for the channel loop and conclave-as-MCP-tool integration. See [openconclave/claude-plugin](https://github.com/openconclave/claude-plugin) for full install details.
+
+> **⚠ Important — current install path:** The Claude Code plugin marketplace registration is still being finalized. Until it lands, load the channel plugin in dev mode:
+>
+> ```bash
+> claude --dangerously-load-development-channels plugin:openconclave-channel@openconclave
+> ```
+>
+> Without this, conclave channel loops and Claude-in-the-loop prompts won't reach your Claude Code session.
 
 ## Manual install
 
