@@ -280,6 +280,7 @@ export function NodePalette() {
   // Custom pointer-based drag for node palette items. Replaces HTML5 DnD so
   // we keep full cursor control (grabbing throughout, no browser arrow).
   const setPendingNodeDrop = useConclaveStore((s) => s.setPendingNodeDrop);
+  const setPendingModeratorDrop = useConclaveStore((s) => s.setPendingModeratorDrop);
   const dragDataRef = useRef<{ type: NodeType; label: string; config: unknown } | null>(null);
 
   const onNodePointerDown = useCallback((e: React.PointerEvent, type: NodeType, label: string) => {
@@ -293,9 +294,25 @@ export function NodePalette() {
       window.removeEventListener("pointerup", onUp);
       document.body.classList.remove("oc-dragging-node");
 
+      if (!dragDataRef.current) return;
       const target = document.elementFromPoint(ev.clientX, ev.clientY);
+
+      // 1) Moderator slot takes priority — only agent/code types are valid.
+      const modSlot = target?.closest("[data-moderator-slot]") as HTMLElement | null;
+      const discussionNodeId = modSlot?.dataset.discussionNodeId;
+      const dropType = dragDataRef.current.type;
+      if (modSlot && discussionNodeId && (dropType === "agent" || dropType === "code")) {
+        setPendingModeratorDrop({
+          discussionNodeId,
+          ...dragDataRef.current,
+        });
+        dragDataRef.current = null;
+        return;
+      }
+
+      // 2) Canvas drop — create a new node.
       const isCanvas = target?.closest(".react-flow");
-      if (isCanvas && dragDataRef.current) {
+      if (isCanvas) {
         setPendingNodeDrop({
           ...dragDataRef.current,
           screenX: ev.clientX,
@@ -306,7 +323,7 @@ export function NodePalette() {
     };
 
     window.addEventListener("pointerup", onUp);
-  }, [setPendingNodeDrop]);
+  }, [setPendingNodeDrop, setPendingModeratorDrop]);
 
   const setDraggingTool = useConclaveStore((s) => s.setDraggingTool);
 

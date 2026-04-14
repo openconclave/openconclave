@@ -6,6 +6,13 @@ import { useConclaveStore } from "@/stores/conclave-store";
 import { useNodeData } from "@/hooks/use-node-data";
 import type { DiscussionConfig, DiscussionModeratorConfig, AgentConfig, CodeConfig } from "@openconclave/shared";
 
+interface ModeratorDropPayload {
+  discussionNodeId: string;
+  type: string;
+  label: string;
+  config: unknown;
+}
+
 const GRID = 20;
 
 // ── Shared handle/border styles matching base-node.tsx ───────
@@ -125,99 +132,59 @@ export function DiscussionNode(props: NodeProps) {
   ).length;
 
   const [dragOver, setDragOver] = useState(false);
-  const dropRef = useRef<HTMLDivElement>(null);
-  const dragCountRef = useRef(0);
+  const slotRef = useRef<HTMLDivElement>(null);
 
   const clearModerator = useCallback(() => {
     updateNodeConfig(props.id, { moderator: undefined });
   }, [props.id, updateNodeConfig]);
 
-  // Native DOM event listeners bypass React Flow's synthetic event interception.
-  // React Flow v12 registers pane-level handlers via native listeners, so React's
-  // e.stopPropagation() on synthetic events doesn't prevent the canvas onDrop from
-  // also firing. Native stopImmediatePropagation() does.
-  //
-  // Counter-based dragenter/dragleave eliminates flicker caused by child elements:
-  // each child enter increments, each leave decrements — only reset at zero.
+  // Consume pending moderator drop from the palette's pointer-drag system.
+  const pendingModeratorDrop = useConclaveStore((s) => s.pendingModeratorDrop);
+  const setPendingModeratorDrop = useConclaveStore((s) => s.setPendingModeratorDrop);
+
   useEffect(() => {
-    const el = dropRef.current;
+    if (!pendingModeratorDrop || pendingModeratorDrop.discussionNodeId !== props.id) return;
+    const { type: nodeType, label, config: dropConfig } = pendingModeratorDrop as ModeratorDropPayload;
+
+    const moderatorType: "code" | "agent" = (nodeType === "transform" || nodeType === "code") ? "code" : "agent";
+    updateNodeConfig(props.id, {
+      moderator: {
+        type: moderatorType,
+        node: {
+          label,
+          type: nodeType as "transform" | "code" | "agent",
+          config: dropConfig as AgentConfig | CodeConfig,
+        },
+      },
+    });
+    setPendingModeratorDrop(null);
+  }, [pendingModeratorDrop, props.id, updateNodeConfig, setPendingModeratorDrop]);
+
+  // Visual feedback: highlight slot while a palette node is being dragged and
+  // the cursor is over this slot. Only active when body has oc-dragging-node class.
+  useEffect(() => {
+    const el = slotRef.current;
     if (!el) return;
 
-    const getNodeId = () => props.id;
-    const getUpdateFn = () => updateNodeConfig;
-
-    const isNodeDrag = (dt: DataTransfer | null) =>
-      dt?.types.includes("application/openconclave-node") ?? false;
-
-    const handleDragOver = (e: DragEvent) => {
-      if (!isNodeDrag(e.dataTransfer)) return;
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      e.dataTransfer!.dropEffect = "move";
-    };
-
-    const handleDragEnter = (e: DragEvent) => {
-      if (!isNodeDrag(e.dataTransfer)) return;
-      e.preventDefault();
-      dragCountRef.current++;
-      if (dragCountRef.current === 1) setDragOver(true);
-    };
-
-    const handleDragLeave = (_e: DragEvent) => {
-      dragCountRef.current--;
-      if (dragCountRef.current <= 0) {
-        dragCountRef.current = 0;
-        setDragOver(false);
+    const onPointerMove = (ev: PointerEvent) => {
+      if (!document.body.classList.contains("oc-dragging-node")) {
+        if (dragOver) setDragOver(false);
+        return;
       }
+      const target = document.elementFromPoint(ev.clientX, ev.clientY);
+      const overSlot = !!target?.closest(`[data-discussion-node-id="${props.id}"]`);
+      setDragOver(overSlot);
     };
 
-    const handleDrop = (e: DragEvent) => {
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      dragCountRef.current = 0;
-      setDragOver(false);
+    const onPointerUp = () => setDragOver(false);
 
-      const raw = e.dataTransfer?.getData("application/openconclave-node");
-      if (!raw) return;
-
-      let parsed: unknown;
-      try { parsed = JSON.parse(raw); } catch { return; }
-
-      if (
-        typeof parsed !== "object" || parsed === null ||
-        !("type" in parsed) || !("label" in parsed) || !("config" in parsed) ||
-        typeof parsed.config !== "object" || parsed.config === null ||
-        (parsed.type !== "agent" && parsed.type !== "transform" && parsed.type !== "code") ||
-        typeof parsed.label !== "string" || !parsed.label.trim()
-      ) return;
-
-      const { type: nodeType, label, config: dropConfig } = parsed as {
-        type: "agent" | "transform" | "code";
-        label: string;
-        config: AgentConfig | CodeConfig;
-      };
-
-      const moderatorType: "code" | "agent" = (nodeType === "transform" || nodeType === "code") ? "code" : "agent";
-
-      getUpdateFn()(getNodeId(), {
-        moderator: {
-          type: moderatorType,
-          node: { label, type: nodeType, config: dropConfig },
-        },
-      });
-    };
-
-    el.addEventListener("dragover", handleDragOver);
-    el.addEventListener("dragenter", handleDragEnter);
-    el.addEventListener("dragleave", handleDragLeave);
-    el.addEventListener("drop", handleDrop);
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
     return () => {
-      el.removeEventListener("dragover", handleDragOver);
-      el.removeEventListener("dragenter", handleDragEnter);
-      el.removeEventListener("dragleave", handleDragLeave);
-      el.removeEventListener("drop", handleDrop);
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
     };
-  }, [props.id, updateNodeConfig]);
+  }, [props.id, dragOver]);
 
   const nodeRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -229,7 +196,7 @@ export function DiscussionNode(props: NodeProps) {
   }, [data.label, config.moderator]);
 
   return (
-    <div ref={dropRef}>
+    <div>
       <div
         ref={nodeRef}
         className={cn(
@@ -328,7 +295,12 @@ export function DiscussionNode(props: NodeProps) {
         </div>
 
         {/* Moderator slot */}
-        <div className="border-t border-border/40 px-3 py-2">
+        <div
+          ref={slotRef}
+          data-moderator-slot
+          data-discussion-node-id={props.id}
+          className="border-t border-border/40 px-3 py-2"
+        >
           <p className="mb-1.5 text-[10px] font-medium text-muted-foreground/60 uppercase tracking-wider">
             Moderator
           </p>
