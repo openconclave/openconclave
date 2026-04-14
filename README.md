@@ -108,7 +108,6 @@ Drag nodes, draw connections, write system prompts.
 >
 > ```bash
 > claude --dangerously-load-development-channels plugin:openconclave-channel@openconclave
-> claude --dangerously-load-development-channels plugin:openconclave-dev@openconclave
 > ```
 >
 > Without these, conclave channel loops won't reach your Claude Code session and you can't manage conclaves from Claude.
