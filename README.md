@@ -124,12 +124,6 @@ cd oc && bun install && bun start
 
 [Architecture](docs/architecture.md) · [Conclave composition](docs/conclave-composition.md) · [Security](security_guidance.md) · [Lab journal](.notes/README.md)
 
-## Built by
-
-OpenConclave is designed and maintained by **Ches Beiner** — a principal software engineer with 15+ years across ERP, GIS, and fintech, now building multi-agent AI systems.
-
-- LinkedIn: [chesbeiner](https://www.linkedin.com/in/chesbeiner/)
-- Contact: [beiner@me.com](mailto:beiner@me.com)
 
 ## License
 
