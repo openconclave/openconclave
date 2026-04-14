@@ -28,16 +28,9 @@ No runtime dependencies. Single binary. [Manual install →](#manual-install)
 
 ## Try something
 
-Import a `.json` file from the [conclaves repo](https://github.com/openconclave/conclaves) and run it on your own project, question, or just for fun.
+Browse the **[conclaves repo](https://github.com/openconclave/conclaves)** for ready-to-import starters — deep code reviews, multi-agent debates, decision-support tools, and more. Drop a `.json` file into your OC instance and run it.
 
-| Starter | What happens | You need |
-|---|---|---|
-| **[Code Review](https://github.com/openconclave/conclaves/tree/main/code-review)** | 5 specialists review your code in parallel. Findings get severity tags, line numbers, and proposed fixes. A knowledge base captures lessons so the next review is smarter. | Anthropic API key |
-| **[Brainstorm](https://github.com/openconclave/conclaves/tree/main/brainstorm)** | Agents pitch ideas, a critic tears them apart, a moderator steers the debate. You get a structured verdict — not a list of bullet points. | Anthropic API key |
-| **[Three Advisors](https://github.com/openconclave/conclaves/tree/main/three-advisors)** | Ask any question. Three agents answer independently, then a fourth merges their perspectives into one response. | Any API key or Ollama |
-| **[Agent Mafia](https://github.com/openconclave/conclaves/tree/main/agent-mafia)** | AI agents play Mafia against each other. You just watch. | Ollama |
-
-**To import:** Conclaves → ⬇ Import → paste URL or drop the `.json` file → Run.
+**To import:** Conclaves → ⬇ Import → paste URL or drop the `.json` file → map provider roles → Run.
 
 ---
 
