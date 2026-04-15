@@ -5,6 +5,7 @@ import { runs, runEvents, checkpoints } from "../db/schema";
 import { executeGraph } from "./graph-walker";
 import { logger } from "../lib/logger";
 import { saveAttachmentsForRun, type AttachmentInput, type SavedAttachment } from "../lib/workspace";
+import { clearWebFetchRunState } from "../agent/web-fetch";
 import type { ConclaveDefinition } from "@openconclave/shared";
 
 import type { RunEvent, EventCallback } from "./types";
@@ -120,6 +121,10 @@ export class ConclaveExecutor {
   // ── Events ──────────────────────────────────────────────
 
   private emit(event: RunEvent): void {
+    // Clear web_fetch per-run state when a run ends
+    if (event.type === "run:completed") {
+      clearWebFetchRunState(event.runId);
+    }
     // Skip DB persistence for high-frequency streaming events — they're only
     // useful for the live WebSocket feed. The final output is captured in
     // agent_tasks.output when the task completes. Persisting every chunk

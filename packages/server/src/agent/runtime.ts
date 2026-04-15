@@ -19,7 +19,7 @@ import { ingestText } from "../knowledge/ingest";
 import { registerPrompt } from "../engine/prompt-registry";
 import { broadcastRunEvent } from "../ws/broadcast";
 import { createBuiltinTools } from "./builtin-tools";
-import { createClaudeAttachmentTools, hasAttachments } from "./attachment-tools";
+import { createClaudeAttachmentTools } from "./attachment-tools";
 import { createClaudeArtifactTools } from "./artifact-tools";
 import { ROUTING_TOOL_NAME } from "./constants";
 
@@ -169,7 +169,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
   // They replace the Claude Code CLI's builtin Read/Write/Edit/Grep/Glob, whose
   // path-resolution walks .git upward and escapes git worktrees to the main repo.
   // See issue #30.
-  const ocBuiltins = createBuiltinTools(ws);
+  const ocBuiltins = createBuiltinTools(ws, options.runId);
   const allowedSet = new Set(config.allowedTools ?? []);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const OC_TOOL_MAP: Record<string, () => any> = {
@@ -242,19 +242,28 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
         content: [{ type: "text" as const, text: await ocBuiltins.bash!.execute({ command }) }],
       }),
     ),
+    WebFetch: () => tool(
+      "web_fetch",
+      "Fetch a URL with a real headless browser (handles JavaScript and SPAs), extract the main content as Markdown, and save it to this run's attachments folder. Returns a short status with the saved filename — the page content does NOT come back inline. Use list_attachments to see saved files; read_attachment or grep_attachment to read them. Repeated calls for the same URL within a run reuse the first fetch's saved file.",
+      {
+        url: z.string().describe("Absolute http(s) URL to fetch"),
+      },
+      async ({ url }) => ({
+        content: [{ type: "text" as const, text: await ocBuiltins.web_fetch!.execute({ url }) }],
+      }),
+    ),
   };
 
   const ocFsTools = Object.entries(OC_TOOL_MAP)
     .filter(([name]) => allowedSet.has(name))
     .map(([, factory]) => factory());
 
-  // Auto-inject attachment tools when the run has attachments, regardless of allowedTools
+  // Attachment + artifact tools are always on when we know the runId.
+  // They behave correctly on empty folders ("No attachments.") and become
+  // populated when web_fetch or user upload adds files mid-run.
   const runId = options.runId;
-  if (runId !== undefined && hasAttachments(runId)) {
-    ocFsTools.push(...createClaudeAttachmentTools(runId));
-  }
-  // Artifact tools are always on when we know the runId
   if (runId !== undefined) {
+    ocFsTools.push(...createClaudeAttachmentTools(runId));
     ocFsTools.push(...createClaudeArtifactTools(runId));
   }
 

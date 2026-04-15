@@ -1,6 +1,7 @@
 import { spawn } from "bun";
 import { logger } from "../lib/logger";
 import type { Workspace } from "../engine/workspace";
+import { webFetch, formatFetchResult } from "./web-fetch";
 
 export interface ToolDef {
   type: "function";
@@ -16,9 +17,11 @@ export interface BuiltinTool {
   execute: (args: Record<string, unknown>) => Promise<string>;
 }
 
-export function createBuiltinTools(workspace?: Workspace): Record<string, BuiltinTool> {
+export function createBuiltinTools(workspace?: Workspace, runId?: number): Record<string, BuiltinTool> {
   const resolvePath = (p: string) => workspace ? workspace.resolve(p) : p;
+  const webFetchTools = runId !== undefined ? createWebFetchBuiltin(runId) : {};
   return {
+    ...webFetchTools,
     bash: {
       tool: {
         type: "function",
@@ -506,4 +509,38 @@ export const TOOL_NAME_MAP: Record<string, string> = {
   Edit: "edit",
   Glob: "glob",
   Grep: "grep",
+  WebFetch: "web_fetch",
 };
+
+function createWebFetchBuiltin(runId: number): Record<string, BuiltinTool> {
+  return {
+    web_fetch: {
+      tool: {
+        type: "function",
+        function: {
+          name: "web_fetch",
+          description:
+            "Fetch a URL with a real headless browser (handles JavaScript and SPAs), extract the main content as Markdown, and save it to this run's attachments folder. Returns a short status with the saved filename — the page content does NOT come back inline. Use list_attachments to see saved files; read_attachment or grep_attachment to read them. Repeated calls for the same URL within a run reuse the first fetch's saved file.",
+          parameters: {
+            type: "object",
+            required: ["url"],
+            properties: {
+              url: { type: "string", description: "Absolute http(s) URL to fetch" },
+            },
+          },
+        },
+      },
+      execute: async (args) => {
+        try {
+          const url = String(args.url ?? "");
+          if (!url) return "Error: url is required";
+          const result = await webFetch(runId, url);
+          return formatFetchResult(result);
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          return `Error fetching URL: ${msg}`;
+        }
+      },
+    },
+  };
+}

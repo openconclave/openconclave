@@ -8,7 +8,7 @@
 
 import type { ResolvedAgentConfig } from "@openconclave/shared";
 import { createBuiltinTools, TOOL_NAME_MAP, type BuiltinTool } from "./builtin-tools";
-import { createAttachmentBuiltinTools, hasAttachments } from "./attachment-tools";
+import { createAttachmentBuiltinTools } from "./attachment-tools";
 import { createArtifactBuiltinTools } from "./artifact-tools";
 import { McpBridge } from "./mcp-bridge";
 import { logger } from "../lib/logger";
@@ -31,12 +31,15 @@ export class AgentBase {
   private mcpBridge: McpBridge | null = null;
   protected readonly workspace: Workspace;
 
+  private readonly runId?: number;
+
   constructor(
     protected readonly config: ResolvedAgentConfig,
     workspace?: Workspace,
     runId?: number,
   ) {
     this.workspace = workspace ?? new Workspace();
+    this.runId = runId;
     this.resolveBuiltinTools();
     this.resolveKnowledgeTools();
     if (runId !== undefined) {
@@ -48,7 +51,7 @@ export class AgentBase {
   // ── Builtin tools from connected tool nodes ─────────────────
 
   private resolveBuiltinTools(): void {
-    const builtins = createBuiltinTools(this.workspace);
+    const builtins = createBuiltinTools(this.workspace, this.runId);
 
     for (const toolName of this.config.allowedTools) {
       // Map Claude Code names (Bash→bash, Read→read_file) or use direct name
@@ -108,7 +111,6 @@ export class AgentBase {
   // ── Attachment tools (auto-injected when the run has attachments) ──
 
   private resolveAttachmentTools(runId: number): void {
-    if (!hasAttachments(runId)) return;
     const tools = createAttachmentBuiltinTools(runId);
     for (const bt of Object.values(tools)) this.addBuiltin(bt);
   }
