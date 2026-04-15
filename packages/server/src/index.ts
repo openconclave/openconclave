@@ -29,6 +29,8 @@ import { ConclaveExecutor } from "./engine/executor";
 import { getRunWorkspace } from "./engine/graph-walker";
 import { CronScheduler } from "./engine/scheduler";
 import { agentPool } from "./agent/pool";
+import { listArtifacts } from "./agent/artifact-tools";
+import { sessionDirForRun } from "./lib/workspace";
 import { TelegramTrigger } from "./triggers/telegram";
 import { AppError } from "@openconclave/shared";
 import { API_PORT, VERSION } from "@openconclave/shared";
@@ -189,6 +191,41 @@ app.post("/api/runs/:runId/message", async (c) => {
   );
 
   return c.json({ runId, status: "running" });
+});
+
+// ── Artifacts ─────────────────────────────────────────────────
+app.get("/api/runs/:runId/artifacts", (c) => {
+  const runId = Number(c.req.param("runId"));
+  if (isNaN(runId)) throw AppError.validation("Invalid run ID");
+  const artifacts = listArtifacts(runId);
+  const dir = join(sessionDirForRun(runId), "artifacts");
+  return c.json({ data: { artifacts, dir } });
+});
+
+app.post("/api/runs/:runId/artifacts/:filename/reveal", async (c) => {
+  const runId = Number(c.req.param("runId"));
+  if (isNaN(runId)) throw AppError.validation("Invalid run ID");
+  const raw = c.req.param("filename");
+  const { basename } = await import("path");
+  const safe = basename(raw);
+  if (safe !== raw || safe.includes("..") || safe.length === 0) {
+    throw AppError.validation("Invalid filename");
+  }
+  const path = join(sessionDirForRun(runId), "artifacts", safe);
+  if (!existsSync(path)) throw AppError.notFound("Artifact", safe);
+
+  try {
+    if (process.platform === "win32") {
+      Bun.spawn(["explorer", `/select,${path}`]);
+    } else if (process.platform === "darwin") {
+      Bun.spawn(["open", "-R", path]);
+    } else {
+      Bun.spawn(["xdg-open", dirname(path)]);
+    }
+  } catch (err: unknown) {
+    logger.warn("reveal failed", { error: err instanceof Error ? err.message : String(err) });
+  }
+  return c.body(null, 204);
 });
 
 // ── Set working directory for a running conclave ─────────────

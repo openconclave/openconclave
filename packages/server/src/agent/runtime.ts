@@ -20,6 +20,7 @@ import { registerPrompt } from "../engine/prompt-registry";
 import { broadcastRunEvent } from "../ws/broadcast";
 import { createBuiltinTools } from "./builtin-tools";
 import { createClaudeAttachmentTools, hasAttachments } from "./attachment-tools";
+import { createClaudeArtifactTools } from "./artifact-tools";
 import { ROUTING_TOOL_NAME } from "./constants";
 
 function findSystemClaude(): string | undefined {
@@ -251,6 +252,10 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
   const runId = options.runId;
   if (runId !== undefined && hasAttachments(runId)) {
     ocFsTools.push(...createClaudeAttachmentTools(runId));
+  }
+  // Artifact tools are always on when we know the runId
+  if (runId !== undefined) {
+    ocFsTools.push(...createClaudeArtifactTools(runId));
   }
 
   if (ocFsTools.length > 0) {

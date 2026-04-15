@@ -1,7 +1,41 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
-import { Send, Loader2, Bot, User, PlusCircle, Users, Paperclip, X } from "lucide-react";
+import { toast } from "@/components/ui/toast";
+import { Send, Loader2, Bot, User, PlusCircle, Users, Paperclip, X, FileText, Clipboard, FolderOpen } from "lucide-react";
 import { MarkdownContent } from "@/components/ui/markdown-content";
+
+type ArtifactInfo = { filename: string; path: string; size: number; createdAt: string };
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function ArtifactChip({ artifact }: { artifact: ArtifactInfo }) {
+  const copyPath = () => {
+    void navigator.clipboard.writeText(artifact.path);
+    toast("Path copied", "success");
+  };
+  const reveal = () => {
+    const segs = artifact.path.split(/[/\\]/);
+    const runId = segs[segs.length - 3];
+    void fetch(`/api/runs/${runId}/artifacts/${encodeURIComponent(artifact.filename)}/reveal`, { method: "POST" });
+  };
+  return (
+    <div className="inline-flex items-center gap-1.5 rounded-md bg-background/60 border border-border px-2 py-1 text-xs">
+      <FileText className="h-3 w-3 text-muted-foreground" />
+      <span className="font-mono">{artifact.filename}</span>
+      <span className="text-muted-foreground">{formatSize(artifact.size)}</span>
+      <button onClick={copyPath} className="text-muted-foreground hover:text-foreground" title="Copy path">
+        <Clipboard className="h-3 w-3" />
+      </button>
+      <button onClick={reveal} className="text-muted-foreground hover:text-foreground" title="Reveal in explorer">
+        <FolderOpen className="h-3 w-3" />
+      </button>
+    </div>
+  );
+}
 
 interface ChatMessage {
   role: "user" | "assistant" | "agent" | "moderator";
@@ -36,6 +70,7 @@ export function ChatPage() {
   const [dragging, setDragging] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [runArtifacts, setRunArtifacts] = useState<Record<number, ArtifactInfo[]>>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const hydratedRef = useRef(!urlRunId); // true if new chat, false until history loads
@@ -118,6 +153,14 @@ export function ChatPage() {
             });
           }
         }
+
+        // Attach any artifacts the run produced via the per-run artifact map
+        api.get<{ data: { artifacts: ArtifactInfo[] } }>(`/runs/${chatRunId}/artifacts`)
+          .then((res) => {
+            const arts = res.data?.artifacts ?? [];
+            if (arts.length > 0) setRunArtifacts((prev) => ({ ...prev, [chatRunId]: arts }));
+          })
+          .catch(() => {});
 
         if (restored.length > 0) {
           setMessages(restored);
@@ -226,6 +269,16 @@ export function ChatPage() {
             return updated;
           });
           setLoading(false);
+        }
+
+        // Artifact appears mid-run — add to per-run map; render finds the right bubble.
+        if (data.type === "artifact:created" && data.data) {
+          const art = data.data as ArtifactInfo;
+          setRunArtifacts((prev) => {
+            const list = prev[data.runId] ?? [];
+            if (list.some((a) => a.path === art.path)) return prev;
+            return { ...prev, [data.runId]: [...list, art] };
+          });
         }
 
         // Handle run completion — clean up pending messages
@@ -380,7 +433,18 @@ export function ChatPage() {
           </div>
         )}
 
-        {messages.map((msg, i) => (
+        {(() => {
+          // Compute the last assistant/agent bubble index per runId so artifact chips
+          // render on whichever bubble is "most recent" for that run.
+          const lastBubbleIdx = new Map<number, number>();
+          messages.forEach((m, idx) => {
+            if (m.runId != null && (m.role === "assistant" || m.role === "agent") && m.status !== "pending") {
+              lastBubbleIdx.set(m.runId, idx);
+            }
+          });
+          return messages.map((msg, i) => {
+            const arts = msg.runId != null && lastBubbleIdx.get(msg.runId) === i ? runArtifacts[msg.runId] : undefined;
+            return (
           <div key={i} className={`flex gap-3 ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
             {msg.role === "moderator" && (
               <div className="flex-shrink-0 w-7 h-7 rounded-full bg-node-discussion/20 flex items-center justify-center">
@@ -416,7 +480,16 @@ export function ChatPage() {
               ) : msg.role === "user" ? (
                 msg.content
               ) : (
-                <MarkdownContent content={msg.content} />
+                <>
+                  {msg.content && <MarkdownContent content={msg.content} />}
+                  {arts && arts.length > 0 && (
+                    <div className={`flex flex-wrap gap-1.5 ${msg.content ? "mt-2" : ""}`}>
+                      {arts.map((a) => (
+                        <ArtifactChip key={a.path} artifact={a} />
+                      ))}
+                    </div>
+                  )}
+                </>
               )}
             </div>
             {msg.role === "user" && (
@@ -425,7 +498,9 @@ export function ChatPage() {
               </div>
             )}
           </div>
-        ))}
+            );
+          });
+        })()}
         <div ref={messagesEndRef} />
       </div>
 

@@ -21,7 +21,12 @@ import {
   Square,
   RotateCcw,
   MessageSquare,
+  FileText,
+  Clipboard,
+  FolderOpen,
 } from "lucide-react";
+
+type ArtifactInfo = { filename: string; path: string; size: number; createdAt: string };
 
 const statusIcon: Record<string, ReactNode> = {
   queued: <Clock className="h-4 w-4 text-muted-foreground" />,
@@ -182,6 +187,8 @@ export function RunDetailPage() {
   const [expandedEvents, setExpandedEvents] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<number[]>([]);
   const [expandedEventIds, setExpandedEventIds] = useState<number[]>([]);
+  const [artifacts, setArtifacts] = useState<ArtifactInfo[]>([]);
+  const [artifactsDir, setArtifactsDir] = useState<string>("");
 
   const path = window.location.pathname;
   const runId = path.split("/runs/")[1]?.split("/")[0]; // Bug #4 fix: handle trailing slash
@@ -240,6 +247,44 @@ export function RunDetailPage() {
 
     return () => clearInterval(interval);
   }, [runId, data?.run.status]);
+
+  // Artifacts polling — piggybacks on run polling cadence
+  useEffect(() => {
+    if (!runId) return;
+    const load = () => {
+      api
+        .get<{ data: { artifacts: ArtifactInfo[]; dir: string } }>(`/runs/${runId}/artifacts`)
+        .then((res) => {
+          setArtifacts(res.data?.artifacts ?? []);
+          setArtifactsDir(res.data?.dir ?? "");
+        })
+        .catch(() => {});
+    };
+    load();
+    const interval = setInterval(() => {
+      if (data?.run.status === "running" || data?.run.status === "queued") load();
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [runId, data?.run.status]);
+
+  const handleCopyPath = (path: string) => {
+    void navigator.clipboard.writeText(path);
+    toast("Path copied", "success");
+  };
+
+  const handleReveal = async (filename: string) => {
+    try {
+      await fetch(`/api/runs/${runId}/artifacts/${encodeURIComponent(filename)}/reveal`, { method: "POST" });
+    } catch (err: unknown) {
+      toast(`Reveal failed: ${err instanceof Error ? err.message : String(err)}`, "error");
+    }
+  };
+
+  const formatSize = (bytes: number): string => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
 
   const toggleTask = (id: number) => {
     setExpandedTasks((prev) =>
@@ -401,6 +446,56 @@ export function RunDetailPage() {
             {run.completedAt && <span className="ml-4">Completed: {new Date(run.completedAt).toLocaleString()}</span>}
           </div>
         </div>
+
+        {/* Artifacts */}
+        {artifacts.length > 0 && (
+          <div className="rounded-lg border border-border bg-card">
+            <div className="flex items-center justify-between border-b border-border px-4 py-3">
+              <h3 className="text-sm font-semibold">Artifacts ({artifacts.length})</h3>
+              <span className="text-xs text-muted-foreground">
+                {formatSize(artifacts.reduce((s, a) => s + a.size, 0))} total
+              </span>
+            </div>
+            <div className="divide-y divide-border">
+              {artifacts.map((a) => (
+                <div key={a.filename} className="flex items-center gap-3 px-4 py-2.5">
+                  <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <span className="font-mono text-sm truncate flex-1">{a.filename}</span>
+                  <span className="text-xs text-muted-foreground shrink-0 w-16 text-right">{formatSize(a.size)}</span>
+                  <button
+                    onClick={() => handleCopyPath(a.path)}
+                    className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                    title="Copy absolute path"
+                  >
+                    <Clipboard className="h-3.5 w-3.5" />
+                    Copy path
+                  </button>
+                  <button
+                    onClick={() => handleReveal(a.filename)}
+                    className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                    title="Reveal in file explorer"
+                  >
+                    <FolderOpen className="h-3.5 w-3.5" />
+                    Open
+                  </button>
+                </div>
+              ))}
+            </div>
+            {artifactsDir && (
+              <div className="flex items-center gap-2 border-t border-border px-4 py-2 text-xs text-muted-foreground">
+                <span>Location:</span>
+                <span className="font-mono truncate flex-1">{artifactsDir}</span>
+                <button
+                  onClick={() => handleCopyPath(artifactsDir)}
+                  className="text-muted-foreground hover:text-foreground transition-colors"
+                  title="Copy folder path"
+                >
+                  <Clipboard className="h-3 w-3" />
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Agent Tasks */}
         <div className="rounded-lg border border-border bg-card">
