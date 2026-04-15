@@ -92,10 +92,13 @@ app.post("/api/conclaves/:id/run", async (c) => {
   const nodes = (definition.nodes ?? []) as Array<{ id: string; data?: { type?: string } }>;
   const triggerNode = nodes.find((n) => n.data?.type === "trigger");
 
+  const attachments = body.attachments as Array<{ filename: string; contentBase64: string }> | undefined;
+
   const runId = await executor.execute(
     definition as never,
     body.payload,
-    triggerNode?.id
+    triggerNode?.id,
+    attachments
   );
 
   return c.json({ runId, status: "running" }, 201);
@@ -175,11 +178,14 @@ app.post("/api/runs/:runId/message", async (c) => {
     data: { content: message },
   });
 
+  const attachments = body.attachments as Array<{ filename: string; contentBase64: string }> | undefined;
+
   await executor.executeInRun(
     runId,
     definition as never,
     message,
-    triggerNode?.id
+    triggerNode?.id,
+    attachments
   );
 
   return c.json({ runId, status: "running" });

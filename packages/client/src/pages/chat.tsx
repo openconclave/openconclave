@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
-import { Send, Loader2, Bot, User, PlusCircle, Users } from "lucide-react";
+import { Send, Loader2, Bot, User, PlusCircle, Users, Paperclip, X } from "lucide-react";
 import { MarkdownContent } from "@/components/ui/markdown-content";
 
 interface ChatMessage {
@@ -32,6 +32,8 @@ export function ChatPage() {
   const [chatRunId, setChatRunId] = useState<number | null>(urlRunId ? Number(urlRunId) : null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
+  const [attachments, setAttachments] = useState<File[]>([]);
+  const [dragging, setDragging] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -252,25 +254,68 @@ export function ChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  const MAX_FILE_BYTES = 1 * 1024 * 1024;
+  const MAX_TOTAL_BYTES = 5 * 1024 * 1024;
+
+  const readFileBase64 = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(reader.error);
+      reader.onload = () => {
+        const result = reader.result as string;
+        resolve(result.slice(result.indexOf(",") + 1));
+      };
+      reader.readAsDataURL(file);
+    });
+
+  const addAttachments = async (files: FileList | File[]) => {
+    const incoming = Array.from(files);
+    const existingTotal = attachments.reduce((s, f) => s + f.size, 0);
+    const accepted: File[] = [];
+    let runningTotal = existingTotal;
+    for (const f of incoming) {
+      if (f.size > MAX_FILE_BYTES) { setError(`"${f.name}" exceeds 1 MB`); continue; }
+      if (runningTotal + f.size > MAX_TOTAL_BYTES) { setError("Total attachments exceed 5 MB"); continue; }
+      accepted.push(f);
+      runningTotal += f.size;
+    }
+    if (accepted.length) {
+      setError(null);
+      setAttachments((prev) => [...prev, ...accepted]);
+    }
+  };
+
+  const removeAttachment = (idx: number) => {
+    setAttachments((prev) => prev.filter((_, i) => i !== idx));
+  };
+
   const handleSend = async () => {
-    if (!input.trim() || !conclave || loading) return;
+    if ((!input.trim() && attachments.length === 0) || !conclave || loading) return;
 
     const userMessage = input.trim();
+    const stagedFiles = attachments;
     setInput("");
+    setAttachments([]);
     setLoading(true);
 
-    // Add user message
-    setMessages((prev) => [...prev, { role: "user", content: userMessage }]);
+    const attachLabel = stagedFiles.length
+      ? stagedFiles.map((f) => `📎 ${f.name}`).join("  ")
+      : "";
+    const displayContent = [attachLabel, userMessage].filter(Boolean).join("\n");
+    setMessages((prev) => [...prev, { role: "user", content: displayContent }]);
 
     try {
+      const encoded = await Promise.all(
+        stagedFiles.map(async (f) => ({ filename: f.name, contentBase64: await readFileBase64(f) }))
+      );
+      const attachmentsPayload = encoded.length ? encoded : undefined;
+
       let runId: number;
       if (chatRunId) {
-        // Continue existing run
-        await api.post(`/runs/${chatRunId}/message`, { message: userMessage });
+        await api.post(`/runs/${chatRunId}/message`, { message: userMessage || "(attachments)", attachments: attachmentsPayload });
         runId = chatRunId;
       } else {
-        // First message — create new run
-        const data = await api.post<{ runId: number }>(`/conclaves/${conclave.id}/run`, { payload: userMessage });
+        const data = await api.post<{ runId: number }>(`/conclaves/${conclave.id}/run`, { payload: userMessage, attachments: attachmentsPayload });
         runId = data.runId;
         setChatRunId(runId);
         window.history.replaceState(null, "", `/${toolName}/chat/${runId}`);
@@ -385,25 +430,63 @@ export function ChatPage() {
       </div>
 
       {/* Input */}
-      <div className="border-t border-border px-6 py-4">
-        <div className="flex gap-2 max-w-3xl mx-auto">
-          <input
-            ref={inputRef}
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
-            placeholder="Type a message..."
-            disabled={loading}
-            className="flex-1 rounded-lg border border-input bg-background px-4 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
-          />
-          <button
-            onClick={handleSend}
-            disabled={!input.trim() || loading}
-            className="rounded-lg bg-primary px-4 py-2.5 text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
-          >
-            <Send className="h-4 w-4" />
-          </button>
+      <div
+        className={`border-t border-border px-6 py-4 transition-colors ${dragging ? "bg-primary/5" : ""}`}
+        onDragOver={(e) => { e.preventDefault(); if (!dragging) setDragging(true); }}
+        onDragLeave={(e) => {
+          if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+          setDragging(false);
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragging(false);
+          if (e.dataTransfer.files.length) void addAttachments(e.dataTransfer.files);
+        }}
+      >
+        <div className="max-w-3xl mx-auto space-y-2">
+          {attachments.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {attachments.map((f, i) => (
+                <div
+                  key={`${f.name}-${i}`}
+                  className="inline-flex items-center gap-1.5 rounded-md bg-accent/60 border border-border px-2 py-1 text-xs"
+                >
+                  <Paperclip className="h-3 w-3 text-muted-foreground" />
+                  <span className="font-mono">{f.name}</span>
+                  <span className="text-muted-foreground">{(f.size / 1024).toFixed(1)} KB</span>
+                  <button
+                    onClick={() => removeAttachment(i)}
+                    className="text-muted-foreground hover:text-destructive"
+                    aria-label={`Remove ${f.name}`}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          {error && (
+            <p className="text-xs text-destructive">{error}</p>
+          )}
+          <div className="flex gap-2">
+            <input
+              ref={inputRef}
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
+              placeholder={dragging ? "Drop files here…" : "Type a message..."}
+              disabled={loading}
+              className="flex-1 rounded-lg border border-input bg-background px-4 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
+            />
+            <button
+              onClick={handleSend}
+              disabled={(!input.trim() && attachments.length === 0) || loading}
+              className="rounded-lg bg-primary px-4 py-2.5 text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+            >
+              <Send className="h-4 w-4" />
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -48,6 +48,7 @@ export interface OpenAIRunOptions {
   sessionFile?: string;
   maxTurns?: number;
   onOutput?: (chunk: string) => void;
+  runId?: number;
 }
 
 export interface OpenAIResult {

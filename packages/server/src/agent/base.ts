@@ -8,6 +8,7 @@
 
 import type { ResolvedAgentConfig } from "@openconclave/shared";
 import { createBuiltinTools, TOOL_NAME_MAP, type BuiltinTool } from "./builtin-tools";
+import { createAttachmentBuiltinTools, hasAttachments } from "./attachment-tools";
 import { McpBridge } from "./mcp-bridge";
 import { logger } from "../lib/logger";
 import { Workspace } from "../engine/workspace";
@@ -32,10 +33,12 @@ export class AgentBase {
   constructor(
     protected readonly config: ResolvedAgentConfig,
     workspace?: Workspace,
+    runId?: number,
   ) {
     this.workspace = workspace ?? new Workspace();
     this.resolveBuiltinTools();
     this.resolveKnowledgeTools();
+    if (runId !== undefined) this.resolveAttachmentTools(runId);
   }
 
   // ── Builtin tools from connected tool nodes ─────────────────
@@ -96,6 +99,14 @@ export class AgentBase {
         this.addBuiltin(bt);
       }
     }
+  }
+
+  // ── Attachment tools (auto-injected when the run has attachments) ──
+
+  private resolveAttachmentTools(runId: number): void {
+    if (!hasAttachments(runId)) return;
+    const tools = createAttachmentBuiltinTools(runId);
+    for (const bt of Object.values(tools)) this.addBuiltin(bt);
   }
 
   // ── MCP server tools (from connected MCP tool nodes) ────────

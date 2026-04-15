@@ -10,7 +10,7 @@ import { runOllamaAgent } from "../agent/ollama";
 import { runOpenAIAgent, type OpenAIProvider } from "../agent/openai";
 import type { AgentResult, ThinkingBlock } from "../agent/runtime";
 import { logger } from "../lib/logger";
-import { SESSIONS_DIR } from "../lib/workspace";
+import { sessionDirForRun } from "../lib/workspace";
 import { AppError, ErrorCode } from "@openconclave/shared";
 import type { ResolvedAgentConfig, ConclaveNode, ConclaveEdge } from "@openconclave/shared";
 import { getOutgoingEdges } from "./graph";
@@ -229,7 +229,7 @@ export async function executeAgent(
   for (let attempt = 0; attempt <= MAX_ROUTE_RETRIES; attempt++) {
     if (engine === "debug") {
       // Resolve tools via AgentBase so debug output shows actual tool definitions
-      const agent = new AgentBase(augmentedConfig, workspace);
+      const agent = new AgentBase(augmentedConfig, workspace, runId);
       await agent.connectMcpServers();
       const resolvedTools = agent.toChatTools();
       await agent.disconnect();
@@ -260,8 +260,7 @@ export async function executeAgent(
       break;
     } else if (engine === "ollama") {
       // Session file for Ollama — always create path, reuse on subsequent turns
-      const tmpDir = SESSIONS_DIR;
-      const ollamaSessionFile = sessionId ?? join(tmpDir, `${runId}-${nodeId}.jsonl`);
+      const ollamaSessionFile = sessionId ?? join(sessionDirForRun(runId), `${nodeId}.jsonl`);
 
       result = await runOllamaAgent({
         model: modelName,
@@ -278,6 +277,7 @@ export async function executeAgent(
         sessionFile: ollamaSessionFile,
         maxTurns: config.maxTurns ?? 25,
         thinking: config.thinking ?? true,
+        runId,
         onOutput: (chunk) => {
           emit({ type: "agent:output", runId, nodeId, data: { taskId, chunk } });
         },
@@ -297,7 +297,7 @@ export async function executeAgent(
       }
       const provider = JSON.parse(providerRow.value) as OpenAIProvider;
 
-      const openaiSessionFile = sessionId ?? join(SESSIONS_DIR, `${runId}-${nodeId}.jsonl`);
+      const openaiSessionFile = sessionId ?? join(sessionDirForRun(runId), `${nodeId}.jsonl`);
 
       result = await runOpenAIAgent({
         provider,
@@ -313,6 +313,7 @@ export async function executeAgent(
         extraTools: askUserExtraTools.length > 0 ? askUserExtraTools : undefined,
         sessionFile: openaiSessionFile,
         maxTurns: config.maxTurns ?? 25,
+        runId,
         onOutput: (chunk) => {
           emit({ type: "agent:output", runId, nodeId, data: { taskId, chunk } });
         },
@@ -330,6 +331,7 @@ export async function executeAgent(
         routeTargets,
         promptConfig: firstPromptConfig,
         sessionId: retrySessionId,
+        runId,
         onOutput: (chunk) => {
           emit({ type: "agent:output", runId, nodeId, data: { taskId, chunk } });
         },

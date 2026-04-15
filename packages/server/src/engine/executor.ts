@@ -4,6 +4,7 @@ import { db } from "../db/client";
 import { runs, runEvents, checkpoints } from "../db/schema";
 import { executeGraph } from "./graph-walker";
 import { logger } from "../lib/logger";
+import { saveAttachmentsForRun, type AttachmentInput, type SavedAttachment } from "../lib/workspace";
 import type { ConclaveDefinition } from "@openconclave/shared";
 
 import type { RunEvent, EventCallback } from "./types";
@@ -12,6 +13,15 @@ import type { RunEvent, EventCallback } from "./types";
 export type { RunEvent, EventCallback } from "./types";
 
 // ── Executor ────────────────────────────────────────────────
+
+function applyAttachmentsToPayload(payload: unknown, saved: SavedAttachment[]): unknown {
+  if (!saved.length) return payload;
+  const names = saved.map((a) => a.filename).join(", ");
+  const hint = `[${saved.length} attachment(s): ${names}. Call list_attachments to see them, read_attachment to read, grep_attachment to search.]`;
+  if (typeof payload === "string") return `${hint}\n\n${payload}`;
+  if (payload == null) return hint;
+  return { attachments: saved, payload };
+}
 
 export class ConclaveExecutor {
   private readonly onEvent?: EventCallback;
@@ -25,11 +35,14 @@ export class ConclaveExecutor {
     runId: number,
     conclave: ConclaveDefinition,
     triggerPayload?: unknown,
-    triggerNodeId?: string
+    triggerNodeId?: string,
+    attachments?: AttachmentInput[]
   ): Promise<void> {
     const emit = (event: RunEvent) => this.emit(event);
+    const saved = saveAttachmentsForRun(runId, attachments);
+    const payload = applyAttachmentsToPayload(triggerPayload, saved);
 
-    executeGraph(runId, conclave, emit, triggerPayload, triggerNodeId).catch(
+    executeGraph(runId, conclave, emit, payload, triggerNodeId).catch(
       (err: unknown) => {
         const message = err instanceof Error ? err.message : String(err);
         logger.error(`Run ${runId} continued message failed`, { error: message });
@@ -40,7 +53,8 @@ export class ConclaveExecutor {
   async execute(
     conclave: ConclaveDefinition,
     triggerPayload?: unknown,
-    triggerNodeId?: string
+    triggerNodeId?: string,
+    attachments?: AttachmentInput[]
   ): Promise<number> {
     const now = new Date().toISOString();
 
@@ -58,8 +72,10 @@ export class ConclaveExecutor {
     this.emit({ type: "run:started", runId });
 
     const emit = (event: RunEvent) => this.emit(event);
+    const saved = saveAttachmentsForRun(runId, attachments);
+    const payload = applyAttachmentsToPayload(triggerPayload, saved);
 
-    executeGraph(runId, conclave, emit, triggerPayload, triggerNodeId).catch(
+    executeGraph(runId, conclave, emit, payload, triggerNodeId).catch(
       (err: unknown) => {
         const message = err instanceof Error ? err.message : String(err);
         logger.error(`Run ${runId} failed`, { error: message });

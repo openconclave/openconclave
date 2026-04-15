@@ -50,6 +50,7 @@ export type OllamaRunOptions = {
   maxTurns?: number;
   abortSignal?: AbortSignal;
   onOutput?: (chunk: string) => void;
+  runId?: number;
 };
 
 // ── Result types ─────────────────────────────────────────────

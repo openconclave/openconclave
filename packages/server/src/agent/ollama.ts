@@ -125,7 +125,7 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
     mcpTools: options.mcpTools,
     knowledgeBases: options.knowledgeBases ?? [],
   };
-  const agent = new AgentBase(resolvedConfig, options.workspace);
+  const agent = new AgentBase(resolvedConfig, options.workspace, options.runId);
   await agent.connectMcpServers();
 
   const activeTools: OllamaTool[] = agent.toChatTools() as OllamaTool[];

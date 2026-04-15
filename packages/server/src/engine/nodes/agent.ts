@@ -1,8 +1,8 @@
 import { join } from "path";
-import { mkdirSync, existsSync, appendFileSync } from "fs";
+import { existsSync, appendFileSync } from "fs";
 import type { ConclaveNode, ConclaveEdge, AgentConfig, ResolvedAgentConfig, ToolConfig } from "@openconclave/shared";
 import { executeAgent } from "../agent-executor";
-import { SESSIONS_DIR } from "../../lib/workspace";
+import { sessionDirForRun } from "../../lib/workspace";
 import type { RunEvent } from "../types";
 import type { Workspace } from "../workspace";
 
@@ -83,9 +83,7 @@ export async function executeAgentNode(
       agentSessions.set(nodeId, agentResult.sessionId);
     }
   } else {
-    const sessionDir = SESSIONS_DIR;
-    mkdirSync(sessionDir, { recursive: true });
-    const sessionFile = agentSessions.get(nodeId) ?? join(sessionDir, `${runId}-${nodeId}.jsonl`);
+    const sessionFile = agentSessions.get(nodeId) ?? join(sessionDirForRun(runId), `${nodeId}.jsonl`);
 
     if (!existsSync(sessionFile)) {
       appendFileSync(sessionFile, JSON.stringify({ role: "system", content: fullSystemPrompt }) + "\n");

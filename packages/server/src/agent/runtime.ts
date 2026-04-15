@@ -19,6 +19,7 @@ import { ingestText } from "../knowledge/ingest";
 import { registerPrompt } from "../engine/prompt-registry";
 import { broadcastRunEvent } from "../ws/broadcast";
 import { createBuiltinTools } from "./builtin-tools";
+import { createClaudeAttachmentTools, hasAttachments } from "./attachment-tools";
 import { ROUTING_TOOL_NAME } from "./constants";
 
 function findSystemClaude(): string | undefined {
@@ -116,6 +117,7 @@ export type AgentRunOptions = {
   env?: Record<string, string>;
   abortController?: AbortController;
   onOutput?: (chunk: string) => void;
+  runId?: number;
 };
 
 export const ALLOWED_MODELS = new Set(["sonnet", "opus", "haiku"]);
@@ -244,6 +246,12 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
   const ocFsTools = Object.entries(OC_TOOL_MAP)
     .filter(([name]) => allowedSet.has(name))
     .map(([, factory]) => factory());
+
+  // Auto-inject attachment tools when the run has attachments, regardless of allowedTools
+  const runId = options.runId;
+  if (runId !== undefined && hasAttachments(runId)) {
+    ocFsTools.push(...createClaudeAttachmentTools(runId));
+  }
 
   if (ocFsTools.length > 0) {
     mcpServers["oc"] = createSdkMcpServer({
