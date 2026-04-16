@@ -1,1 +1,0 @@
-claude --dangerously-load-development-channels plugin:openconclave-channel@openconclave --effort high

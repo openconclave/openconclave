@@ -76,6 +76,69 @@ export async function checkOllama(): Promise<OllamaStatus> {
   }
 }
 
+// ── Ollama streaming response reader ──────────────────────────
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function readOllamaStream(res: Response, onOutput?: (text: string) => void): Promise<any> {
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  let thinking = "";
+  let content = "";
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let toolCalls: any[] | undefined;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let finalMsg: any = null;
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+
+    const lines = buf.split("\n");
+    buf = lines.pop()!;
+
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const chunk = JSON.parse(line) as any;
+        const msg = chunk.message;
+        if (msg?.thinking) thinking += msg.thinking;
+        if (msg?.content) {
+          content += msg.content;
+          onOutput?.(msg.content);
+        }
+        if (msg?.tool_calls) toolCalls = msg.tool_calls;
+        if (chunk.done) finalMsg = chunk;
+      } catch { /* skip malformed lines */ }
+    }
+  }
+
+  if (buf.trim()) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const chunk = JSON.parse(buf) as any;
+      const msg = chunk.message;
+      if (msg?.thinking) thinking += msg.thinking;
+      if (msg?.content) content += msg.content;
+      if (msg?.tool_calls) toolCalls = msg.tool_calls;
+      if (chunk.done) finalMsg = chunk;
+    } catch { /* skip */ }
+  }
+
+  return {
+    role: "assistant",
+    content: content || undefined,
+    thinking: thinking || undefined,
+    tool_calls: toolCalls,
+    ...(finalMsg?.message ?? {}),
+    // Override with accumulated values (streaming chunks are deltas)
+    ...(content ? { content } : {}),
+    ...(thinking ? { thinking } : {}),
+  };
+}
+
 // ── Agent runtime loop ────────────────────────────────────────
 
 export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaResult> {
@@ -158,7 +221,7 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
       const body: Record<string, unknown> = {
         model,
         messages,
-        stream: false,
+        stream: true,
         think: options.thinking ?? true,
         options: { num_ctx: 32768 },
       };
@@ -173,11 +236,19 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
         tools: hasTools ? activeTools : undefined,
       });
 
+      // Bun's fetch has a 30s default timeout — far too short for local LLM
+      // inference (time-to-first-token on a 9B model with thinking can exceed 60s).
+      // Combine the pool's cancellation signal with a 10-minute deadline.
+      const timeoutSignal = AbortSignal.timeout(600_000);
+      const fetchSignal = abortSignal
+        ? AbortSignal.any([abortSignal, timeoutSignal])
+        : timeoutSignal;
+
       const res = await fetch(`${OLLAMA_URL}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
-        signal: abortSignal,
+        signal: fetchSignal,
       });
 
       if (!res.ok) {
@@ -192,9 +263,7 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
       }
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const data = (await res.json()) as any;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const assistantMsg = data.message as any;
+      const assistantMsg = await readOllamaStream(res, onOutput) as any;
       ollamaLog(`RESPONSE turn ${turn + 1}`, {
         thinking: assistantMsg.thinking?.slice(0, 500),
         content: assistantMsg.content?.slice(0, 500),
