@@ -8,12 +8,14 @@
  */
 import { createHash } from "crypto";
 import { mkdirSync, rmSync, statSync, writeFileSync } from "fs";
+import { lookup } from "dns/promises";
+import { isIPv4, isIPv6 } from "net";
 import { join } from "path";
 import { Readability } from "@mozilla/readability";
 import { JSDOM } from "jsdom";
 import TurndownService from "turndown";
 
-import { launchChromium, type ChromiumProcess } from "./chromium-manager";
+import { launchChromium, releaseProfileDir, type ChromiumProcess } from "./chromium-manager";
 import { sessionDirForRun } from "../lib/workspace";
 import { logger } from "../lib/logger";
 
@@ -23,11 +25,8 @@ const MAX_CONCURRENT_FETCHES = 6;
 const NAV_TIMEOUT_MS = 30_000;
 const LOAD_TIMEOUT_MS = 30_000;
 const EVAL_TIMEOUT_MS = 10_000;
-
-const PRIVATE_IP_RE = [
-  /^127\./, /^10\./, /^172\.(1[6-9]|2[0-9]|3[0-1])\./, /^192\.168\./,
-  /^169\.254\./, /^::1$/, /^fc/i, /^fd/i,
-];
+const MAX_URL_LENGTH = 2048;
+const MAX_HTML_BYTES = 10_000_000; // 10 MB cap on serialized DOM to prevent OOM
 
 // ── Semaphore ───────────────────────────────────────────────────────
 
@@ -146,31 +145,114 @@ export async function shutdownWebFetchBrowser(): Promise<void> {
   if (!browser) return;
   const b = browser;
   browser = null;
-  try { b.cdp.close(); } catch { /* */ }
-  try { b.chrome.proc.kill(); await b.chrome.proc.exited; } catch { /* */ }
-  try { rmSync(b.chrome.profileDir, { recursive: true, force: true }); } catch { /* */ }
+  try { b.cdp.close(); } catch (err) { logger.warn("web_fetch: CDP close failed", { err: String(err) }); }
+  try { b.chrome.proc.kill(); await b.chrome.proc.exited; } catch (err) { logger.warn("web_fetch: browser process kill failed", { err: String(err) }); }
+  try { rmSync(b.chrome.profileDir, { recursive: true, force: true }); } catch (err) { logger.warn("web_fetch: profile dir removal failed", { err: String(err) }); }
+  releaseProfileDir(b.chrome.profileDir);
 }
 
 // ── Fetch + extract ─────────────────────────────────────────────────
 
-function isBlockedUrl(url: URL): boolean {
-  const host = url.hostname.toLowerCase();
-  if (host === "localhost") return true;
-  return PRIVATE_IP_RE.some((re) => re.test(host));
+// Private/reserved IPv4 ranges as [networkInt, prefix] pairs.
+// Covers RFC 1918, loopback, link-local, CGNAT, TEST-NET, multicast, reserved.
+const PRIVATE_V4_RANGES: Array<[number, number]> = [
+  [0x00000000, 8],  // 0.0.0.0/8
+  [0x0A000000, 8],  // 10.0.0.0/8
+  [0x7F000000, 8],  // 127.0.0.0/8 loopback
+  [0xA9FE0000, 16], // 169.254.0.0/16 link-local
+  [0xAC100000, 12], // 172.16.0.0/12
+  [0xC0A80000, 16], // 192.168.0.0/16
+  [0x64400000, 10], // 100.64.0.0/10 CGNAT
+  [0xC0000000, 24], // 192.0.0.0/24 IETF
+  [0xC0000200, 24], // 192.0.2.0/24 TEST-NET-1
+  [0xC6336400, 24], // 198.51.100.0/24 TEST-NET-2
+  [0xCB007100, 24], // 203.0.113.0/24 TEST-NET-3
+  [0xE0000000, 4],  // 224.0.0.0/4 multicast
+  [0xF0000000, 4],  // 240.0.0.0/4 reserved
+];
+
+function ipv4ToInt(ip: string): number | null {
+  const parts = ip.split(".");
+  if (parts.length !== 4) return null;
+  let n = 0;
+  for (const p of parts) {
+    const b = Number(p);
+    if (!Number.isInteger(b) || b < 0 || b > 255) return null;
+    n = (n * 256) + b;
+  }
+  return n >>> 0;
 }
 
-function validateUrl(raw: string): URL {
+function isPrivateV4(ip: string): boolean {
+  const int = ipv4ToInt(ip);
+  if (int === null) return false;
+  for (const [net, prefix] of PRIVATE_V4_RANGES) {
+    const mask = prefix === 0 ? 0 : (0xFFFFFFFF << (32 - prefix)) >>> 0;
+    if ((int & mask) === (net & mask)) return true;
+  }
+  return false;
+}
+
+function isPrivateV6(ip: string): boolean {
+  const normalized = ip.toLowerCase().replace(/^\[|\]$/g, "");
+  // IPv4-mapped IPv6 (::ffff:a.b.c.d) — check the embedded IPv4.
+  const mapped = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (mapped) return isPrivateV4(mapped[1]!);
+  if (normalized === "::" || normalized === "::1") return true;
+  if (normalized.startsWith("fc") || normalized.startsWith("fd")) return true; // fc00::/7 ULA
+  if (normalized.startsWith("fe80:") || normalized.startsWith("fe8") || normalized.startsWith("fe9") || normalized.startsWith("fea") || normalized.startsWith("feb")) return true; // fe80::/10 link-local
+  if (normalized.startsWith("ff")) return true; // multicast
+  return false;
+}
+
+async function isBlockedHost(hostname: string): Promise<boolean> {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (host === "localhost" || host.endsWith(".localhost")) return true;
+
+  // If host is a literal IP, check it directly.
+  if (isIPv4(host)) return isPrivateV4(host);
+  if (isIPv6(host)) return isPrivateV6(host);
+
+  // Otherwise resolve DNS and check every returned A/AAAA record.
+  try {
+    const addrs = await lookup(host, { all: true });
+    for (const a of addrs) {
+      if (a.family === 4 && isPrivateV4(a.address)) return true;
+      if (a.family === 6 && isPrivateV6(a.address)) return true;
+    }
+    return false;
+  } catch (err) {
+    // DNS failure — treat as blocked rather than leaking into the browser unvalidated.
+    logger.warn("web_fetch: DNS resolution failed, blocking", { host, err: String(err) });
+    return true;
+  }
+}
+
+async function validateUrl(raw: string): Promise<URL> {
+  if (typeof raw !== "string") throw new Error("URL must be a string");
+  if (raw.length > MAX_URL_LENGTH) throw new Error(`URL exceeds max length ${MAX_URL_LENGTH}`);
   const url = new URL(raw);
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error(`Unsupported protocol: ${url.protocol}`);
   }
-  if (isBlockedUrl(url)) throw new Error(`Blocked host (private/loopback): ${url.hostname}`);
+  if (await isBlockedHost(url.hostname)) {
+    throw new Error(`Blocked host (private/loopback/unresolvable): ${url.hostname}`);
+  }
   return url;
 }
 
 async function renderPageHtml(url: string): Promise<string> {
   const b = await ensureBrowser();
-  const { targetId } = await b.cdp.send<{ targetId: string }>("Target.createTarget", { url: "about:blank" });
+  // Fresh browser context per fetch isolates cookies / localStorage / cache
+  // / service workers from other fetches in the same process.
+  const { browserContextId } = await b.cdp.send<{ browserContextId: string }>(
+    "Target.createBrowserContext",
+    { disposeOnDetach: true },
+  );
+  const { targetId } = await b.cdp.send<{ targetId: string }>(
+    "Target.createTarget",
+    { url: "about:blank", browserContextId },
+  );
   const { sessionId } = await b.cdp.send<{ sessionId: string }>("Target.attachToTarget", { targetId, flatten: true });
   try {
     await b.cdp.send("Page.enable", {}, sessionId);
@@ -183,12 +265,20 @@ async function renderPageHtml(url: string): Promise<string> {
     ]);
     const result = await b.cdp.send<{ result: { value: string } }>(
       "Runtime.evaluate",
-      { expression: "document.documentElement.outerHTML", returnByValue: true, timeout: EVAL_TIMEOUT_MS },
+      {
+        // Cap serialized HTML to prevent OOM on pathologically large DOMs.
+        expression: `document.documentElement.outerHTML.slice(0, ${MAX_HTML_BYTES})`,
+        returnByValue: true,
+        timeout: EVAL_TIMEOUT_MS,
+      },
       sessionId,
     );
     return result.result.value;
   } finally {
-    await b.cdp.send("Target.closeTarget", { targetId }).catch(() => { /* tab already gone */ });
+    await b.cdp.send("Target.closeTarget", { targetId }).catch((err) => {
+      logger.debug("web_fetch: Target.closeTarget failed", { err: String(err) });
+    });
+    // disposeOnDetach:true on the context cleans itself when the target closes.
   }
 }
 
@@ -244,7 +334,7 @@ export function clearWebFetchRunState(runId: number): void {
 
 function attachmentsDir(runId: number): string {
   const dir = join(sessionDirForRun(runId), "attachments");
-  mkdirSync(dir, { recursive: true });
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
   return dir;
 }
 
@@ -257,14 +347,14 @@ export type FetchResult = {
 };
 
 async function doFetchAndSave(runId: number, rawUrl: string): Promise<string> {
-  const url = validateUrl(rawUrl);
+  const url = await validateUrl(rawUrl);
   const filename = filenameFor(url, rawUrl);
   const path = join(attachmentsDir(runId), filename);
 
   logger.info("web_fetch: rendering", { runId, url: rawUrl });
   const html = await renderPageHtml(url.toString());
   const markdown = htmlToMarkdown(html, url.toString());
-  writeFileSync(path, markdown);
+  writeFileSync(path, markdown, { mode: 0o600 });
   logger.info("web_fetch: saved", { runId, filename, size: markdown.length });
   return filename;
 }
