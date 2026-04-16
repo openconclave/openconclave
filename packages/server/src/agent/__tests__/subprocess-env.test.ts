@@ -111,7 +111,9 @@ describe("buildSubprocessEnv: blocks secrets", () => {
   for (const [key, value] of SECRETS) {
     test(`blocks ${key}`, () => {
       withEnv({ [key]: value }, () => {
-        expect(buildSubprocessEnv()).not.toHaveProperty(key);
+        // SDK 0.2.111+ overlays env on process.env, so blocked keys must be
+        // present with empty string — omission would let the parent value leak.
+        expect(buildSubprocessEnv()[key]).toBe("");
       });
     });
   }
@@ -123,13 +125,13 @@ describe("buildSubprocessEnv: blocks secrets", () => {
 describe("buildSubprocessEnv: blocks auth credentials", () => {
   test("blocks ANTHROPIC_API_KEY", () => {
     withEnv({ ANTHROPIC_API_KEY: "sk-ant-test" }, () => {
-      expect(buildSubprocessEnv()).not.toHaveProperty("ANTHROPIC_API_KEY");
+      expect(buildSubprocessEnv().ANTHROPIC_API_KEY).toBe("");
     });
   });
 
   test("blocks CLAUDE_CODE_OAUTH_TOKEN", () => {
     withEnv({ CLAUDE_CODE_OAUTH_TOKEN: "oauth-tok" }, () => {
-      expect(buildSubprocessEnv()).not.toHaveProperty("CLAUDE_CODE_OAUTH_TOKEN");
+      expect(buildSubprocessEnv().CLAUDE_CODE_OAUTH_TOKEN).toBe("");
     });
   });
 });
@@ -159,8 +161,8 @@ describe("buildSubprocessEnv: extra parameter", () => {
       SESSION_SECRET: "leaked",
       NORMAL_VAR: "ok",
     });
-    expect(env).not.toHaveProperty("AWS_ACCESS_KEY_ID");
-    expect(env).not.toHaveProperty("SESSION_SECRET");
+    expect(env.AWS_ACCESS_KEY_ID).toBe("");
+    expect(env.SESSION_SECRET).toBe("");
     expect(env.NORMAL_VAR).toBe("ok");
   });
 });
@@ -171,35 +173,38 @@ describe("buildSubprocessEnv: pattern robustness", () => {
   test("blocks all vars ending in _KEY", () => {
     withEnv({ SOME_RANDOM_KEY: "value", ANTHROPIC_API_KEY: "sk-ant", OPENAI_API_KEY: "sk-oai" }, () => {
       const env = buildSubprocessEnv();
-      expect(env).not.toHaveProperty("SOME_RANDOM_KEY");
-      expect(env).not.toHaveProperty("ANTHROPIC_API_KEY");
-      expect(env).not.toHaveProperty("OPENAI_API_KEY");
+      expect(env.SOME_RANDOM_KEY).toBe("");
+      expect(env.ANTHROPIC_API_KEY).toBe("");
+      expect(env.OPENAI_API_KEY).toBe("");
     });
   });
 
   test("blocks all vars ending in _TOKEN", () => {
     withEnv({ SLACK_BOT_TOKEN: "xoxb-test", CLAUDE_CODE_OAUTH_TOKEN: "oauth", GITHUB_TOKEN: "ghp" }, () => {
       const env = buildSubprocessEnv();
-      expect(env).not.toHaveProperty("SLACK_BOT_TOKEN");
-      expect(env).not.toHaveProperty("CLAUDE_CODE_OAUTH_TOKEN");
-      expect(env).not.toHaveProperty("GITHUB_TOKEN");
+      expect(env.SLACK_BOT_TOKEN).toBe("");
+      expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe("");
+      expect(env.GITHUB_TOKEN).toBe("");
     });
   });
 
   test("blocks vars containing SECRET regardless of position", () => {
     withEnv({ MY_SECRET_VALUE: "s1", SECRET_THING: "s2", THING_SECRET: "s3" }, () => {
       const env = buildSubprocessEnv();
-      expect(env).not.toHaveProperty("MY_SECRET_VALUE");
-      expect(env).not.toHaveProperty("SECRET_THING");
-      expect(env).not.toHaveProperty("THING_SECRET");
+      expect(env.MY_SECRET_VALUE).toBe("");
+      expect(env.SECRET_THING).toBe("");
+      expect(env.THING_SECRET).toBe("");
     });
   });
 
   test("blocks vars containing PASSWORD regardless of case", () => {
+    // Windows env vars are case-insensitive: setting both collapses to one entry.
+    // Either casing must be blanked (or absent entirely, which is equivalent for
+    // overlay-mode env since process.env doesn't have the other casing).
     withEnv({ db_password: "p1", DB_PASSWORD: "p2" }, () => {
       const env = buildSubprocessEnv();
-      expect(env).not.toHaveProperty("db_password");
-      expect(env).not.toHaveProperty("DB_PASSWORD");
+      expect(env.db_password ?? "").toBe("");
+      expect(env.DB_PASSWORD ?? "").toBe("");
     });
   });
 

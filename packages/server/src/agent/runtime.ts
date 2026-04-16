@@ -78,7 +78,10 @@ console.log(`[claude-cli] ${cliPath.includes("cli.js") ? "embedded" : "system"}:
 
 // Block secrets from spawned Claude CLI subprocesses. A prompt-injected
 // agent with `bypassPermissions` can exfiltrate env vars via MCP servers.
-// Strategy: pass everything EXCEPT vars matching secret-like patterns.
+// Strategy: pass everything EXCEPT vars matching secret-like patterns. SDK
+// 0.2.111+ overlays `options.env` on top of inherited process.env instead of
+// replacing it, so blocked keys must be explicitly blanked — omitting them
+// would leak the parent value.
 const BLOCKED_ENV_PATTERNS = [
   /secret/i,
   /password/i,
@@ -108,12 +111,11 @@ function isBlockedEnvKey(key: string): boolean {
 export function buildSubprocessEnv(extra: Record<string, string> = {}): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) {
-    if (!isBlockedEnvKey(k) && v !== undefined) out[k] = v;
+    if (v === undefined) continue;
+    out[k] = isBlockedEnvKey(k) ? "" : v;
   }
-  // Apply the same filter to caller-supplied extras so a future caller can't
-  // reintroduce blocked keys after the process-env pass.
   for (const [k, v] of Object.entries(extra)) {
-    if (!isBlockedEnvKey(k)) out[k] = v;
+    out[k] = isBlockedEnvKey(k) ? "" : v;
   }
   return out;
 }
@@ -652,9 +654,16 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
         // Only servers explicitly passed in mcpServers above will be available.
         strictMcpConfig: true,
         resume: options.sessionId,
+        // Adaptive thinking is required on Opus 4.7 (enabled+budgetTokens returns 400).
+        // display: "summarized" keeps thinking text visible in the response stream so
+        // our thinking-block capture at the assistant-message loop still works — the
+        // new 4.7 default is "omitted", which would silently blank block.thinking.
+        // effort: "high" matches the depth we got from budgetTokens: 31999 on 4.6.
+        // Consider "xhigh" for agentic/coding workloads once we've priced the delta.
         thinking: config.thinking === false
           ? { type: "disabled" as const }
-          : { type: "enabled" as const, budgetTokens: 31999 },
+          : { type: "adaptive" as const, display: "summarized" as const },
+        effort: "high" as const,
         stderr: (data: string) => onOutput?.(`[CLI stderr] ${data}`),
         abortController,
       },

@@ -1,0 +1,11 @@
+diff --git a/node_modules/@anthropic-ai/claude-agent-sdk/tempfile.js b/tempfile.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..4edf34ee6989504ccf22d5075ffa532a93420ffc
+--- /dev/null
++++ b/tempfile.js
+@@ -0,0 +1,5 @@
++// Shim for upstream bug — https://github.com/anthropics/claude-agent-sdk-typescript/issues/273
++// tempfile.js is referenced by extractFromBunfs.js but missing from the published tarball
++// since 0.2.96. Delegates to os.tmpdir() which is what the upstream file almost certainly
++// did. Remove this patch once the SDK ships tempfile.js (expected in 0.2.112+).
++export { tmpdir } from 'os'
