@@ -3,7 +3,7 @@ import type { SDKMessage, McpServerConfig } from "@anthropic-ai/claude-agent-sdk
 import embeddedCliPath from "@anthropic-ai/claude-agent-sdk/embed";
 import { createHash } from "crypto";
 import { execFileSync } from "child_process";
-import { mkdirSync, readFileSync, existsSync, chmodSync, renameSync, writeFileSync } from "fs";
+import { mkdirSync, readFileSync, existsSync, chmodSync, renameSync, writeFileSync, statSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { eq } from "drizzle-orm";
@@ -45,20 +45,31 @@ function resolveCliPath(path: string): string {
     const dir = join(tmpdir(), `claude-agent-sdk-${hash}`);
     out = join(dir, "cli.js");
     if (existsSync(out)) return out;
-    // mode 0o700 prevents other users on the host from pre-placing a malicious
-    // cli.js in this directory under a permissive umask.
+    // mode 0o700 only applies to directories we newly create; if `dir` already
+    // exists with looser perms, mkdirSync leaves it alone. Verify explicitly
+    // on POSIX so an attacker with shared-tmpdir access can't pre-place a
+    // malicious cli.js under a world-writable directory we then execute.
     mkdirSync(dir, { recursive: true, mode: 0o700 });
+    if (process.platform !== "win32") {
+      const st = statSync(dir);
+      const mode = st.mode & 0o777;
+      if (mode !== 0o700) {
+        throw new Error(`CLI cache dir ${dir} has mode ${mode.toString(8)}, expected 700`);
+      }
+    }
     const tmp = join(dir, `cli.js.tmp.${process.pid}`);
     writeFileSync(tmp, content);
     try { chmodSync(tmp, 0o755); } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'EPERM') throw e; }
     renameSync(tmp, out);
     return out;
-  } catch {
+  } catch (err) {
     // Honest-race recovery: if another process already extracted the file
-    // (their renameSync won, ours threw EPERM), return the existing file
-    // instead of falling back to the unresolvable bunfs path.
+    // (their renameSync won, ours threw EPERM), return the existing file.
     if (out && existsSync(out)) return out;
-    return path;
+    // Any other failure (disk full, permission denied, bad mode) is fatal —
+    // returning the bunfs path would let the SDK try to spawn it and fail
+    // with a cryptic "no such file" later.
+    throw err;
   }
 }
 
@@ -75,7 +86,18 @@ const BLOCKED_ENV_PATTERNS = [
   /private.?key/i,
   /^database.?url$/i,
   /^redis.?url$/i,
-  /^mongo.?uri$/i,
+  // `mongo.?uri` missed MONGODB_URI (4 chars between MONGO and URI); broaden.
+  /^mongo.*(uri|url)$/i,
+  // Cloud-provider creds: AWS_ACCESS_KEY_ID (ends _ID, not _KEY), GOOGLE_APPLICATION_CREDENTIALS, etc.
+  /^aws_/i,
+  /^azure_/i,
+  /^gcp_/i,
+  /^google_application_/i,
+  // Package-manager / SSH / Kubernetes / DSNs / personal access tokens.
+  /^npm_config_/i,
+  /^(ssh_auth_sock|kubeconfig)$/i,
+  /_dsn$/i,
+  /_pat$/i,
   /_(key|token)$/i,
 ];
 
@@ -88,7 +110,12 @@ export function buildSubprocessEnv(extra: Record<string, string> = {}): Record<s
   for (const [k, v] of Object.entries(process.env)) {
     if (!isBlockedEnvKey(k) && v !== undefined) out[k] = v;
   }
-  return { ...out, ...extra };
+  // Apply the same filter to caller-supplied extras so a future caller can't
+  // reintroduce blocked keys after the process-env pass.
+  for (const [k, v] of Object.entries(extra)) {
+    if (!isBlockedEnvKey(k)) out[k] = v;
+  }
+  return out;
 }
 
 export interface ThinkingBlock {
@@ -126,15 +153,39 @@ const CONCLAVE_MCP_SERVER_ID = "openconclave-conclave";
 
 export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentResult> {
   const { config, input, env, abortController, onOutput } = options;
-  const ws = options.workspace ?? new Workspace();
+  // Require an explicit workspace so we never silently fall back to process.cwd()
+  // (issue #30: that fallback lets agents escape the run's intended working dir).
+  if (!options.workspace) {
+    throw new Error("runClaudeAgent requires options.workspace — none was provided");
+  }
+  const ws = options.workspace;
   const startTime = Date.now();
 
-  // Build the prompt
   let prompt: string;
-  const INPUT_MAX_BYTES = 100_000;
+  const INPUT_MAX_CHARS = 100_000;
   if (input !== undefined && input !== null && input !== "") {
-    const raw = typeof input === "string" ? input : JSON.stringify(input, null, 2);
-    prompt = raw.length > INPUT_MAX_BYTES ? raw.slice(0, INPUT_MAX_BYTES) + "\n...[truncated]" : raw;
+    let raw: string;
+    if (typeof input === "string") {
+      raw = input;
+    } else {
+      try {
+        raw = JSON.stringify(input, null, 2);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return {
+          success: false,
+          output: "",
+          error: `Failed to serialize input: ${msg}`,
+          durationMs: Date.now() - startTime,
+        };
+      }
+    }
+    if (raw.length > INPUT_MAX_CHARS) {
+      onOutput?.(`[input truncated from ${raw.length} to ${INPUT_MAX_CHARS} chars]\n`);
+      prompt = raw.slice(0, INPUT_MAX_CHARS) + "\n...[truncated]";
+    } else {
+      prompt = raw;
+    }
   } else {
     prompt = "Start";
   }
@@ -242,17 +293,25 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
         content: [{ type: "text" as const, text: await ocBuiltins.bash!.execute({ command }) }],
       }),
     ),
-    WebFetch: () => tool(
+  };
+
+  // WebFetch is populated by createBuiltinTools only when runId is defined
+  // (attachments folder is per-run). Register the SDK tool only then, so a
+  // caller that requests WebFetch without runId gets a clear "tool unavailable"
+  // signal instead of a cryptic TypeError at invocation time.
+  if (ocBuiltins.web_fetch) {
+    const webFetch = ocBuiltins.web_fetch;
+    OC_TOOL_MAP.WebFetch = () => tool(
       "web_fetch",
       "Fetch a URL with a real headless browser (handles JavaScript and SPAs), extract the main content as Markdown, and save it to this run's attachments folder. Returns a short status with the saved filename — the page content does NOT come back inline. Use list_attachments to see saved files; read_attachment or grep_attachment to read them. Repeated calls for the same URL within a run reuse the first fetch's saved file.",
       {
         url: z.string().describe("Absolute http(s) URL to fetch"),
       },
       async ({ url }) => ({
-        content: [{ type: "text" as const, text: await ocBuiltins.web_fetch!.execute({ url }) }],
+        content: [{ type: "text" as const, text: await webFetch.execute({ url }) }],
       }),
-    ),
-  };
+    );
+  }
 
   const ocFsTools = Object.entries(OC_TOOL_MAP)
     .filter(([name]) => allowedSet.has(name))
@@ -280,7 +339,11 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
   // works inside Bun compiled binaries (where conclave-mcp-server.ts lives at a
   // virtual bunfs path that a spawned `bun run` cannot reach).
   const routeTargets = options.routeTargets;
-  const knowledgeBaseIds = config.knowledgeBases?.map(Number).filter((n) => !isNaN(n)) ?? [];
+  // Reject empty strings and non-integer inputs — Number("") returns 0, which
+  // would silently pass an !isNaN check and authorise KB id 0.
+  const knowledgeBaseIds = (config.knowledgeBases ?? [])
+    .filter((s) => /^\d+$/.test(s))
+    .map(Number);
   const promptConfig = options.promptConfig;
   const routingState: { routeTo?: string; routeContent?: string } = {};
 
@@ -312,7 +375,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
         },
         async ({ node_id, content }) => {
           if (routingState.routeTo) {
-            return { isError: true, content: [{ type: "text", text: `Route already set to ${routingState.routeTo} — cannot route twice.` }] };
+            return { content: [{ type: "text", text: `Error: route already set to ${routingState.routeTo} — cannot route twice.` }] };
           }
           routingState.routeTo = node_id;
           routingState.routeContent = content;
@@ -354,6 +417,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
               promptConfig.nodeId,
               question,
               null,
+              abortController?.signal,
             );
             return { content: [{ type: "text", text: response }] };
           } catch (err: unknown) {

@@ -19,11 +19,12 @@ export function registerPrompt(
   runId: number,
   nodeId: string,
   question: string,
-  input: unknown
+  input: unknown,
+  abortSignal?: AbortSignal,
 ): Promise<string> {
   const key = `${runId}:${nodeId}`;
 
-  return new Promise<string>((resolve) => {
+  return new Promise<string>((resolve, reject) => {
     pending.set(key, {
       runId,
       nodeId,
@@ -32,6 +33,24 @@ export function registerPrompt(
       resolve,
       createdAt: new Date().toISOString(),
     });
+
+    if (abortSignal) {
+      if (abortSignal.aborted) {
+        pending.delete(key);
+        reject(new Error("prompt aborted"));
+        return;
+      }
+      abortSignal.addEventListener(
+        "abort",
+        () => {
+          if (pending.has(key)) {
+            pending.delete(key);
+            reject(new Error("prompt aborted"));
+          }
+        },
+        { once: true },
+      );
+    }
   });
 }
 

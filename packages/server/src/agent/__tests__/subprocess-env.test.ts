@@ -80,18 +80,30 @@ describe("buildSubprocessEnv: blocks secrets", () => {
     ["DATABASE_URL", "postgres://user:pass@host/db"],
     ["REDIS_URL", "redis://localhost:6379"],
     ["MONGO_URI", "mongodb://host/db"],
+    ["MONGODB_URI", "mongodb+srv://user:pass@cluster.mongodb.net/db"],
+    ["MONGODB_URL", "mongodb+srv://user:pass@cluster.mongodb.net/db"],
     ["SESSION_SECRET", "super-secret"],
     ["JWT_SECRET", "jwt-secret"],
     ["APP_SECRET", "app-secret"],
     ["ENCRYPTION_SECRET", "enc-secret"],
     ["DB_PASSWORD", "dbpass"],
     ["ADMIN_PASSWORD", "adminpass"],
+    ["AWS_ACCESS_KEY_ID", "AKIAIOSFODNN7EXAMPLE"],
     ["AWS_SECRET_ACCESS_KEY", "aws-secret"],
+    ["AWS_SESSION_TOKEN", "aws-session"],
+    ["AZURE_CLIENT_SECRET", "azure-client"],
+    ["GCP_PRIVATE_KEY", "-----BEGIN RSA-----"],
+    ["GOOGLE_APPLICATION_CREDENTIALS", "/path/to/creds.json"],
+    ["NPM_CONFIG__AUTH", "base64-auth"],
+    ["NPM_CONFIG_AUTHTOKEN", "npm-token"],
+    ["SSH_AUTH_SOCK", "/tmp/ssh-agent.sock"],
+    ["KUBECONFIG", "/home/user/.kube/config"],
+    ["SENTRY_DSN", "https://key@sentry.io/project"],
+    ["GITHUB_PAT", "ghp_personal_access_token"],
     ["OPENAI_API_KEY", "sk-openai"],
     ["GITHUB_TOKEN", "ghp_test"],
     ["TELEGRAM_BOT_TOKEN", "123456:ABC"],
     ["STRIPE_SECRET_KEY", "sk_live_test"],
-    ["GCP_PRIVATE_KEY", "-----BEGIN RSA-----"],
     ["SSH_PRIVATE_KEY", "-----BEGIN OPENSSH-----"],
     ["AWS_CREDENTIAL", "cred-value"],
   ];
@@ -139,6 +151,17 @@ describe("buildSubprocessEnv: extra parameter", () => {
   test("defaults to empty when no extra given", () => {
     const env = buildSubprocessEnv();
     expect(typeof env).toBe("object");
+  });
+
+  test("filters blocked keys out of extra (can't smuggle secrets through extra)", () => {
+    const env = buildSubprocessEnv({
+      AWS_ACCESS_KEY_ID: "AKIA-leaked",
+      SESSION_SECRET: "leaked",
+      NORMAL_VAR: "ok",
+    });
+    expect(env).not.toHaveProperty("AWS_ACCESS_KEY_ID");
+    expect(env).not.toHaveProperty("SESSION_SECRET");
+    expect(env.NORMAL_VAR).toBe("ok");
   });
 });
 
