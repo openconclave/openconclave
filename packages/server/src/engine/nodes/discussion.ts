@@ -19,7 +19,7 @@ import type {
   ToolConfig,
 } from "@openconclave/shared";
 import type { RunEvent } from "../types";
-import type { Workspace } from "../workspace";
+import { Workspace } from "../workspace";
 
 // ── Constants ────────────────────────────────────────────────
 
@@ -118,6 +118,7 @@ export async function executeDiscussion(
       runId,
       nodeId,
       emit,
+      workspace ?? new Workspace(),
     );
 
     if (openingResult.summary) {
@@ -232,6 +233,7 @@ export async function executeDiscussion(
         runId,
         nodeId,
         emit,
+        workspace ?? new Workspace(),
       );
 
       // Accumulate last non-empty summary and append to transcript so participants can see it
@@ -292,9 +294,10 @@ async function runModerator(
   runId: number,
   nodeId: string,
   emit: (event: RunEvent) => void,
+  workspace: Workspace,
 ): Promise<ModeratorResult> {
   if (moderator.type === "code") {
-    return runCodeModerator(moderator, responses, transcript, round, input);
+    return runCodeModerator(moderator, responses, transcript, round, input, workspace);
   }
   return runAgentModerator(
     moderator,
@@ -317,6 +320,7 @@ async function runCodeModerator(
   transcript: string,
   round: number,
   input: unknown,
+  workspace: Workspace,
 ): Promise<ModeratorResult> {
   const config = moderator.node.config as CodeConfig;
 
@@ -331,7 +335,7 @@ async function runCodeModerator(
   let rawResult: unknown;
   try {
     // No context: code moderator doesn't need OC_API_URL / OC_CONCLAVE_ID
-    rawResult = await executeCode(config, moderatorInput, undefined);
+    rawResult = await executeCode(config, moderatorInput, undefined, workspace);
   } catch {
     // Moderator errors must not surface as run failures — default to continuing
     return { action: "call_next" };

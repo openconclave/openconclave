@@ -11,7 +11,7 @@ import { executePrompt } from "./nodes/prompt";
 import { executeFile } from "./nodes/file";
 import { executeOutput } from "./nodes/output";
 import { executeDiscussion } from "./nodes/discussion";
-import type { Workspace } from "./workspace";
+import { Workspace } from "./workspace";
 
 export async function executeNode(
   runId: number,
@@ -91,11 +91,12 @@ export async function executeNode(
         output = executeCondition(node, input);
         break;
       case "code":
-        output = await executeCode(node.data.config as CodeConfig, input, {
-          conclaveId: Number(conclave.id),
-          runId,
-          nodeId,
-        }, workspace);
+        output = await executeCode(
+          node.data.config as CodeConfig,
+          input,
+          { conclaveId: Number(conclave.id), runId, nodeId },
+          workspace ?? new Workspace(),
+        );
         break;
       case "merge":
         output = executeMerge(nodeId, edges, nodeMap, nodeOutputs);
