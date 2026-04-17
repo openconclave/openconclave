@@ -1,22 +1,16 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { NODE_TYPE_ALIASES } from "@openconclave/shared/src/constants";
+import { NODE_TYPE_ALIASES, NODE_TYPES } from "@openconclave/shared/src/constants";
 import { VERSION } from "@openconclave/shared";
 
 const OC_URL = process.env.OPENCONCLAVE_URL ?? "http://localhost:4000";
 
-/**
- * Accepted node types for MCP conclave creation/update.
- * Includes both current and legacy type names for backward compatibility.
- * Legacy names are mapped to their current equivalents by the conclave normalizer.
- *
- * Note: This set is more restrictive than NODE_TYPES because the MCP API
- * doesn't expose all node types (e.g., "file" and "discussion" are internal only).
- */
+// Accept every canonical node type plus legacy aliases (resolved by the
+// conclave normalizer). Sourcing from shared's NODE_TYPES means new node
+// types added to the editor auto-propagate here instead of drifting.
 const legacyNodeTypes = Object.keys(NODE_TYPE_ALIASES) as string[];
-const conclaveNodeTypesForMcp = ["trigger", "agent", "condition", "code", "merge", "prompt", "output"] as const;
-const acceptedConclaveNodeTypes = [...conclaveNodeTypesForMcp, ...legacyNodeTypes] as [string, ...string[]];
+const acceptedConclaveNodeTypes = [...NODE_TYPES, ...legacyNodeTypes] as [string, ...string[]];
 
 async function ocApi(path: string, method = "GET", body?: unknown): Promise<unknown> {
   const res = await fetch(`${OC_URL}/api${path}`, {

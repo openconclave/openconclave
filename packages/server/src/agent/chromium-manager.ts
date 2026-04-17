@@ -183,10 +183,10 @@ async function readWsEndpoint(proc: Subprocess<"ignore", "pipe", "pipe">): Promi
       if (remaining <= 0) {
         throw new Error(`chromium did not announce DevTools endpoint within ${LAUNCH_TIMEOUT_MS}ms (captured stderr: ${buf.slice(-500)})`);
       }
-      const timeoutPromise = new Promise<{ value: Uint8Array; done: boolean }>((_, reject) =>
+      const timeoutPromise = new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error("read timeout")), remaining),
       );
-      let chunk: { value: Uint8Array | undefined; done: boolean };
+      let chunk;
       try {
         chunk = await Promise.race([reader.read(), timeoutPromise]);
       } catch {
