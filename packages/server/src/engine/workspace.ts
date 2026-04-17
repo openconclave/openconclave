@@ -11,7 +11,8 @@
  *  - MCP server configs (single source, no duplication)
  */
 
-import { join, isAbsolute, resolve, normalize } from "path";
+import { join, isAbsolute, resolve, normalize, sep, dirname, basename } from "path";
+import { realpathSync } from "fs";
 import type { ToolConfig } from "@openconclave/shared";
 
 // ── MCP server configs ──────────────────────────────────────
@@ -56,6 +57,41 @@ export interface McpResolvedConfig {
 
 /** Default CWD: where the server process was started. */
 const SERVER_CWD = process.cwd();
+
+/** Whether `target` is at or under `base`, honoring the OS filesystem casing. */
+function pathIsWithin(target: string, base: string): boolean {
+  const isWin = process.platform === "win32";
+  const t = isWin ? target.toLowerCase() : target;
+  const b = isWin ? base.toLowerCase() : base;
+  if (t === b) return true;
+  const bWithSep = b.endsWith(sep) ? b : b + sep;
+  return t.startsWith(bWithSep);
+}
+
+/**
+ * realpathSync, but tolerate missing files — walk up to the deepest existing
+ * ancestor and reattach the missing tail. Used for paths that a tool is about
+ * to CREATE (write_file on a new path can't realpath the target itself).
+ */
+function realpathOrBestEffort(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    // Path doesn't exist (yet). Realpath the deepest existing parent.
+    let cur = dirname(p);
+    let tail = basename(p);
+    for (;;) {
+      try {
+        return normalize(join(realpathSync(cur), tail));
+      } catch {
+        const parent = dirname(cur);
+        if (parent === cur) return normalize(p); // hit filesystem root, give up
+        tail = join(basename(cur), tail);
+        cur = parent;
+      }
+    }
+  }
+}
 
 export class Workspace {
   /** The resolved working directory (absolute, normalized path). */
@@ -113,6 +149,38 @@ export class Workspace {
   resolve(path: string): string {
     if (isAbsolute(path) || /^[a-zA-Z]:/.test(path)) return normalize(path);
     return normalize(join(this.cwd, path));
+  }
+
+  /**
+   * Resolve a path and verify it stays within one of the allowed directories,
+   * FOLLOWING symlinks. A bare lexical check misses `inside/link → /etc/passwd`;
+   * Bun.file/write/Glob.scan all follow symlinks when the file is opened, so
+   * the check must too. We realpath the target AND each allowed dir so a
+   * symlinked allowed dir (e.g. /tmp → /private/tmp on macOS) still works.
+   *
+   * Throws if the real target is outside every allowed dir.
+   * Returns the original resolved path (not the realpath) — the tool then
+   * opens the path the agent asked for; we're only gating admission.
+   */
+  resolveInside(path: string): string {
+    const resolved = this.resolve(path);
+    if (this.isInsideAllowed(resolved)) return resolved;
+    throw new Error(
+      `Path outside workspace: ${path} → ${resolved} (allowed: ${this.getAllowedDirs().join(", ")})`,
+    );
+  }
+
+  /**
+   * Non-throwing check for iteration paths: glob/grep yield every descendant
+   * path, and Bun.Glob.scan follows symlinks, so a symlinked subdir can point
+   * outside the workspace. Callers drop yielded paths that fail this check.
+   */
+  isInsideAllowed(path: string): boolean {
+    const real = realpathOrBestEffort(path);
+    for (const dir of this.getAllowedDirs()) {
+      if (pathIsWithin(real, realpathOrBestEffort(dir))) return true;
+    }
+    return false;
   }
 
   // ── Allowed directories ─────────────────────────────────────

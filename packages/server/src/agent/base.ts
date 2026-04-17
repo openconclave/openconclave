@@ -16,6 +16,8 @@ import { Workspace } from "../engine/workspace";
 
 // ── Resolved tool (engine-agnostic) ─────────────────────────
 
+const KNOWLEDGE_TOOL_NAMES = new Set(["search_knowledge", "knowledge_fetch", "knowledge_add"]);
+
 export interface ResolvedTool {
   name: string;
   description: string;
@@ -56,9 +58,20 @@ export class AgentBase {
     for (const toolName of this.config.allowedTools) {
       // Map Claude Code names (Bash→bash, Read→read_file) or use direct name
       const mapped = TOOL_NAME_MAP[toolName] ?? toolName;
+      // Knowledge tools must ONLY register via resolveKnowledgeTools, which
+      // wraps them in KB-scoped executors. addBuiltin dedupes by first-added-wins,
+      // so if we registered the raw builtin here, the scoped wrapper added later
+      // would be silently dropped.
+      if (KNOWLEDGE_TOOL_NAMES.has(mapped)) continue;
       const bt = builtins[mapped];
       if (bt) {
         this.addBuiltin(bt);
+      } else if (toolName in TOOL_NAME_MAP) {
+        logger.warn("builtin tool requested but no executor available", {
+          toolName,
+          mappedTo: mapped,
+          hasRunId: this.runId !== undefined,
+        });
       }
     }
   }
@@ -70,28 +83,29 @@ export class AgentBase {
 
     const builtins = createBuiltinTools(this.workspace);
     const kbIds = this.config.knowledgeBases;
+    const allowedNumericIds = new Set(kbIds.map(Number).filter((n) => !isNaN(n)));
     const knowledgeToolNames = ["search_knowledge", "knowledge_fetch", "knowledge_add"];
 
     for (const name of knowledgeToolNames) {
       const bt = builtins[name];
       if (!bt) continue;
 
-      // Patch search_knowledge: scope to agent's connected KBs only
       if (name === "search_knowledge") {
         const patchedTool = JSON.parse(JSON.stringify(bt.tool));
         const param = patchedTool.function?.parameters?.properties?.knowledge_base_id;
         if (param) {
           param.description = `Knowledge base ID to search. Available IDs: ${kbIds.join(", ")}. If omitted, searches all connected knowledge bases.`;
         }
-        // Wrap execute to scope the fallback to connected KBs only
         const scopedExecute = async (args: Record<string, unknown>) => {
-          if (args.knowledge_base_id === undefined) {
-            args.knowledge_base_id = undefined; // keep explicit
+          if (args.knowledge_base_id !== undefined) {
+            const id = Number(args.knowledge_base_id);
+            if (!allowedNumericIds.has(id)) {
+              return `Error: knowledge_base_id ${args.knowledge_base_id} not connected to this agent. Available IDs: ${kbIds.join(", ")}.`;
+            }
           }
-          // If no ID provided, inject connected KB IDs via searchMultipleKBs
           if (args.knowledge_base_id === undefined && kbIds.length > 0) {
             const { searchMultipleKBs } = await import("../knowledge/search");
-            const numericIds = kbIds.map(Number).filter((n) => !isNaN(n));
+            const numericIds = [...allowedNumericIds];
             const results = await searchMultipleKBs(numericIds, args.query as string, (args.top_k as number | undefined) ?? 5);
             if (results.length === 0) return "No relevant results found.";
             return results
@@ -103,7 +117,22 @@ export class AgentBase {
         };
         this.addBuiltin({ tool: patchedTool, execute: scopedExecute });
       } else {
-        this.addBuiltin(bt);
+        // knowledge_fetch and knowledge_add — reject kb_ids outside connected set.
+        // Matches the Claude-side guard in runtime.ts; the AgentBase executors
+        // previously trusted any kb_id, letting an agent bound to KB 1 read KB 2.
+        const patchedTool = JSON.parse(JSON.stringify(bt.tool));
+        const param = patchedTool.function?.parameters?.properties?.knowledge_base_id;
+        if (param) {
+          param.description = `${param.description ?? "Knowledge base ID"}. Available IDs: ${kbIds.join(", ")}.`;
+        }
+        const scopedExecute = async (args: Record<string, unknown>) => {
+          const id = Number(args.knowledge_base_id);
+          if (!allowedNumericIds.has(id)) {
+            return `Error: knowledge_base_id ${args.knowledge_base_id} not connected to this agent. Available IDs: ${kbIds.join(", ")}.`;
+          }
+          return bt.execute(args);
+        };
+        this.addBuiltin({ tool: patchedTool, execute: scopedExecute });
       }
     }
   }
@@ -195,7 +224,6 @@ export class AgentBase {
     }));
   }
 
-  /** Get tool IDs for Ollama (used to filter from OllamaBuiltinTools) */
   getToolIds(): string[] {
     return this.tools.map((t) => t.name);
   }

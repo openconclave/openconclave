@@ -76,49 +76,8 @@ function resolveCliPath(path: string): string {
 export const cliPath = resolveCliPath(embeddedCliPath);
 console.log(`[claude-cli] ${cliPath.includes("cli.js") ? "embedded" : "system"}: ${cliPath}`);
 
-// Block secrets from spawned Claude CLI subprocesses. A prompt-injected
-// agent with `bypassPermissions` can exfiltrate env vars via MCP servers.
-// Strategy: pass everything EXCEPT vars matching secret-like patterns. SDK
-// 0.2.111+ overlays `options.env` on top of inherited process.env instead of
-// replacing it, so blocked keys must be explicitly blanked — omitting them
-// would leak the parent value.
-const BLOCKED_ENV_PATTERNS = [
-  /secret/i,
-  /password/i,
-  /credential/i,
-  /private.?key/i,
-  /^database.?url$/i,
-  /^redis.?url$/i,
-  // `mongo.?uri` missed MONGODB_URI (4 chars between MONGO and URI); broaden.
-  /^mongo.*(uri|url)$/i,
-  // Cloud-provider creds: AWS_ACCESS_KEY_ID (ends _ID, not _KEY), GOOGLE_APPLICATION_CREDENTIALS, etc.
-  /^aws_/i,
-  /^azure_/i,
-  /^gcp_/i,
-  /^google_application_/i,
-  // Package-manager / SSH / Kubernetes / DSNs / personal access tokens.
-  /^npm_config_/i,
-  /^(ssh_auth_sock|kubeconfig)$/i,
-  /_dsn$/i,
-  /_pat$/i,
-  /_(key|token)$/i,
-];
-
-function isBlockedEnvKey(key: string): boolean {
-  return BLOCKED_ENV_PATTERNS.some((p) => p.test(key));
-}
-
-export function buildSubprocessEnv(extra: Record<string, string> = {}): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(process.env)) {
-    if (v === undefined) continue;
-    out[k] = isBlockedEnvKey(k) ? "" : v;
-  }
-  for (const [k, v] of Object.entries(extra)) {
-    out[k] = isBlockedEnvKey(k) ? "" : v;
-  }
-  return out;
-}
+export { buildSubprocessEnv, isBlockedEnvKey } from "./subprocess-env";
+import { buildSubprocessEnv } from "./subprocess-env";
 
 export interface ThinkingBlock {
   thinking: string;

@@ -1,7 +1,22 @@
 import { spawn } from "bun";
+import { join } from "path";
 import { logger } from "../lib/logger";
-import type { Workspace } from "../engine/workspace";
+import { Workspace } from "../engine/workspace";
+import { buildSubprocessEnv } from "./subprocess-env";
 import { webFetch, formatFetchResult } from "./web-fetch";
+
+const BASH_TIMEOUT_MS = 60_000;
+const BASH_OUTPUT_CAP_BYTES = 4 * 1024 * 1024;
+const READ_FILE_CAP_BYTES = 5 * 1024 * 1024;
+const WRITE_FILE_CAP_BYTES = 5 * 1024 * 1024;
+// Full-document knowledge fetches can blow the model's context. Cap conservatively
+// and instruct the agent to fetch specific chunks if they need more.
+const KB_FULL_DOC_CAP_CHARS = 200_000;
+const GREP_WALLCLOCK_BUDGET_MS = 10_000;
+// Source-code lines rarely exceed a few KB; 100KB covers all reasonable cases
+// while still bounding regex runtime on truly pathological input. The tool
+// description documents that lines past this length may miss matches.
+const GREP_LINE_LENGTH_CAP = 100_000;
 
 export interface ToolDef {
   type: "function";
@@ -17,8 +32,8 @@ export interface BuiltinTool {
   execute: (args: Record<string, unknown>) => Promise<string>;
 }
 
-export function createBuiltinTools(workspace?: Workspace, runId?: number): Record<string, BuiltinTool> {
-  const resolvePath = (p: string) => workspace ? workspace.resolve(p) : p;
+export function createBuiltinTools(workspace: Workspace, runId?: number): Record<string, BuiltinTool> {
+  const resolveIn = (p: string) => workspace.resolveInside(p);
   const webFetchTools = runId !== undefined ? createWebFetchBuiltin(runId) : {};
   return {
     ...webFetchTools,
@@ -27,7 +42,8 @@ export function createBuiltinTools(workspace?: Workspace, runId?: number): Recor
         type: "function",
         function: {
           name: "bash",
-          description: "Run a shell command and return its output",
+          description:
+            `Run a shell command and return its output. Wall-clock timeout ${BASH_TIMEOUT_MS / 1000}s; output capped at ${BASH_OUTPUT_CAP_BYTES / (1024 * 1024)}MB per stream.`,
           parameters: {
             type: "object",
             required: ["command"],
@@ -38,22 +54,9 @@ export function createBuiltinTools(workspace?: Workspace, runId?: number): Recor
         },
       },
       execute: async (args) => {
-        try {
-          const proc = spawn({
-            cmd: ["bash", "-c", args.command as string],
-            cwd: workspace?.cwd,
-            stdout: "pipe",
-            stderr: "pipe",
-          });
-          const stdout = await new Response(proc.stdout).text();
-          const stderr = await new Response(proc.stderr).text();
-          const exitCode = await proc.exited;
-          return exitCode === 0
-            ? stdout || "(no output)"
-            : `Error (exit ${exitCode}): ${stderr || stdout}`;
-        } catch (err: unknown) {
-          return `Error: ${err instanceof Error ? err.message : String(err)}`;
-        }
+        const command = typeof args.command === "string" ? args.command : "";
+        if (!command) return "Error: command is required (non-empty string).";
+        return runBash(command, workspace.cwd);
       },
     },
     read_file: {
@@ -73,7 +76,11 @@ export function createBuiltinTools(workspace?: Workspace, runId?: number): Recor
       },
       execute: async (args) => {
         try {
-          const file = Bun.file(resolvePath(args.path as string));
+          const file = Bun.file(resolveIn(args.path as string));
+          if (!(await file.exists())) return `Error: file not found: ${args.path}`;
+          if (file.size > READ_FILE_CAP_BYTES) {
+            return `Error: file exceeds ${READ_FILE_CAP_BYTES / (1024 * 1024)}MB cap (${file.size} bytes). Use grep or a smaller range.`;
+          }
           return await file.text();
         } catch (err: unknown) {
           return `Error: ${err instanceof Error ? err.message : String(err)}`;
@@ -98,7 +105,12 @@ export function createBuiltinTools(workspace?: Workspace, runId?: number): Recor
       },
       execute: async (args) => {
         try {
-          await Bun.write(resolvePath(args.path as string), args.content as string);
+          const content = args.content as string;
+          const byteLen = Buffer.byteLength(content, "utf-8");
+          if (byteLen > WRITE_FILE_CAP_BYTES) {
+            return `Error: content exceeds ${WRITE_FILE_CAP_BYTES / (1024 * 1024)}MB cap (${byteLen} bytes).`;
+          }
+          await Bun.write(resolveIn(args.path as string), content);
           return `File written: ${args.path}`;
         } catch (err: unknown) {
           return `Error: ${err instanceof Error ? err.message : String(err)}`;
@@ -133,14 +145,25 @@ export function createBuiltinTools(workspace?: Workspace, runId?: number): Recor
       },
       execute: async (args) => {
         try {
-          const filePath = resolvePath(args.path as string);
+          const filePath = resolveIn(args.path as string);
           const oldStr = args.old_string as string;
           const newStr = args.new_string as string;
           const replaceAll = args.replace_all === true;
 
+          // An empty old_string matches every zero-width gap between characters.
+          // `"abc".split("").join("X")` → "XaXbXcX" — destroys the file silently.
+          // `"abc".includes("")` is also always true, so the "not found" guard
+          // below wouldn't catch it. Reject explicitly.
+          if (oldStr.length === 0) {
+            return "Error: old_string must not be empty.";
+          }
+
           const file = Bun.file(filePath);
           if (!(await file.exists())) {
             return `Error: file not found: ${args.path}`;
+          }
+          if (file.size > READ_FILE_CAP_BYTES) {
+            return `Error: file exceeds ${READ_FILE_CAP_BYTES / (1024 * 1024)}MB cap (${file.size} bytes). Use bash + sed/awk for large files.`;
           }
           const content = await file.text();
           if (!content.includes(oldStr)) {
@@ -192,20 +215,23 @@ export function createBuiltinTools(workspace?: Workspace, runId?: number): Recor
       execute: async (args) => {
         try {
           const pattern = args.pattern as string;
-          const base = args.path
-            ? resolvePath(args.path as string)
-            : (workspace?.cwd ?? process.cwd());
+          const base = args.path ? resolveIn(args.path as string) : workspace.cwd;
           const glob = new Bun.Glob(pattern);
           const matches: string[] = [];
           const cap = 1000;
+          // Memory ceiling: don't collect unbounded matches on a huge monorepo,
+          // but collect well past `cap` so the sort reflects true alphabetical
+          // order across the matched set instead of filesystem iteration order.
+          const collectLimit = 10 * cap;
           for await (const file of glob.scan({ cwd: base, onlyFiles: true, dot: false })) {
+            if (!workspace.isInsideAllowed(join(base, file))) continue;
             matches.push(file);
-            if (matches.length > cap) break;
+            if (matches.length >= collectLimit) break;
           }
           matches.sort();
           if (matches.length === 0) return `No files matching ${pattern} under ${base}`;
           if (matches.length > cap) {
-            return `${cap}+ files matching ${pattern} (truncated):\n${matches.slice(0, cap).join("\n")}`;
+            return `${cap}+ files matching ${pattern} (showing first ${cap} alphabetically):\n${matches.slice(0, cap).join("\n")}`;
           }
           return `${matches.length} file(s) matching ${pattern}:\n${matches.join("\n")}`;
         } catch (err: unknown) {
@@ -219,7 +245,7 @@ export function createBuiltinTools(workspace?: Workspace, runId?: number): Recor
         function: {
           name: "grep",
           description:
-            "Search file contents for a regex pattern (JavaScript flavor). Returns matches as 'path:line:content'. Searches the agent's working directory unless a path is given. Skips node_modules, .git, dist, build, .worktrees, and files over 2MB.",
+            "Search file contents for a regex pattern (JavaScript flavor). Returns matches as 'path:line:content'. Searches the agent's working directory unless a path is given. Skips node_modules, .git, dist, build, .worktrees, and files over 2MB. Lines longer than 100KB are truncated for the match test, so matches past that length on such lines may be missed.",
           parameters: {
             type: "object",
             required: ["pattern"],
@@ -249,12 +275,12 @@ export function createBuiltinTools(workspace?: Workspace, runId?: number): Recor
       execute: async (args) => {
         try {
           const pattern = args.pattern as string;
-          const baseDir = args.path
-            ? resolvePath(args.path as string)
-            : (workspace?.cwd ?? process.cwd());
-          const fileGlob = (args.glob as string) ?? "**/*";
+          const baseDir = args.path ? resolveIn(args.path as string) : workspace.cwd;
+          const fileGlob = typeof args.glob === "string" ? args.glob : "**/*";
           const ignoreCase = args.ignore_case === true;
-          const maxResults = (args.max_results as number | undefined) ?? 100;
+          const maxResults = typeof args.max_results === "number" && args.max_results > 0
+            ? args.max_results
+            : 100;
 
           let re: RegExp;
           try {
@@ -274,21 +300,31 @@ export function createBuiltinTools(workspace?: Workspace, runId?: number): Recor
 
           const glob = new Bun.Glob(fileGlob);
           const matches: string[] = [];
+          const startedAt = Date.now();
+          let timedOut = false;
 
-          for await (const relPath of glob.scan({ cwd: baseDir, onlyFiles: true, dot: false })) {
+          outer: for await (const relPath of glob.scan({ cwd: baseDir, onlyFiles: true, dot: false })) {
             if (matches.length >= maxResults) break;
+            if (Date.now() - startedAt > GREP_WALLCLOCK_BUDGET_MS) {
+              timedOut = true;
+              break;
+            }
             if (relPath.split(/[\\/]/).some((seg) => skipDirs.has(seg))) continue;
 
-            const absPath = `${baseDir.replace(/[\\/]$/, "")}/${relPath}`;
+            const absPath = join(baseDir, relPath);
+            if (!workspace.isInsideAllowed(absPath)) continue;
             try {
               const file = Bun.file(absPath);
               if (file.size > 2 * 1024 * 1024) continue;
               const text = await file.text();
-              const lines = text.split("\n");
-              for (let i = 0; i < lines.length; i++) {
-                if (matches.length >= maxResults) break;
-                const line = lines[i] ?? "";
-                if (re.test(line)) {
+              for (const [i, line] of text.split("\n").entries()) {
+                if (matches.length >= maxResults) break outer;
+                if (Date.now() - startedAt > GREP_WALLCLOCK_BUDGET_MS) {
+                  timedOut = true;
+                  break outer;
+                }
+                const bounded = line.length > GREP_LINE_LENGTH_CAP ? line.slice(0, GREP_LINE_LENGTH_CAP) : line;
+                if (re.test(bounded)) {
                   const trimmed = line.trim().slice(0, 300);
                   matches.push(`${relPath}:${i + 1}:${trimmed}`);
                 }
@@ -298,10 +334,13 @@ export function createBuiltinTools(workspace?: Workspace, runId?: number): Recor
             }
           }
 
-          if (matches.length === 0) {
+          if (matches.length === 0 && !timedOut) {
             return `No matches for /${pattern}/${ignoreCase ? "i" : ""} in ${baseDir}`;
           }
-          const note = matches.length >= maxResults ? `\n(truncated at ${maxResults} matches)` : "";
+          const notes: string[] = [];
+          if (matches.length >= maxResults) notes.push(`truncated at ${maxResults} matches`);
+          if (timedOut) notes.push(`search budget ${GREP_WALLCLOCK_BUDGET_MS / 1000}s exceeded`);
+          const note = notes.length ? `\n(${notes.join("; ")})` : "";
           return `${matches.length} match(es):\n${matches.join("\n")}${note}`;
         } catch (err: unknown) {
           return `Error: ${err instanceof Error ? err.message : String(err)}`;
@@ -346,7 +385,6 @@ export function createBuiltinTools(workspace?: Workspace, runId?: number): Recor
           if (kbId !== undefined) {
             results = await searchKnowledgeBase(kbId, query, topK);
           } else {
-            // Search all knowledge bases
             const { db: dbClient } = await import("../db/client");
             const { knowledgeBases: kbTable } = await import("../db/schema");
             const allKBs = await dbClient.select({ id: kbTable.id }).from(kbTable);
@@ -444,6 +482,10 @@ export function createBuiltinTools(workspace?: Workspace, runId?: number): Recor
 
           const sorted = [...docChunks].sort((a, b) => a.chunkIndex - b.chunkIndex);
           const fullText = sorted.map((c) => c.content).join("\n\n");
+          if (fullText.length > KB_FULL_DOC_CAP_CHARS) {
+            const truncated = fullText.slice(0, KB_FULL_DOC_CAP_CHARS);
+            return `Document: ${doc.filename} (${docChunks.length} chunks, truncated at ${KB_FULL_DOC_CAP_CHARS} chars — fetch individual chunks by chunk_index for more)\nSource: ${doc.sourcePath ?? "N/A"}\n\n${truncated}`;
+          }
           return `Document: ${doc.filename} (${docChunks.length} chunks)\nSource: ${doc.sourcePath ?? "N/A"}\n\n${fullText}`;
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : String(err);
@@ -511,6 +553,119 @@ export const TOOL_NAME_MAP: Record<string, string> = {
   Grep: "grep",
   WebFetch: "web_fetch",
 };
+
+/**
+ * Run bash under an allowlisted env with concurrent pipe drain, wall-clock
+ * timeout, and per-stream output cap. Returns a human-readable result string.
+ *
+ * The three concerns — sequential drain deadlocks on large stderr, absent
+ * timeout lets long commands pin the caller, and inherited env leaks secrets
+ * to the subprocess — are addressed together because they share the spawn call.
+ */
+export async function runBash(
+  command: string,
+  cwd: string,
+  opts: { timeoutMs?: number; outputCapBytes?: number } = {},
+): Promise<string> {
+  const timeoutMs = opts.timeoutMs ?? BASH_TIMEOUT_MS;
+  const capBytes = opts.outputCapBytes ?? BASH_OUTPUT_CAP_BYTES;
+  let proc: ReturnType<typeof spawn> | undefined;
+  let stdoutReader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  let stderrReader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+  try {
+    proc = spawn({
+      cmd: ["bash", "-c", command],
+      cwd,
+      stdout: "pipe",
+      stderr: "pipe",
+      env: buildSubprocessEnv(),
+    });
+
+    stdoutReader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
+    stderrReader = (proc.stderr as ReadableStream<Uint8Array>).getReader();
+
+    type Outcome =
+      | { kind: "exit"; stdout: string; stderr: string; exitCode: number }
+      | { kind: "timeout" };
+
+    const normalRun: Promise<Outcome> = (async () => {
+      const [stdoutRes, stderrRes, exitCode] = await Promise.all([
+        collectCappedFromReader(stdoutReader!, capBytes),
+        collectCappedFromReader(stderrReader!, capBytes),
+        proc!.exited,
+      ]);
+      return { kind: "exit", stdout: stdoutRes.text, stderr: stderrRes.text, exitCode };
+    })();
+
+    // On timeout, kill the process AND cancel the readers. Cancelling makes
+    // any pending `read()` return {done: true}, so collectCappedFromReader exits
+    // its loop and releases the lock in finally. Without cancel, on Windows where
+    // kill often doesn't propagate to grandchildren, the reader would stay locked
+    // indefinitely.
+    const timeoutRun: Promise<Outcome> = new Promise((resolve) => {
+      timeoutHandle = setTimeout(() => {
+        try { proc?.kill(); } catch { /* already dead */ }
+        stdoutReader?.cancel().catch(() => { /* reader might already be done */ });
+        stderrReader?.cancel().catch(() => { /* reader might already be done */ });
+        resolve({ kind: "timeout" });
+      }, timeoutMs);
+    });
+
+    const outcome = await Promise.race([normalRun, timeoutRun]);
+
+    if (outcome.kind === "timeout") {
+      return `Error: command timed out after ${timeoutMs / 1000}s (process killed).`;
+    }
+
+    if (outcome.exitCode === 0) return outcome.stdout || "(no output)";
+
+    const parts = [`Error (exit ${outcome.exitCode})`];
+    if (outcome.stdout) parts.push(`--- stdout ---\n${outcome.stdout}`);
+    if (outcome.stderr) parts.push(`--- stderr ---\n${outcome.stderr}`);
+    return parts.join("\n");
+  } catch (err: unknown) {
+    try { proc?.kill(); } catch { /* already dead */ }
+    // Same rationale as the timeout branch: if proc.exited rejected or a reader
+    // erred, the other reader may still be pending. Cancel both so their locks
+    // release through collectCappedFromReader's finally.
+    stdoutReader?.cancel().catch(() => { /* already done */ });
+    stderrReader?.cancel().catch(() => { /* already done */ });
+    return `Error: ${err instanceof Error ? err.message : String(err)}`;
+  } finally {
+    // Unconditionally clear the timer — on any success, error, or early return
+    // path — so it doesn't fire later holding proc + reader closures.
+    if (timeoutHandle) clearTimeout(timeoutHandle);
+  }
+}
+
+async function collectCappedFromReader(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  capBytes: number,
+): Promise<{ text: string; truncated: boolean }> {
+  const decoder = new TextDecoder();
+  let out = "";
+  let size = 0;
+  let truncated = false;
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > capBytes) {
+        truncated = true;
+        // Keep draining to let the process exit cleanly — dropping content only.
+        continue;
+      }
+      out += decoder.decode(value, { stream: true });
+    }
+    out += decoder.decode();
+  } finally {
+    try { reader.releaseLock(); } catch { /* already released or cancelled */ }
+  }
+  if (truncated) out += `\n\n…(output truncated at ${capBytes} bytes)`;
+  return { text: out, truncated };
+}
 
 function createWebFetchBuiltin(runId: number): Record<string, BuiltinTool> {
   return {
