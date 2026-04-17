@@ -22,6 +22,7 @@ import { createBuiltinTools } from "./builtin-tools";
 import { createClaudeAttachmentTools } from "./attachment-tools";
 import { createClaudeArtifactTools } from "./artifact-tools";
 import { ROUTING_TOOL_NAME } from "./constants";
+import { logger } from "../lib/logger";
 
 function findSystemClaude(): string | undefined {
   try {
@@ -34,21 +35,24 @@ function findSystemClaude(): string | undefined {
 
 // SDK's extractFromBunfs only checks for "$bunfs" but Bun on Windows uses "B:/~BUN/".
 // Re-extract here to cover both patterns.
-function resolveCliPath(path: string): string {
+function resolveCliPathWithSource(path: string): { path: string; source: "system" | "embedded" | "passthrough" } {
   const system = findSystemClaude();
-  if (system) return system;
-  if (!path.includes("$bunfs") && !path.includes("~BUN")) return path;
+  if (system) return { path: system, source: "system" };
+  if (!path.includes("$bunfs") && !path.includes("~BUN")) return { path, source: "passthrough" };
   let out: string | undefined;
   try {
     const content = readFileSync(path);
     const hash = createHash("sha256").update(content).digest("hex").slice(0, 16);
     const dir = join(tmpdir(), `claude-agent-sdk-${hash}`);
     out = join(dir, "cli.js");
-    if (existsSync(out)) return out;
-    // mode 0o700 only applies to directories we newly create; if `dir` already
-    // exists with looser perms, mkdirSync leaves it alone. Verify explicitly
-    // on POSIX so an attacker with shared-tmpdir access can't pre-place a
-    // malicious cli.js under a world-writable directory we then execute.
+
+    // Ensure the cache dir is safe BEFORE trusting anything inside it. Without
+    // this, a pre-placed cli.js on the fast-path (existsSync(out)) bypasses the
+    // mode check entirely, letting an attacker on a shared tmpdir execute
+    // arbitrary code. mkdirSync is idempotent when the dir already exists.
+    // Note: Windows has no POSIX mode bits — per-user %TEMP% is typically safe,
+    // but a shared-tempdir environment (CI, service accounts) doesn't get the
+    // same protection here.
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     if (process.platform !== "win32") {
       const st = statSync(dir);
@@ -57,15 +61,30 @@ function resolveCliPath(path: string): string {
         throw new Error(`CLI cache dir ${dir} has mode ${mode.toString(8)}, expected 700`);
       }
     }
+
+    if (existsSync(out)) return { path: out, source: "embedded" };
+
     const tmp = join(dir, `cli.js.tmp.${process.pid}`);
     writeFileSync(tmp, content);
-    try { chmodSync(tmp, 0o755); } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'EPERM') throw e; }
+    try { chmodSync(tmp, 0o755); } catch (e) {
+      // EPERM on chmod is expected on Windows (no POSIX bits); on POSIX we
+      // just wrote the file ourselves, so an error here is real (SELinux,
+      // noexec mount) and must not be swallowed.
+      if (process.platform !== "win32") throw e;
+      if ((e as NodeJS.ErrnoException).code !== "EPERM") throw e;
+    }
     renameSync(tmp, out);
-    return out;
+    return { path: out, source: "embedded" };
   } catch (err) {
-    // Honest-race recovery: if another process already extracted the file
-    // (their renameSync won, ours threw EPERM), return the existing file.
-    if (out && existsSync(out)) return out;
+    // Honest-race recovery: if another process finished extracting before us,
+    // their renameSync wins and ours hits EEXIST/EPERM. Only swallow THOSE
+    // errors — if we're here because the cache dir had unsafe perms, the
+    // existing file is the exact attack we're trying to defend against.
+    const code = (err as NodeJS.ErrnoException).code;
+    const isRaceError = code === "EEXIST" || code === "EPERM";
+    if (isRaceError && out && existsSync(out)) {
+      return { path: out, source: "embedded" };
+    }
     // Any other failure (disk full, permission denied, bad mode) is fatal —
     // returning the bunfs path would let the SDK try to spawn it and fail
     // with a cryptic "no such file" later.
@@ -73,10 +92,20 @@ function resolveCliPath(path: string): string {
   }
 }
 
-export const cliPath = resolveCliPath(embeddedCliPath);
-console.log(`[claude-cli] ${cliPath.includes("cli.js") ? "embedded" : "system"}: ${cliPath}`);
+// Lazy-initialize so importing this module for its types (or in tests) doesn't
+// shell out to `which claude`, hash the embedded bundle, or touch tmpdir. A
+// resolveCliPath failure at module-load would take down the whole server boot
+// path before any handler could report it.
+let _cliPath: string | undefined;
+export function getCliPath(): string {
+  if (_cliPath === undefined) {
+    const r = resolveCliPathWithSource(embeddedCliPath);
+    _cliPath = r.path;
+    logger.info("Claude CLI resolved", { path: r.path, source: r.source });
+  }
+  return _cliPath;
+}
 
-export { buildSubprocessEnv, isBlockedEnvKey } from "./subprocess-env";
 import { buildSubprocessEnv } from "./subprocess-env";
 
 export interface ThinkingBlock {
@@ -109,8 +138,14 @@ export type AgentRunOptions = {
   runId?: number;
 };
 
-export const ALLOWED_MODELS = new Set(["sonnet", "opus", "haiku"]);
+export const ALLOWED_MODEL_ALIASES = new Set(["sonnet", "opus", "haiku"]);
+/** Accepts our three aliases OR a pinned model ID like `claude-opus-4-7`. */
+export function isAllowedModel(model: string): boolean {
+  return ALLOWED_MODEL_ALIASES.has(model) || /^claude-[a-z0-9-]+$/i.test(model);
+}
 const CONCLAVE_MCP_SERVER_ID = "openconclave-conclave";
+const KB_FULL_DOC_CAP_CHARS = 200_000;
+const ROUTE_CONTENT_MAX = 100_000;
 
 export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentResult> {
   const { config, input, env, abortController, onOutput } = options;
@@ -155,6 +190,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
   // Claude SDK supports stdio external MCP servers and in-process SDK MCP servers.
   const mcpServers: Record<string, McpServerConfig> = {};
 
+  const RESERVED_MCP_IDS = new Set(["oc", CONCLAVE_MCP_SERVER_ID]);
   if (config.mcpServers?.length) {
     const mcpTools = config.mcpTools ?? [];
     const legacyIds = config.mcpServers.filter(
@@ -162,8 +198,27 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
     );
     const resolved = ws.getMcpToolConfigs(mcpTools, legacyIds);
     for (const [id, cfg] of Object.entries(resolved)) {
+      if (RESERVED_MCP_IDS.has(id)) {
+        // Silent clobber would leave a user wondering "why doesn't my tool
+        // work" — OC owns these server IDs for the in-process mcp__oc__*
+        // and mcp__openconclave-conclave__* tool surfaces.
+        logger.error("MCP server id is reserved for OC internals; ignoring", {
+          serverId: id,
+          runId: options.runId,
+        });
+        continue;
+      }
       if (cfg.transport === "stdio" && cfg.command) {
-        mcpServers[id] = { type: "stdio", command: cfg.command, args: cfg.args ?? [], env: cfg.env };
+        // Route env through the shared denylist so stdio MCP subprocesses
+        // don't inherit ANTHROPIC_API_KEY / DATABASE_URL / session secrets.
+        // User-configured cfg.env layers on top so intentional MCP creds
+        // (GITHUB_TOKEN, NOTION_API_KEY, etc.) aren't blanked by the regex.
+        mcpServers[id] = {
+          type: "stdio",
+          command: cfg.command,
+          args: cfg.args ?? [],
+          env: { ...buildSubprocessEnv(), ...(cfg.env ?? {}) },
+        };
       } else if (cfg.transport === "sse" && cfg.url) {
         mcpServers[id] = { type: "sse", url: cfg.url };
       } else if (cfg.transport === "streamable-http" && cfg.url) {
@@ -300,10 +355,16 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
   // works inside Bun compiled binaries (where conclave-mcp-server.ts lives at a
   // virtual bunfs path that a spawned `bun run` cannot reach).
   const routeTargets = options.routeTargets;
-  // Reject empty strings and non-integer inputs — Number("") returns 0, which
-  // would silently pass an !isNaN check and authorise KB id 0.
-  const knowledgeBaseIds = (config.knowledgeBases ?? [])
-    .filter((s) => /^\d+$/.test(s))
+  // Reject non-digit strings (Number("") === 0 would slip id 0 past !isNaN).
+  // Log rejected entries so a misconfigured conclave doesn't silently return
+  // half-populated results from search_knowledge.
+  const configuredKbIds = config.knowledgeBases ?? [];
+  const knowledgeBaseIds = configuredKbIds
+    .filter((s) => {
+      if (/^\d+$/.test(s)) return true;
+      logger.warn("Dropped non-numeric knowledge base id", { id: s, runId: options.runId });
+      return false;
+    })
     .map(Number);
   const promptConfig = options.promptConfig;
   const routingState: { routeTo?: string; routeContent?: string } = {};
@@ -332,7 +393,7 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
         ].join("\n"),
         {
           node_id: z.enum(validIds).describe("The ID of the next node to route to"),
-          content: z.string().describe("Your output message to pass to the next node"),
+          content: z.string().max(ROUTE_CONTENT_MAX).describe("Your output message to pass to the next node"),
         },
         async ({ node_id, content }) => {
           if (routingState.routeTo) {
@@ -340,9 +401,10 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
           }
           routingState.routeTo = node_id;
           routingState.routeContent = content;
-          const target = routeTargets.find((t) => t.nodeId === node_id);
+          // node_id is validated by z.enum(validIds), so target is always defined.
+          const target = routeTargets.find((t) => t.nodeId === node_id)!;
           return {
-            content: [{ type: "text", text: `Routing to: ${target?.label ?? node_id}` }],
+            content: [{ type: "text", text: `Routing to: ${target.label}` }],
           };
         },
       ),
@@ -350,6 +412,11 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
   }
 
   if (promptConfig) {
+    // Guard against the model parallelizing ask_user calls within one
+    // assistant message. registerPrompt is keyed on (runId, nodeId), so a
+    // second concurrent call would clobber the first pending resolver and
+    // leave its promise hanging until the whole run aborts.
+    let askInFlight = false;
     conclaveTools.push(
       tool(
         "ask_user",
@@ -359,7 +426,21 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
           question: z.string().describe("The question to ask the user"),
         },
         async ({ question }) => {
+          if (askInFlight) {
+            return { content: [{ type: "text", text: "Error: ask_user is already pending — wait for the user's response before asking again." }] };
+          }
+          askInFlight = true;
           try {
+            // Register the prompt resolver BEFORE broadcasting. Otherwise a
+            // fast UI + fast user could post a response that arrives before
+            // registerPrompt stashes the resolver, losing the response.
+            const responsePromise = registerPrompt(
+              promptConfig.runId,
+              promptConfig.nodeId,
+              question,
+              null,
+              abortController?.signal,
+            );
             broadcastRunEvent({
               type: "prompt:question",
               runId: promptConfig.runId,
@@ -373,17 +454,13 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
                 senderType: "agent",
               },
             });
-            const response = await registerPrompt(
-              promptConfig.runId,
-              promptConfig.nodeId,
-              question,
-              null,
-              abortController?.signal,
-            );
+            const response = await responsePromise;
             return { content: [{ type: "text", text: response }] };
           } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);
             return { content: [{ type: "text", text: `Error asking user: ${msg}` }] };
+          } finally {
+            askInFlight = false;
           }
         },
       ),
@@ -491,7 +568,8 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
                 chunkIndex: chunks.chunkIndex,
               })
               .from(chunks)
-              .where(eq(chunks.documentId, document_id));
+              .where(eq(chunks.documentId, document_id))
+              .orderBy(chunks.chunkIndex);
 
             if (chunk_index !== undefined) {
               const chunk = docChunks.find((c) => c.chunkIndex === chunk_index);
@@ -515,8 +593,18 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
               };
             }
 
-            const sorted = [...docChunks].sort((a, b) => a.chunkIndex - b.chunkIndex);
-            const fullText = sorted.map((c) => c.content).join("\n\n");
+            const fullText = docChunks.map((c) => c.content).join("\n\n");
+            if (fullText.length > KB_FULL_DOC_CAP_CHARS) {
+              const truncated = fullText.slice(0, KB_FULL_DOC_CAP_CHARS);
+              return {
+                content: [
+                  {
+                    type: "text",
+                    text: `Document: ${doc.filename} (${docChunks.length} chunks, truncated at ${KB_FULL_DOC_CAP_CHARS} chars — fetch individual chunks by chunk_index for more)\nSource: ${doc.sourcePath ?? "N/A"}\n\n${truncated}`,
+                  },
+                ],
+              };
+            }
             return {
               content: [
                 {
@@ -581,28 +669,56 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
     });
   }
 
+  const thinkingBlocks: ThinkingBlock[] = [];
+  // Lifted out of `try` so the catch can still surface a session id captured
+  // from the SDK's init message even if the stream threw mid-flight — caller
+  // can then `resume:` on the next run.
+  let sessionId: string | undefined;
   try {
-    const thinkingBlocks: ThinkingBlock[] = [];
     let resultOutput = "";
     let costUsd: number | undefined;
-    let sessionId: string | undefined;
+
+    if (config.model && !isAllowedModel(config.model)) {
+      logger.warn("Unrecognized model; falling back to SDK default", {
+        requested: config.model,
+        runId: options.runId,
+      });
+    }
 
     // Filter out filesystem builtins — they're replaced by our in-process
     // mcp__oc__* tools above, which honor workspace.cwd correctly. Any
     // other builtins (WebSearch, WebFetch, LSP, etc.) declared by the
     // agent are kept. If the agent declared nothing, we pass [] so the
     // CLI preset doesn't sneak the bugged Read/Write/Edit back in.
-    const passthroughTools = (config.allowedTools ?? []).filter(
-      (t) => !(t in OC_TOOL_MAP),
-    );
+    // Also drop WebFetch when there's no runId: OC_TOOL_MAP.WebFetch is only
+    // registered when the attachments folder exists, but the raw name would
+    // otherwise fall through to the CLI's native WebFetch — the very tool
+    // whose working-dir escape (issue #30) this shim exists to avoid.
+    const passthroughTools = (config.allowedTools ?? []).filter((t) => {
+      // Hard-block WebFetch unconditionally: if runId is defined, OC_TOOL_MAP
+      // supplies the sandboxed shim; if it isn't, passthrough would fall back
+      // to the CLI's native WebFetch — issue #30. Not relying on "is it in
+      // OC_TOOL_MAP" ordering keeps this robust to future refactors of where
+      // WebFetch is registered.
+      if (t === "WebFetch") {
+        if (runId === undefined) {
+          logger.warn("WebFetch requested without runId; dropping to avoid CLI fallback", {
+            runId: options.runId,
+          });
+        }
+        return false;
+      }
+      if (t in OC_TOOL_MAP) return false;
+      return true;
+    });
 
     const agentQuery = query({
       prompt,
       options: {
-        pathToClaudeCodeExecutable: cliPath,
+        pathToClaudeCodeExecutable: getCliPath(),
         cwd: ws.cwd,
         env: buildSubprocessEnv(env ?? {}),
-        model: ALLOWED_MODELS.has(config.model ?? "") ? config.model : undefined,
+        model: config.model && isAllowedModel(config.model) ? config.model : undefined,
         systemPrompt: config.systemPrompt,
         maxTurns: config.maxTurns ?? 25,
         permissionMode: "bypassPermissions",
@@ -628,11 +744,17 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
       },
     });
 
-    // Consume the async generator
     for await (const message of agentQuery) {
       const msg = message as SDKMessage & { type: string; subtype?: string; [key: string]: unknown };
 
-      // Capture thinking + tool-use blocks from assistant messages
+      // Capture session id from the init message; the final `result` message
+      // is the authoritative source, but grabbing it here means a mid-stream
+      // throw still surfaces a resumable id via the outer catch.
+      if (msg.type === "system" && msg.subtype === "init") {
+        const sid = (msg as { session_id?: string }).session_id;
+        if (typeof sid === "string") sessionId = sid;
+      }
+
       if (msg.type === "assistant") {
         const assistantMsg = msg as unknown as {
           message?: {
@@ -652,7 +774,10 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
                 thinking: block.thinking,
                 signature: block.signature,
               });
-              onOutput?.(`[thinking: ${block.thinking.slice(0, 100)}...]\n`);
+              const preview = block.thinking.length > 100
+                ? block.thinking.slice(0, 100) + "…"
+                : block.thinking;
+              onOutput?.(`[thinking: ${preview}]\n`);
             } else if (block.type === "tool_use" && block.name) {
               // Emit one event per tool invocation for observability.
               // Truncate args to keep run_events manageable — full input is in the SDK stream.
@@ -720,7 +845,10 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
           costUsd = resultMsg.total_cost_usd;
           sessionId = resultMsg.session_id;
         } else {
-          // Error result
+          // Error result. Drop routeTo — declaring a route before the run
+          // failed doesn't mean the route should be followed. Callers that
+          // only check routeTo without also checking success would otherwise
+          // advance the graph on a broken run.
           const errorMsg = resultMsg.errors?.join("\n") ?? "Agent failed";
           return {
             success: false,
@@ -729,7 +857,6 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
             costUsd: resultMsg.total_cost_usd,
             durationMs: Date.now() - startTime,
             thinking: thinkingBlocks.length > 0 ? thinkingBlocks : undefined,
-            routeTo: routingState.routeTo,
             sessionId: resultMsg.session_id,
           };
         }
@@ -760,10 +887,11 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
     const message = err instanceof Error ? err.message : String(err);
     return {
       success: false,
-      output: "",
+      output: routingState.routeContent ?? "",
       error: message,
       durationMs: Date.now() - startTime,
-      routeTo: routingState.routeTo,
+      thinking: thinkingBlocks.length > 0 ? thinkingBlocks : undefined,
+      sessionId,
     };
   }
 }

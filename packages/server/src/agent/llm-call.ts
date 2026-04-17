@@ -407,9 +407,10 @@ const DYNAMIC_TOOLS_MCP_NAME = "openconclave-dynamic-tools";
 
 async function invokeClaude(options: InvokeWithToolsOptions): Promise<ToolCallResult> {
   const { query, createSdkMcpServer, tool } = await import("@anthropic-ai/claude-agent-sdk");
-  const { cliPath, buildSubprocessEnv, ALLOWED_MODELS } = await import("./runtime");
+  const { getCliPath, isAllowedModel } = await import("./runtime");
+  const { buildSubprocessEnv } = await import("./subprocess-env");
 
-  const model = ALLOWED_MODELS.has(options.config.model ?? "") ? options.config.model : undefined;
+  const model = options.config.model && isAllowedModel(options.config.model) ? options.config.model : undefined;
 
   const systemPrompt = options.config.systemPrompt ?? "";
 
@@ -448,7 +449,7 @@ async function invokeClaude(options: InvokeWithToolsOptions): Promise<ToolCallRe
   const agentQuery = query({
     prompt: options.prompt,
     options: {
-      pathToClaudeCodeExecutable: cliPath,
+      pathToClaudeCodeExecutable: getCliPath(),
       env: buildSubprocessEnv(),
       model,
       systemPrompt,

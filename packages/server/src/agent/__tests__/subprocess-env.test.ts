@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { buildSubprocessEnv } from "../runtime";
+import { buildSubprocessEnv } from "../subprocess-env";
 
 function withEnv(overrides: Record<string, string>, fn: () => void) {
   const saved: Record<string, string | undefined> = {};

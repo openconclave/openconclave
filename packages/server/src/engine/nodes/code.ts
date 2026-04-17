@@ -9,7 +9,7 @@ import type { CodeConfig } from "@openconclave/shared";
 import { existsSync } from "fs";
 import { resolve as pathResolve, dirname } from "path";
 import type { Workspace } from "../workspace";
-import { buildSubprocessEnv } from "../../agent/runtime";
+import { buildSubprocessEnv } from "../../agent/subprocess-env";
 import { logger } from "../../lib/logger";
 
 export interface CodeNodeContext {
