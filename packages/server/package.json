@@ -10,21 +10,20 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@openconclave/shared": "workspace:*",
     "@hono/zod-validator": "^0.7",
-    "hono": "^4",
-    "drizzle-orm": "^0.38",
     "@modelcontextprotocol/sdk": "^1",
     "@mozilla/readability": "^0.5",
+    "@openconclave/shared": "workspace:*",
     "@puppeteer/browsers": "^2",
-    "jsdom": "^25",
+    "drizzle-orm": "^0.38",
+    "hono": "^4",
+    "linkedom": "^0.18.12",
     "nanoid": "^5",
     "turndown": "^7",
     "zod": "^3.24"
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "@types/jsdom": "^21",
     "@types/turndown": "^5",
     "drizzle-kit": "^0.30",
     "typescript": "^5"

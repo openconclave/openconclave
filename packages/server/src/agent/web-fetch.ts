@@ -12,7 +12,12 @@ import { lookup } from "dns/promises";
 import { isIPv4, isIPv6 } from "net";
 import { join } from "path";
 import { Readability } from "@mozilla/readability";
-import { JSDOM } from "jsdom";
+// linkedom instead of jsdom: jsdom's XMLHttpRequest-impl does
+// require.resolve("./xhr-sync-worker.js") at module init, which Bun's
+// compile step inlines as an absolute build-machine path. The compiled
+// binary then tries to load a nonexistent path at runtime on other
+// machines (oven-sh/bun#14011). linkedom has no worker files.
+import { parseHTML } from "linkedom";
 import TurndownService from "turndown";
 
 import { launchChromium, releaseProfileDir, type ChromiumProcess } from "./chromium-manager";
@@ -285,8 +290,18 @@ async function renderPageHtml(url: string): Promise<string> {
 const turndown = new TurndownService({ headingStyle: "atx", bulletListMarker: "-", codeBlockStyle: "fenced" });
 
 function htmlToMarkdown(html: string, url: string): string {
-  const dom = new JSDOM(html, { url });
-  const article = new Readability(dom.window.document).parse();
+  // linkedom's parseHTML has no `url` option the way jsdom does, so we inject a
+  // <base href> into <head> — Readability reads document.baseURI to resolve
+  // relative links, and inserting <base> is the well-trodden path when the
+  // parser doesn't take a baseURL directly.
+  const safeUrl = url.replace(/"/g, "&quot;");
+  const withBase = /<head\b[^>]*>/i.test(html)
+    ? html.replace(/<head\b([^>]*)>/i, `<head$1><base href="${safeUrl}">`)
+    : `<head><base href="${safeUrl}"></head>${html}`;
+  const { document } = parseHTML(withBase);
+  // Readability's type expects jsdom's Document; linkedom's is structurally
+  // compatible for Readability's usage but nominally different.
+  const article = new Readability(document as unknown as Document).parse();
   const contentHtml = article?.content ?? html;
   let markdown = turndown.turndown(contentHtml).trim();
   markdown = markdown.replace(/!\[[^\]]*\]\(data:[^)]+\)/g, "");
