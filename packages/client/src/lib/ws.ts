@@ -29,6 +29,10 @@ class WebSocketClient {
     this.ws?.send(JSON.stringify({ type: "subscribe", topics }));
   }
 
+  unsubscribe(topics: string[]) {
+    this.ws?.send(JSON.stringify({ type: "unsubscribe", topics }));
+  }
+
   on(type: string, handler: EventHandler) {
     if (!this.handlers.has(type)) this.handlers.set(type, new Set());
     this.handlers.get(type)!.add(handler);

@@ -3,7 +3,7 @@ import { Header } from "@/components/layout/header";
 import { NodePalette } from "@/components/editor/node-palette";
 import { ConclaveCanvas } from "@/components/editor/conclave-canvas";
 import { NodeInspector } from "@/components/editor/node-inspector";
-import { useConclaveStore, edgeStyle } from "@/stores/conclave-store";
+import { useConclaveStore } from "@/stores/conclave-store";
 import { api } from "@/lib/api";
 import { wsClient } from "@/lib/ws";
 import { Save, Play, Square, MessageSquare, Download } from "lucide-react";
@@ -17,13 +17,19 @@ function toSnakeCase(s: string): string {
 }
 
 export function ConclaveEditorPage() {
-  const { nodes, edges, conclaveName, conclaveDescription, isDirty, setConclaveMeta, loadConclave, reset } =
-    useConclaveStore();
+  const nodes = useConclaveStore((s) => s.nodes);
+  const edges = useConclaveStore((s) => s.edges);
+  const conclaveName = useConclaveStore((s) => s.conclaveName);
+  const conclaveDescription = useConclaveStore((s) => s.conclaveDescription);
+  const isDirty = useConclaveStore((s) => s.isDirty);
+  const setConclaveMeta = useConclaveStore((s) => s.setConclaveMeta);
+  const loadConclave = useConclaveStore((s) => s.loadConclave);
+  const reset = useConclaveStore((s) => s.reset);
+  const setActiveNodes = useConclaveStore((s) => s.setActiveNodes);
+  const setSkippedNodes = useConclaveStore((s) => s.setSkippedNodes);
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
-  const setActiveNodes = useConclaveStore((s) => s.setActiveNodes);
-  const setSkippedNodes = useConclaveStore((s) => s.setSkippedNodes);
 
   const path = window.location.pathname;
   const existingId = path.startsWith("/conclaves/") ? path.split("/")[2] : null;
@@ -48,17 +54,11 @@ export function ConclaveEditorPage() {
             position: n.position,
             data: n.data,
           })),
-          (def.edges ?? []).map((e: any) => {
-            const { style, markerEnd } = edgeStyle(e.sourceHandle);
-            return {
-              ...e,
-              type: "default",
-              animated: false,
-              style,
-              markerEnd,
-              targetHandle: e.targetHandle ?? "top",
-            };
-          }),
+          (def.edges ?? []).map((e: any) => ({
+            ...e,
+            animated: false,
+            targetHandle: e.targetHandle ?? "top",
+          })),
           def.name ?? wf.name ?? "Untitled Conclave",
           def.description ?? wf.description ?? "",
           def.toolName ?? wf.toolName
@@ -115,9 +115,9 @@ export function ConclaveEditorPage() {
           if (e.type === "node:skipped" && e.nodeId) { active.delete(e.nodeId); skipped.add(e.nodeId); }
         }
         activeRef.current = active;
-        setActiveNodes(active);
+        setActiveNodes(new Set(active));
         skippedRef.current = skipped;
-        setSkippedNodes(skipped);
+        setSkippedNodes(new Set(skipped));
       })
       .catch(() => {});
   }, [activeRunId]);
@@ -131,33 +131,56 @@ export function ConclaveEditorPage() {
       return;
     }
 
-    // Subscribe to run events for real-time node highlighting
-    wsClient.subscribe([`run:${activeRunId}`]);
+    const topic = `run:${activeRunId}`;
+    wsClient.subscribe([topic]);
+
+    // Buffer mutations in the refs; flush to the store once per animation
+    // frame. At 5-10 agent events/sec this collapses N store writes per frame
+    // into one, capping per-node selector re-evaluation at 60 Hz regardless
+    // of WS event rate.
+    let rafId: number | null = null;
+    let activeDirty = false;
+    let skippedDirty = false;
+    const flush = () => {
+      rafId = null;
+      if (activeDirty) {
+        activeDirty = false;
+        setActiveNodes(new Set(activeRef.current));
+      }
+      if (skippedDirty) {
+        skippedDirty = false;
+        setSkippedNodes(new Set(skippedRef.current));
+      }
+    };
+    const schedule = () => {
+      if (rafId === null) rafId = requestAnimationFrame(flush);
+    };
+
     const off = wsClient.on("*", (data: any) => {
       if (!data?.nodeId || String(data.runId) !== String(activeRunId)) return;
-      const active = new Set(activeRef.current);
       if (data.type === "node:started" || data.type === "agent:started") {
-        active.add(data.nodeId);
+        activeRef.current.add(data.nodeId);
+        activeDirty = true;
       } else if (data.type === "node:completed" || data.type === "agent:completed") {
-        active.delete(data.nodeId);
+        activeRef.current.delete(data.nodeId);
+        activeDirty = true;
       } else if (data.type === "node:skipped") {
-        active.delete(data.nodeId);
-        const skipped = new Set(skippedRef.current);
-        skipped.add(data.nodeId);
-        skippedRef.current = skipped;
-        setSkippedNodes(skipped);
+        activeRef.current.delete(data.nodeId);
+        skippedRef.current.add(data.nodeId);
+        activeDirty = true;
+        skippedDirty = true;
       } else {
         return;
       }
-      activeRef.current = active;
-      setActiveNodes(active);
+      schedule();
     });
 
-    // Poll as fallback (less frequent since WebSocket handles real-time)
+    // Bootstrap once so we catch events that fired before we subscribed.
+    // After that, WebSocket is the single source of truth.
     refreshActiveNodes();
-    const interval = setInterval(refreshActiveNodes, 3000);
     return () => {
-      clearInterval(interval);
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      wsClient.unsubscribe([topic]);
       off();
     };
   }, [activeRunId, refreshActiveNodes]);
@@ -170,6 +193,10 @@ export function ConclaveEditorPage() {
       labelCount.set(n.data.label, count);
     }
     const hasDuplicates = [...labelCount.values()].some((c) => c > 1);
+    // Snapshot original labels so we can revert if save fails
+    const originalLabels = hasDuplicates
+      ? new Map(nodes.map((n) => [n.id, n.data.label]))
+      : null;
     if (hasDuplicates) {
       // Auto-fix: append numbers to duplicates
       const seen = new Map<string, number>();
@@ -185,6 +212,7 @@ export function ConclaveEditorPage() {
     }
 
     setSaving(true);
+    let saved = false;
     try {
       // Re-read nodes after potential rename
       const currentNodes = useConclaveStore.getState().nodes;
@@ -241,8 +269,15 @@ export function ConclaveEditorPage() {
       }
 
       useConclaveStore.setState({ isDirty: false });
+      saved = true;
       toast("Saved. Run /mcp in Claude Code to refresh tools.", "success");
     } finally {
+      if (!saved && originalLabels) {
+        // Revert the auto-rename so the user doesn't see phantom labels
+        for (const [id, label] of originalLabels) {
+          useConclaveStore.getState().updateNodeData(id, { label });
+        }
+      }
       setSaving(false);
     }
   };
@@ -309,6 +344,7 @@ export function ConclaveEditorPage() {
             }}
             className="bg-transparent text-lg font-semibold border-none outline-none focus:ring-0 w-80"
             placeholder="Conclave name..."
+            aria-label="Conclave name"
           />
         }
         actions={
@@ -352,7 +388,7 @@ export function ConclaveEditorPage() {
                     a.href = url;
                     a.download = filename;
                     a.click();
-                    URL.revokeObjectURL(url);
+                    setTimeout(() => URL.revokeObjectURL(url), 0);
                     toast("Exported", "success");
                   } catch (err) {
                     toast(`Export failed: ${(err as Error).message}`, "error");

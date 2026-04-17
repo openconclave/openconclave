@@ -76,8 +76,8 @@ export function BaseNode({
   sourceHandles?: { id: string; label: string; position: number }[];
 }) {
   const updateNodeData = useConclaveStore((s) => s.updateNodeData);
-  const activeNodeIds = useConclaveStore((s) => s.activeNodeIds);
-  const skippedNodeIds = useConclaveStore((s) => s.skippedNodeIds);
+  const isActive = useConclaveStore((s) => s.activeNodeIds.has(id));
+  const isSkipped = useConclaveStore((s) => s.skippedNodeIds.has(id));
   const isDraggingTool = useConclaveStore((s) => s.isDraggingTool);
   const [editing, setEditing] = useState(false);
   const openDropdownId = useConclaveStore((s) => s.openDropdownId);
@@ -113,8 +113,6 @@ export function BaseNode({
       sel?.addRange(range);
     }
   }, [editing]);
-  const isActive = activeNodeIds.has(id);
-  const isSkipped = skippedNodeIds.has(id);
   const isAgent = data.type === "agent" || data.type === "discussion";
   const toolHighlight = isDraggingTool && isAgent;
   const toolDim = isDraggingTool && !isAgent;

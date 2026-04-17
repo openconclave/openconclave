@@ -117,6 +117,22 @@ export const useConclaveStore = create<ConclaveState>((set, get) => {
   let pendingSnapshot: Snapshot | null = null;
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
+  function commitPendingSnapshot() {
+    if (!pendingSnapshot) return;
+    const { _past } = get();
+    const past = _past.length >= MAX_HISTORY ? _past.slice(1) : [..._past];
+    past.push(pendingSnapshot);
+    set({ _past: past, _future: [] });
+    pendingSnapshot = null;
+  }
+
+  /** Synchronously commit any pending snapshot and cancel the debounce.
+   *  Call before reads of _past (undo/redo) so the most recent action isn't lost. */
+  function flushPendingHistory() {
+    if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
+    commitPendingSnapshot();
+  }
+
   function pushHistory() {
     // Capture the earliest state before any mutations in this batch
     if (!pendingSnapshot) {
@@ -126,13 +142,8 @@ export const useConclaveStore = create<ConclaveState>((set, get) => {
 
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
-      if (!pendingSnapshot) return;
-      const { _past } = get();
-      const past = _past.length >= MAX_HISTORY ? _past.slice(1) : [..._past];
-      past.push(pendingSnapshot);
-      set({ _past: past, _future: [] });
-      pendingSnapshot = null;
       debounceTimer = null;
+      commitPendingSnapshot();
     }, 50);
   }
 
@@ -157,10 +168,10 @@ export const useConclaveStore = create<ConclaveState>((set, get) => {
 
   onNodesChange: (changes) => {
     const hasDragStart = changes.some(
-      (c) => c.type === "position" && (c as any).dragging
+      (c) => c.type === "position" && c.dragging === true
     );
     const hasDragEnd = changes.some(
-      (c) => c.type === "position" && !(c as any).dragging
+      (c) => c.type === "position" && c.dragging === false
     );
     const hasRemove = changes.some((c) => c.type === "remove");
 
@@ -170,19 +181,28 @@ export const useConclaveStore = create<ConclaveState>((set, get) => {
       dragSnapshot = { nodes: structuredClone(nodes), edges: structuredClone(edges) };
     }
 
-    // Commit drag snapshot at drag end
+    const nextNodes = applyNodeChanges(changes, get().nodes);
+
+    // Commit drag snapshot at drag end, but only if positions actually changed
     if (hasDragEnd && dragSnapshot) {
-      const { _past } = get();
-      const past = _past.length >= MAX_HISTORY ? _past.slice(1) : [..._past];
-      past.push(dragSnapshot);
-      set({ _past: past, _future: [] });
+      const preMap = new Map(dragSnapshot.nodes.map((n) => [n.id, n.position]));
+      const moved = nextNodes.some((n) => {
+        const p = preMap.get(n.id);
+        return !p || p.x !== n.position.x || p.y !== n.position.y;
+      });
+      if (moved) {
+        const { _past } = get();
+        const past = _past.length >= MAX_HISTORY ? _past.slice(1) : [..._past];
+        past.push(dragSnapshot);
+        set({ _past: past, _future: [] });
+      }
       dragSnapshot = null;
     }
 
     if (hasRemove) pushHistory();
 
     set({
-      nodes: applyNodeChanges(changes, get().nodes),
+      nodes: nextNodes,
       isDirty: true,
     });
   },
@@ -265,9 +285,8 @@ export const useConclaveStore = create<ConclaveState>((set, get) => {
       const tgt = e.target === id ? updatedNode : updatedNodes.find((n) => n.id === e.target);
       const bidirectional = (src && tgt) ? isBidirectional(src, tgt) : false;
       const { style, markerEnd, markerStart } = edgeStyle(e.sourceHandle, bidirectional);
-      const restyled = { ...e, style, markerEnd };
-      if (markerStart) restyled.markerStart = markerStart;
-      else delete restyled.markerStart;
+      const { markerStart: _omit, ...rest } = e;
+      const restyled: Edge = { ...rest, style, markerEnd, ...(markerStart ? { markerStart } : {}) };
       return restyled;
     });
     set({ nodes: updatedNodes, edges: updatedEdges, isDirty: true });
@@ -291,6 +310,7 @@ export const useConclaveStore = create<ConclaveState>((set, get) => {
     // Cancel any pending debounce so a stale snapshot is not committed after load
     if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
     pendingSnapshot = null;
+    dragSnapshot = null;
     // Re-apply bidirectional markers for chat triggers and agent↔prompt connections
     const nodeMap = new Map(nodes.map((n) => [n.id, n]));
     const styledEdges = edges.map((e) => {
@@ -314,6 +334,8 @@ export const useConclaveStore = create<ConclaveState>((set, get) => {
       selectedNodeId: null,
       activeNodeIds: new Set<string>(),
       skippedNodeIds: new Set<string>(),
+      _past: [],
+      _future: [],
     });
   },
 
@@ -321,6 +343,7 @@ export const useConclaveStore = create<ConclaveState>((set, get) => {
     // Cancel any pending debounce so a stale snapshot is not committed after reset
     if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
     pendingSnapshot = null;
+    dragSnapshot = null;
     set({
       nodes: [],
       edges: [],
@@ -336,12 +359,13 @@ export const useConclaveStore = create<ConclaveState>((set, get) => {
   },
 
   undo: () => {
+    flushPendingHistory();
     const { _past, nodes, edges } = get();
     if (_past.length === 0) return;
     const prev = _past[_past.length - 1]!;
     set({
-      nodes: prev.nodes,
-      edges: prev.edges,
+      nodes: structuredClone(prev.nodes),
+      edges: structuredClone(prev.edges),
       _past: _past.slice(0, -1),
       _future: [...get()._future, { nodes: structuredClone(nodes), edges: structuredClone(edges) }],
       isDirty: true,
@@ -349,12 +373,13 @@ export const useConclaveStore = create<ConclaveState>((set, get) => {
   },
 
   redo: () => {
+    flushPendingHistory();
     const { _future, nodes, edges } = get();
     if (_future.length === 0) return;
     const next = _future[_future.length - 1]!;
     set({
-      nodes: next.nodes,
-      edges: next.edges,
+      nodes: structuredClone(next.nodes),
+      edges: structuredClone(next.edges),
       _future: _future.slice(0, -1),
       _past: [...get()._past, { nodes: structuredClone(nodes), edges: structuredClone(edges) }],
       isDirty: true,

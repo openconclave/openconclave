@@ -88,12 +88,10 @@ export function DiscussionNode(props: NodeProps) {
   const config = data.config as DiscussionConfig;
 
   const updateNodeData = useConclaveStore((s) => s.updateNodeData);
-  const activeNodeIds = useConclaveStore((s) => s.activeNodeIds);
+  const isActive = useConclaveStore((s) => s.activeNodeIds.has(props.id));
   const isDraggingTool = useConclaveStore((s) => s.isDraggingTool);
   const updateNodeConfig = useConclaveStore((s) => s.updateNodeConfig);
   const edges = useConclaveStore((s) => s.edges);
-
-  const isActive = activeNodeIds.has(props.id);
 
   const [editing, setEditing] = useState(false);
   const labelRef = useRef<HTMLSpanElement>(null);

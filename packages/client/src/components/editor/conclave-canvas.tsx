@@ -37,8 +37,16 @@ const miniMapColors: Record<string, string> = {
   prompt: "oklch(0.65 0.18 170)",
 };
 
+function isEditableTarget(e: KeyboardEvent): boolean {
+  const t = e.target as HTMLElement | null;
+  if (!t) return false;
+  if (t.isContentEditable) return true;
+  const tag = t.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+}
+
 function MiniMapNode({ x, y, width, height, id }: MiniMapNodeProps) {
-  const nodeType = useConclaveStore.getState().nodes.find((n) => n.id === id)?.data?.type;
+  const nodeType = useConclaveStore((s) => s.nodes.find((n) => n.id === id)?.data?.type);
   const color = miniMapColors[nodeType ?? ""] ?? "oklch(0.65 0.18 260)";
   const rx = Math.min(width, height) * 0.2;
   return (
@@ -76,7 +84,9 @@ const nodeTypes = {
   discussion: DiscussionNode,
 };
 
-let nodeId = Date.now();
+function newNodeId(type: string): string {
+  return `${type}_${crypto.randomUUID()}`;
+}
 
 function autoLayout() {
   const { nodes, edges } = useConclaveStore.getState();
@@ -144,6 +154,9 @@ function getHandleXY(node: Node<ConclaveNodeData>, handleId: string | null | und
 const MINIMAP_POS_KEY = "oc-minimap-pos";
 const MINIMAP_VISIBLE_KEY = "oc-minimap-visible";
 
+const MINIMAP_W = 220;
+const MINIMAP_H = 162;
+
 function DraggableMiniMap({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   const dragging = useRef(false);
@@ -159,8 +172,28 @@ function DraggableMiniMap({ visible, onClose }: { visible: boolean; onClose: () 
     const wrapper = wrapperRef.current?.closest(".react-flow");
     if (!wrapper) return;
     const rect = wrapper.getBoundingClientRect();
-    setPos({ x: rect.width - 232, y: rect.height - 162 });
+    setPos({ x: rect.width - MINIMAP_W - 12, y: rect.height - MINIMAP_H });
   }, []);
+
+  // Clamp position into visible bounds when the canvas wrapper resizes
+  useEffect(() => {
+    const wrapper = wrapperRef.current?.closest(".react-flow") as HTMLElement | null;
+    if (!wrapper) return;
+    const ro = new ResizeObserver(() => {
+      const rect = wrapper.getBoundingClientRect();
+      setPos((p) => {
+        if (!p) return p;
+        const nx = Math.max(0, Math.min(p.x, rect.width - MINIMAP_W));
+        const ny = Math.max(0, Math.min(p.y, rect.height - MINIMAP_H));
+        if (nx === p.x && ny === p.y) return p;
+        const next = { x: nx, y: ny };
+        localStorage.setItem(MINIMAP_POS_KEY, JSON.stringify(next));
+        return next;
+      });
+    });
+    ro.observe(wrapper);
+    return () => ro.disconnect();
+  }, [visible]);
 
   const onPointerDown = useCallback((e: React.PointerEvent) => {
     if (!pos) return;
@@ -175,11 +208,10 @@ function DraggableMiniMap({ visible, onClose }: { visible: boolean; onClose: () 
     const wrapper = wrapperRef.current?.closest(".react-flow") as HTMLElement | null;
     if (!wrapper) return;
     const bounds = wrapper.getBoundingClientRect();
-    const mw = 220, mh = 162; // minimap width + header
     let nx = e.clientX - offset.current.x;
     let ny = e.clientY - offset.current.y;
-    nx = Math.max(0, Math.min(nx, bounds.width - mw));
-    ny = Math.max(0, Math.min(ny, bounds.height - mh));
+    nx = Math.max(0, Math.min(nx, bounds.width - MINIMAP_W));
+    ny = Math.max(0, Math.min(ny, bounds.height - MINIMAP_H));
     setPos({ x: nx, y: ny });
     e.stopPropagation();
   }, []);
@@ -221,21 +253,20 @@ function DraggableMiniMap({ visible, onClose }: { visible: boolean; onClose: () 
           />
         </div>
       </div>
-      <MiniMapEdges />
+      <MiniMapEdges scopeRef={wrapperRef} />
     </div>
   );
 }
 
-function MiniMapEdges() {
+function MiniMapEdges({ scopeRef }: { scopeRef: React.RefObject<HTMLDivElement | null> }) {
   const nodes = useConclaveStore((s) => s.nodes);
   const edges = useConclaveStore((s) => s.edges);
 
   useEffect(() => {
-    const svg = document.querySelector(".react-flow__minimap svg");
+    const svg = scopeRef.current?.querySelector(".react-flow__minimap svg");
     if (!svg) return;
 
-    svg.querySelectorAll(".minimap-edge").forEach((el) => el.remove());
-
+    const added: SVGPathElement[] = [];
     for (const edge of edges) {
       const sn = nodes.find((n) => n.id === edge.source);
       const tn = nodes.find((n) => n.id === edge.target);
@@ -255,8 +286,13 @@ function MiniMapEdges() {
       const mask = svg.querySelector(".react-flow__minimap-mask");
       if (mask) svg.insertBefore(path, mask);
       else svg.appendChild(path);
+      added.push(path);
     }
-  }, [nodes, edges]);
+
+    return () => {
+      for (const p of added) p.remove();
+    };
+  }, [nodes, edges, scopeRef]);
 
   return null;
 }
@@ -343,16 +379,93 @@ export function ConclaveCanvas() {
     }
 
     // Dropped in empty space → delete edge
-    setTimeout(() => {
-      pushHistory();
-      useConclaveStore.setState({
-        edges: useConclaveStore.getState().edges.filter((e) => e.id !== edge.id),
-        isDirty: true,
-      });
-    }, 0);
+    pushHistory();
+    useConclaveStore.setState({
+      edges: useConclaveStore.getState().edges.filter((e) => e.id !== edge.id),
+      isDirty: true,
+    });
   }, [pushHistory]);
   const setSelectedNode = useConclaveStore((s) => s.setSelectedNode);
   const onNodeDragStart = useCallback(() => {}, []);
+
+  const onSelectionStart = useCallback((e: React.MouseEvent) => {
+    selStart.current = { x: e.clientX, y: e.clientY };
+  }, []);
+
+  const onSelectionEnd = useCallback((e: React.MouseEvent) => {
+    const start = selStart.current;
+    if (!start || !reactFlowWrapper.current) {
+      selStart.current = null;
+      return;
+    }
+
+    const left = Math.min(start.x, e.clientX);
+    const top = Math.min(start.y, e.clientY);
+    const right = Math.max(start.x, e.clientX);
+    const bottom = Math.max(start.y, e.clientY);
+
+    // Only process if it was a real drag (not a click)
+    if (right - left < 5 && bottom - top < 5) {
+      selStart.current = null;
+      return;
+    }
+
+    const edgePaths = reactFlowWrapper.current.querySelectorAll(
+      '.react-flow__edge path.react-flow__edge-path'
+    );
+    const toSelect: string[] = [];
+
+    edgePaths.forEach((pathEl) => {
+      const pathBounds = pathEl.getBoundingClientRect();
+      const overlaps =
+        pathBounds.left < right &&
+        pathBounds.right > left &&
+        pathBounds.top < bottom &&
+        pathBounds.bottom > top;
+      if (overlaps) {
+        const edgeEl = pathEl.closest('.react-flow__edge');
+        const edgeId = edgeEl?.getAttribute('data-id');
+        if (edgeId) toSelect.push(edgeId);
+      }
+    });
+
+    if (toSelect.length > 0) {
+      onEdgesChange(
+        toSelect.map((id) => ({ id, type: "select" as const, selected: true }))
+      );
+    }
+    selStart.current = null;
+  }, [onEdgesChange]);
+
+  const isValidConnection = useCallback((connection: Connection | Edge) => {
+    const { edges: currentEdges, nodes: currentNodes } = useConclaveStore.getState();
+    // Prevent self-connections
+    if (connection.source === connection.target) return false;
+    // Prevent duplicate edges (same source+target AND same handles)
+    const exists = currentEdges.some(
+      (e) => e.source === connection.source && e.target === connection.target
+        && e.sourceHandle === connection.sourceHandle && e.targetHandle === connection.targetHandle
+    );
+    if (exists) return false;
+
+    // Block reverse edges when bidirectional single-edge already covers it
+    const sourceNode = currentNodes.find((n) => n.id === connection.source);
+    const targetNode = currentNodes.find((n) => n.id === connection.target);
+    if (sourceNode && targetNode) {
+      const reverseExists = currentEdges.some(
+        (e) => e.source === connection.target && e.target === connection.source
+      );
+      if (reverseExists) {
+        // Chat Trigger ↔ Agent
+        if (targetNode.data.type === "trigger" && (targetNode.data.config as TriggerConfig)?.type === "chat") return false;
+        // Agent ↔ Channel Loop (prompt)
+        if (sourceNode.data.type === "agent" && targetNode.data.type === "prompt") return false;
+        if (sourceNode.data.type === "prompt" && targetNode.data.type === "agent") return false;
+      }
+    }
+
+    return true;
+  }, []);
 
   const [spaceHeld, setSpaceHeld] = useState(false);
   const [, setShiftHeld] = useState(false);
@@ -361,6 +474,9 @@ export function ConclaveCanvas() {
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      // Don't hijack typing in text inputs / textareas / contentEditable
+      if (isEditableTarget(e)) return;
+
       if (e.code === "Space" && !e.repeat) setSpaceHeld(true);
       if (e.key === "Shift") setShiftHeld(true);
 
@@ -389,6 +505,7 @@ export function ConclaveCanvas() {
       }
     };
     const onKeyUp = (e: KeyboardEvent) => {
+      // Mirror keydown guard — but always release space/shift even if focus moved
       if (e.code === "Space") setSpaceHeld(false);
       if (e.key === "Shift") setShiftHeld(false);
     };
@@ -452,7 +569,7 @@ export function ConclaveCanvas() {
         uniqueLabel = `${label} ${counter}`;
       }
 
-      const id = `${type}_${++nodeId}`;
+      const id = newNodeId(type);
       // React Flow has built-in "output" node type with forced styles — use "sink" instead
       const rfType = type === "output" ? "sink" : type;
       const newNode = {
@@ -497,7 +614,7 @@ export function ConclaveCanvas() {
       uniqueLabel = `${label} ${counter}`;
     }
 
-    const id = `${type}_${++nodeId}`;
+    const id = newNodeId(type);
     const rfType = type === "output" ? "sink" : type;
     addNode({
       id,
@@ -522,35 +639,7 @@ export function ConclaveCanvas() {
         onReconnectEnd={onReconnectEnd}
         onNodeDragStart={onNodeDragStart}
         connectionLineComponent={CustomConnectionLine}
-        isValidConnection={(connection) => {
-          const { edges: currentEdges, nodes: currentNodes } = useConclaveStore.getState();
-          // Prevent self-connections
-          if (connection.source === connection.target) return false;
-          // Prevent duplicate edges (same source+target AND same handles)
-          const exists = currentEdges.some(
-            (e) => e.source === connection.source && e.target === connection.target
-              && e.sourceHandle === connection.sourceHandle && e.targetHandle === connection.targetHandle
-          );
-          if (exists) return false;
-
-          // Block reverse edges when bidirectional single-edge already covers it
-          const sourceNode = currentNodes.find((n) => n.id === connection.source);
-          const targetNode = currentNodes.find((n) => n.id === connection.target);
-          if (sourceNode && targetNode) {
-            const reverseExists = currentEdges.some(
-              (e) => e.source === connection.target && e.target === connection.source
-            );
-            if (reverseExists) {
-              // Chat Trigger ↔ Agent
-              if (targetNode.data.type === "trigger" && (targetNode.data.config as TriggerConfig)?.type === "chat") return false;
-              // Agent ↔ Channel Loop (prompt)
-              if (sourceNode.data.type === "agent" && targetNode.data.type === "prompt") return false;
-              if (sourceNode.data.type === "prompt" && targetNode.data.type === "agent") return false;
-            }
-          }
-
-          return true;
-        }}
+        isValidConnection={isValidConnection}
         onDragOver={onDragOver}
         onDrop={onDrop}
         onInit={(instance) => {
@@ -581,53 +670,8 @@ export function ConclaveCanvas() {
             lastClickedEdge.current = edge.id;
           }
         }}
-        onSelectionStart={useCallback((e: React.MouseEvent) => {
-          selStart.current = { x: e.clientX, y: e.clientY };
-        }, [])}
-        onSelectionEnd={useCallback((e: React.MouseEvent) => {
-          const start = selStart.current;
-          if (!start || !reactFlowWrapper.current) {
-            selStart.current = null;
-            return;
-          }
-
-          const left = Math.min(start.x, e.clientX);
-          const top = Math.min(start.y, e.clientY);
-          const right = Math.max(start.x, e.clientX);
-          const bottom = Math.max(start.y, e.clientY);
-
-          // Only process if it was a real drag (not a click)
-          if (right - left < 5 && bottom - top < 5) {
-            selStart.current = null;
-            return;
-          }
-
-          const edgePaths = reactFlowWrapper.current.querySelectorAll(
-            '.react-flow__edge path.react-flow__edge-path'
-          );
-          const toSelect: string[] = [];
-
-          edgePaths.forEach((pathEl) => {
-            const pathBounds = pathEl.getBoundingClientRect();
-            const overlaps =
-              pathBounds.left < right &&
-              pathBounds.right > left &&
-              pathBounds.top < bottom &&
-              pathBounds.bottom > top;
-            if (overlaps) {
-              const edgeEl = pathEl.closest('.react-flow__edge');
-              const edgeId = edgeEl?.getAttribute('data-id');
-              if (edgeId) toSelect.push(edgeId);
-            }
-          });
-
-          if (toSelect.length > 0) {
-            onEdgesChange(
-              toSelect.map((id) => ({ id, type: "select" as const, selected: true }))
-            );
-          }
-          selStart.current = null;
-        }, [onEdgesChange])}
+        onSelectionStart={onSelectionStart}
+        onSelectionEnd={onSelectionEnd}
         onPaneClick={() => {
           setSelectedNode(null);
           lastClickedNode.current = null;
