@@ -232,7 +232,14 @@ export class AgentBase {
       if (Object.keys(configs).length > 0) {
         const results = await bridge.connectResolved(configs);
         for (const r of results) {
-          if (!r.ok) {
+          if (r.ok) continue;
+          // Cancelled mid-flight is a graceful outcome, not a failure.
+          if (r.reason === "cancelled") {
+            logger.info("MCP server connect cancelled", {
+              serverId: r.serverId,
+              runId: this.runId,
+            });
+          } else {
             logger.error("Failed to connect MCP server", {
               serverId: r.serverId,
               error: r.error,
