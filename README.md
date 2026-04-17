@@ -20,7 +20,7 @@ irm https://openconclave.com/install.ps1 | iex
 curl -fsSL https://openconclave.com/install.sh | bash
 ```
 
-Open [localhost:5173](http://localhost:5173) → import a starter → hit **Run**.
+Open [localhost:4000](http://localhost:4000) → import a starter → hit **Run**.
 
 No runtime dependencies. Single binary. [Manual install →](#manual-install)
 
