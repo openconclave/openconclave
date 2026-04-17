@@ -37,6 +37,12 @@ function sanitizeSchema(schema: unknown): Record<string, unknown> {
   return s;
 }
 
+export interface ConnectResult {
+  serverId: string;
+  ok: boolean;
+  error?: string;
+}
+
 type OllamaTool = {
   type: "function";
   function: {
@@ -55,8 +61,13 @@ export class McpBridge {
   /**
    * Connect to MCP servers using resolved configs.
    * Supports stdio, streamable-http, and sse transports.
+   *
+   * Returns per-server results so callers can log partial failures — previously
+   * a misconfigured server would be swallowed at console.error and the agent
+   * would run with a silently-reduced tool surface.
    */
-  async connectResolved(configs: Record<string, McpResolvedConfig>): Promise<void> {
+  async connectResolved(configs: Record<string, McpResolvedConfig>): Promise<ConnectResult[]> {
+    const results: ConnectResult[] = [];
     for (const [id, config] of Object.entries(configs)) {
       try {
         let transport: StdioClientTransport | StreamableHTTPClientTransport | SSEClientTransport;
@@ -70,7 +81,6 @@ export class McpBridge {
         } else if (config.transport === "streamable-http") {
           transport = new StreamableHTTPClientTransport(new URL(config.url!));
         } else {
-          // SSE transport
           transport = new SSEClientTransport(new URL(config.url!));
         }
 
@@ -81,7 +91,6 @@ export class McpBridge {
 
         await client.connect(transport);
 
-        // Discover tools
         const toolsResult = await client.listTools();
 
         for (const tool of toolsResult.tools) {
@@ -100,10 +109,13 @@ export class McpBridge {
 
         this.clients.set(id, client);
         this.transports.set(id, transport);
-      } catch (err: any) {
-        console.error(`Failed to connect MCP server "${id}":`, err.message);
+        results.push({ serverId: id, ok: true });
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        results.push({ serverId: id, ok: false, error: message });
       }
     }
+    return results;
   }
 
   /**

@@ -31,6 +31,14 @@ export class AgentBase {
   readonly tools: ResolvedTool[] = [];
   readonly toolExecutors = new Map<string, (args: Record<string, unknown>) => Promise<string>>();
   private mcpBridge: McpBridge | null = null;
+  private mcpConnectInFlight = false;
+  // A unique token per connect attempt. disconnect() clears it; an in-flight
+  // connect checks that its own token still matches before publishing the
+  // bridge. This is cleaner than a boolean "disconnectRequested" flag, which
+  // couldn't distinguish "external disconnect arrived before our entry" from
+  // "...arrived during our await" without losing a signal.
+  private currentConnectToken: symbol | null = null;
+  private readonly mcpToolNames = new Set<string>();
   protected readonly workspace: Workspace;
 
   private readonly runId?: number;
@@ -42,8 +50,12 @@ export class AgentBase {
   ) {
     this.workspace = workspace ?? new Workspace();
     this.runId = runId;
-    this.resolveBuiltinTools();
-    this.resolveKnowledgeTools();
+    // Build the tool catalog once so both resolveBuiltinTools and
+    // resolveKnowledgeTools see the same runId-bound set (web_fetch included
+    // when runId is defined; knowledge tools always).
+    const builtins = createBuiltinTools(this.workspace, this.runId);
+    this.resolveBuiltinTools(builtins);
+    this.resolveKnowledgeTools(builtins);
     if (runId !== undefined) {
       this.resolveAttachmentTools(runId);
       this.resolveArtifactTools(runId);
@@ -52,22 +64,22 @@ export class AgentBase {
 
   // ── Builtin tools from connected tool nodes ─────────────────
 
-  private resolveBuiltinTools(): void {
-    const builtins = createBuiltinTools(this.workspace, this.runId);
-
+  private resolveBuiltinTools(builtins: Record<string, BuiltinTool>): void {
     for (const toolName of this.config.allowedTools) {
-      // Map Claude Code names (Bash→bash, Read→read_file) or use direct name
       const mapped = TOOL_NAME_MAP[toolName] ?? toolName;
-      // Knowledge tools must ONLY register via resolveKnowledgeTools, which
-      // wraps them in KB-scoped executors. addBuiltin dedupes by first-added-wins,
-      // so if we registered the raw builtin here, the scoped wrapper added later
-      // would be silently dropped.
+      // Knowledge tools must register only via resolveKnowledgeTools, where
+      // the KB-scoping wrappers live. addBuiltin is first-wins, so registering
+      // the raw builtin here would shadow the scoped wrapper.
       if (KNOWLEDGE_TOOL_NAMES.has(mapped)) continue;
       const bt = builtins[mapped];
       if (bt) {
         this.addBuiltin(bt);
-      } else if (toolName in TOOL_NAME_MAP) {
-        logger.warn("builtin tool requested but no executor available", {
+      } else {
+        // allowedTools is specifically for builtins (MCP goes through mcpServers
+        // / mcpTools), so any unresolved entry is a misconfiguration. Warn
+        // regardless of casing — previously a lowercase "web_fetch" would fall
+        // through silently because it didn't match the capitalized map key.
+        logger.warn("allowedTool has no builtin executor", {
           toolName,
           mappedTo: mapped,
           hasRunId: this.runId !== undefined,
@@ -78,12 +90,28 @@ export class AgentBase {
 
   // ── Knowledge tools (when KB tool nodes are connected) ──────
 
-  private resolveKnowledgeTools(): void {
-    if (this.config.knowledgeBases.length === 0) return;
-
-    const builtins = createBuiltinTools(this.workspace);
+  private resolveKnowledgeTools(builtins: Record<string, BuiltinTool>): void {
     const kbIds = this.config.knowledgeBases;
-    const allowedNumericIds = new Set(kbIds.map(Number).filter((n) => !isNaN(n)));
+    if (kbIds.length === 0) return;
+    // KB ids are positive integers (DB autoincrement — id 0 never exists).
+    // Reject non-digit strings (Number("") === 0 would authorize id 0),
+    // explicit leading zero, and ids past MAX_SAFE_INTEGER (which would collapse
+    // neighbors via double-precision rounding).
+    const allowedNumericIds = new Set(
+      kbIds
+        .filter((s) => /^[1-9]\d*$/.test(s))
+        .map(Number)
+        .filter((n) => Number.isSafeInteger(n)),
+    );
+    if (allowedNumericIds.size === 0) {
+      // Every configured id failed validation — registering tools would make
+      // every call return "not connected" with no way for the agent to recover.
+      logger.warn("knowledge tools skipped: no valid KB ids in config", {
+        configured: kbIds,
+        runId: this.runId,
+      });
+      return;
+    }
     const knowledgeToolNames = ["search_knowledge", "knowledge_fetch", "knowledge_add"];
 
     for (const name of knowledgeToolNames) {
@@ -97,40 +125,58 @@ export class AgentBase {
           param.description = `Knowledge base ID to search. Available IDs: ${kbIds.join(", ")}. If omitted, searches all connected knowledge bases.`;
         }
         const scopedExecute = async (args: Record<string, unknown>) => {
-          if (args.knowledge_base_id !== undefined) {
+          // Validate query+topK unconditionally — the fast-path (kb_id present)
+          // previously skipped these, letting `top_k: 1_000_000` reach the DB.
+          if (typeof args.query !== "string" || args.query.length === 0) {
+            return "Error: query must be a non-empty string.";
+          }
+          const topK = typeof args.top_k === "number" && args.top_k > 0 ? args.top_k : 5;
+
+          if (args.knowledge_base_id !== undefined && args.knowledge_base_id !== null) {
             const id = Number(args.knowledge_base_id);
             if (!allowedNumericIds.has(id)) {
               return `Error: knowledge_base_id ${args.knowledge_base_id} not connected to this agent. Available IDs: ${kbIds.join(", ")}.`;
             }
+            return bt.execute({ ...args, knowledge_base_id: id, query: args.query, top_k: topK });
           }
-          if (args.knowledge_base_id === undefined && kbIds.length > 0) {
+
+          // No kb_id: fan out over the agent's connected KBs.
+          try {
             const { searchMultipleKBs } = await import("../knowledge/search");
             const numericIds = [...allowedNumericIds];
-            const results = await searchMultipleKBs(numericIds, args.query as string, (args.top_k as number | undefined) ?? 5);
+            const results = await searchMultipleKBs(numericIds, args.query, topK);
             if (results.length === 0) return "No relevant results found.";
             return results
               .map((r: { score: number; knowledgeBaseId: number; documentId: number; chunkIndex: number; documentName: string; content: string }, i: number) =>
                 `[${i + 1}] (score: ${r.score.toFixed(3)}) [kb:${r.knowledgeBaseId} doc:${r.documentId} chunk:${r.chunkIndex}] ${r.documentName}\n${r.content}`)
               .join("\n\n---\n\n");
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            logger.error("search_knowledge scoped fallback error", { error: msg });
+            return `Error searching knowledge base: ${msg}`;
           }
-          return bt.execute(args);
         };
         this.addBuiltin({ tool: patchedTool, execute: scopedExecute });
       } else {
-        // knowledge_fetch and knowledge_add — reject kb_ids outside connected set.
-        // Matches the Claude-side guard in runtime.ts; the AgentBase executors
-        // previously trusted any kb_id, letting an agent bound to KB 1 read KB 2.
+        // knowledge_fetch and knowledge_add — reject kb_ids outside the
+        // connected set so an agent bound to KB 1 can't reach KB 2.
         const patchedTool = JSON.parse(JSON.stringify(bt.tool));
         const param = patchedTool.function?.parameters?.properties?.knowledge_base_id;
         if (param) {
           param.description = `${param.description ?? "Knowledge base ID"}. Available IDs: ${kbIds.join(", ")}.`;
         }
         const scopedExecute = async (args: Record<string, unknown>) => {
-          const id = Number(args.knowledge_base_id);
-          if (!allowedNumericIds.has(id)) {
-            return `Error: knowledge_base_id ${args.knowledge_base_id} not connected to this agent. Available IDs: ${kbIds.join(", ")}.`;
+          const raw = args.knowledge_base_id;
+          // Reject null/undefined explicitly — Number(null) === 0 would otherwise
+          // slip into allowedNumericIds.has() with id 0.
+          if (raw === null || raw === undefined) {
+            return `Error: knowledge_base_id is required. Available IDs: ${kbIds.join(", ")}.`;
           }
-          return bt.execute(args);
+          const id = Number(raw);
+          if (!allowedNumericIds.has(id)) {
+            return `Error: knowledge_base_id ${raw} not connected to this agent. Available IDs: ${kbIds.join(", ")}.`;
+          }
+          return bt.execute({ ...args, knowledge_base_id: id });
         };
         this.addBuiltin({ tool: patchedTool, execute: scopedExecute });
       }
@@ -152,11 +198,31 @@ export class AgentBase {
   // ── MCP server tools (from connected MCP tool nodes) ────────
 
   async connectMcpServers(): Promise<void> {
-    if (this.config.mcpServers.length === 0) return;
+    // Either path (legacy mcpServers id list OR registry-aware mcpTools entries)
+    // can populate the bridge. Early-returning on just mcpServers.length === 0
+    // would drop registry-only configs on the floor.
+    if (this.config.mcpServers.length === 0 && (this.config.mcpTools ?? []).length === 0) return;
+    if (this.mcpConnectInFlight) {
+      logger.warn("connectMcpServers re-entered while a connect was in flight", {
+        runId: this.runId,
+      });
+      return;
+    }
+    this.mcpConnectInFlight = true;
+    const myToken = Symbol("connect");
+    this.currentConnectToken = myToken;
 
-    this.mcpBridge = new McpBridge();
+    // Inline teardown of any prior bridge — do NOT call this.disconnect(),
+    // which would null currentConnectToken and cause our own race check below
+    // to abandon the new bridge.
+    if (this.mcpBridge) {
+      await this.mcpBridge.disconnect();
+      this.mcpBridge = null;
+      this.evictMcpTools();
+    }
+
+    const bridge = new McpBridge();
     try {
-      // Use new registry-aware path if mcpTools are available
       const mcpTools = this.config.mcpTools ?? [];
       const legacyIds = this.config.mcpServers.filter(
         (id) => !mcpTools.some((t) => t.toolId === id),
@@ -164,31 +230,102 @@ export class AgentBase {
       const configs = this.workspace.getMcpToolConfigs(mcpTools, legacyIds);
 
       if (Object.keys(configs).length > 0) {
-        await this.mcpBridge.connectResolved(configs);
+        const results = await bridge.connectResolved(configs);
+        for (const r of results) {
+          if (!r.ok) {
+            logger.error("Failed to connect MCP server", {
+              serverId: r.serverId,
+              error: r.error,
+              runId: this.runId,
+            });
+          }
+        }
       }
 
-      for (const tool of this.mcpBridge.getTools()) {
-        const name = tool.function.name;
-        this.tools.push({
-          name,
-          description: tool.function.description,
-          parameters: tool.function.parameters as Record<string, unknown>,
-          execute: async (args) => this.mcpBridge!.callTool(name, args),
+      // If our token was cleared (external disconnect) or replaced (unlikely
+      // given the in-flight guard, but possible via manual token manipulation),
+      // tear down the bridge we just built and bail silently.
+      if (this.currentConnectToken !== myToken) {
+        logger.warn("connect superseded by external disconnect; discarding new bridge", {
+          runId: this.runId,
         });
-        this.toolExecutors.set(name, async (args) => this.mcpBridge!.callTool(name, args));
+        await bridge.disconnect().catch(() => { /* partial state, ignore */ });
+        return;
+      }
+
+      this.mcpBridge = bridge;
+
+      for (const tool of bridge.getTools()) {
+        // Route through addBuiltin so first-wins dedupe protects KB-scoped
+        // wrappers and attachment/artifact tools from a name collision.
+        // `bridge` is captured in the closure so post-disconnect calls hit
+        // bridge.callTool's graceful "server not connected" path.
+        const name = tool.function.name;
+        // Check collision BEFORE recording in mcpToolNames — otherwise a
+        // rejected add would still mark the name for eviction, taking out
+        // the pre-existing tool that actually owns the name.
+        if (this.toolExecutors.has(name)) {
+          logger.warn("MCP tool name collides with an existing tool, skipping", {
+            name,
+            runId: this.runId,
+          });
+          continue;
+        }
+        this.mcpToolNames.add(name);
+        this.addBuiltin({
+          tool: {
+            type: "function",
+            function: {
+              name,
+              description: tool.function.description,
+              parameters: tool.function.parameters as Record<string, unknown>,
+            },
+          },
+          execute: async (args) => bridge.callTool(name, args),
+        });
       }
     } catch (err: unknown) {
-      logger.warn("Failed to connect MCP servers", {
-        error: err instanceof Error ? err.message : String(err),
-      });
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error("MCP bridge setup failed", { error: msg, runId: this.runId });
+      await bridge.disconnect().catch(() => { /* already broken */ });
+      this.mcpBridge = null;
+      this.evictMcpTools();
+    } finally {
+      this.mcpConnectInFlight = false;
     }
   }
 
   async disconnect(): Promise<void> {
-    if (this.mcpBridge) {
-      await this.mcpBridge.disconnect();
-      this.mcpBridge = null;
+    // Invalidate any in-flight connect so it tears down the bridge it built
+    // instead of publishing it. Reset state FIRST so a failing
+    // bridge.disconnect() can't leave stale tool closures registered.
+    this.currentConnectToken = null;
+    const bridge = this.mcpBridge;
+    this.mcpBridge = null;
+    this.evictMcpTools();
+    if (bridge) {
+      try {
+        await bridge.disconnect();
+      } catch (err: unknown) {
+        logger.warn("MCP bridge disconnect failed", {
+          error: err instanceof Error ? err.message : String(err),
+          runId: this.runId,
+        });
+      }
     }
+  }
+
+  /** Remove MCP-registered tool entries so stale bridge closures can't be called. */
+  private evictMcpTools(): void {
+    if (this.mcpToolNames.size === 0) return;
+    for (const name of this.mcpToolNames) {
+      this.toolExecutors.delete(name);
+    }
+    for (let i = this.tools.length - 1; i >= 0; i--) {
+      const t = this.tools[i];
+      if (t && this.mcpToolNames.has(t.name)) this.tools.splice(i, 1);
+    }
+    this.mcpToolNames.clear();
   }
 
   // ── Helpers ─────────────────────────────────────────────────
