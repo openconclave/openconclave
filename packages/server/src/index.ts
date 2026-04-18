@@ -43,7 +43,7 @@ await recoverStaleRuns();
 const app = new Hono();
 
 app.use("*", cors());
-app.use("*", errorHandler);
+app.onError(errorHandler);
 
 // ── Health ───────────────────────────────────────────────────
 app.get("/api/health", (c) => c.json({ status: "ok", version: VERSION }));
