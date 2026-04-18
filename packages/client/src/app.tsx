@@ -6,7 +6,6 @@ import { DashboardPage } from "@/pages/dashboard";
 import { ConclavesPage } from "@/pages/conclaves";
 import { ConclaveEditorPage } from "@/pages/conclave-editor";
 import { RunsPage } from "@/pages/runs";
-import { RunDetailPage } from "@/pages/run-detail";
 import { SettingsPage } from "@/pages/settings";
 import { ChatPage } from "@/pages/chat";
 import { KnowledgePage } from "@/pages/knowledge";
@@ -18,8 +17,7 @@ function getPage() {
   if (path === "/" || path === "") return <DashboardPage />;
   if (path === "/conclaves") return <ConclavesPage />;
   if (path.startsWith("/conclaves/")) return <ConclaveEditorPage />;
-  if (path === "/runs") return <RunsPage />;
-  if (path.startsWith("/runs/")) return <RunDetailPage />;
+  if (path === "/runs" || path.startsWith("/runs/")) return <RunsPage />;
   if (path === "/settings") return <SettingsPage />;
   if (path === "/knowledge") return <KnowledgePage />;
   // /:toolName/chat or /:toolName/chat/:sessionId

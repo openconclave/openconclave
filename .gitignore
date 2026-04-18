@@ -30,3 +30,4 @@ scripts/entitlements.plist
 
 # Conclave run artifacts (e.g. The Ledger writes ledger-<runId>/ to cwd)
 ledger-*/
+.reviews
