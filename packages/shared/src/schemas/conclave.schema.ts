@@ -14,6 +14,7 @@ export const triggerConfigSchema = z.object({
   cron: z.string().optional(),
   webhookPath: z.string().optional(),
   chatId: z.string().optional(),
+  allowFromUsers: z.array(z.string()).optional(),
 });
 
 const mcpServerLaunchConfigSchema = z.object({

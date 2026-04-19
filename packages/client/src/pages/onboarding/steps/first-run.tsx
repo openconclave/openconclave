@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { I, STARTERS, type StarterId } from "../atoms";
+import { I, type Starter, type StarterId } from "../atoms";
 
 type Phase = "idle" | "running" | "channel" | "done";
 
@@ -11,7 +11,9 @@ interface LogLine {
   channel?: boolean;
 }
 
-const SCRIPTS: Record<Exclude<StarterId, "empty">, LogLine[]> = {
+type ScriptKind = "ledger" | "review" | "advisors";
+
+const SCRIPTS: Record<ScriptKind, LogLine[]> = {
   ledger: [
     { t: "00:00", tag: "trig", cls: "trig", msg: "chat trigger fired" },
     { t: "00:01", tag: "discussion", cls: "agn", msg: "round 1/6 · sunk-cost agent starts" },
@@ -40,27 +42,36 @@ const SCRIPTS: Record<Exclude<StarterId, "empty">, LogLine[]> = {
   ],
 };
 
-const DEFAULT_PROMPTS: Record<Exclude<StarterId, "empty">, string> = {
+const DEFAULT_PROMPTS: Record<ScriptKind, string> = {
   ledger: "I'm considering leaving the startup I co-founded three years ago. I've put in savings, late nights, and told my family this would work. Another company offered me a role that gives me more time and better pay, but feels less meaningful.",
   review: "Review src/auth/session.ts — I just refactored token refresh to use a sliding window, want a second look.",
   advisors: "Should we prioritize migrating to Postgres now, or ship the feature backlog first?",
 };
 
-const CHANNEL_QUESTIONS: Record<Exclude<StarterId, "empty">, string> = {
+const CHANNEL_QUESTIONS: Record<ScriptKind, string> = {
   ledger: 'Is the "other company" offer a concrete offer with compensation terms, or exploratory?',
   review: "Is the session storage server-side only, or does it sync to client cookies?",
   advisors: "Is your current Postgres need driven by reliability or feature gaps?",
 };
 
+function scriptKindFor(id: StarterId): ScriptKind {
+  if (id.includes("ledger")) return "ledger";
+  if (id.includes("review")) return "review";
+  if (id.includes("advisor")) return "advisors";
+  return "ledger";
+}
+
 export function FirstRunStep({
   starter,
+  starters,
   onComplete,
 }: {
   starter: StarterId;
+  starters: Starter[];
   onComplete: () => void;
 }) {
-  const effective = (starter === "empty" ? "ledger" : starter) as Exclude<StarterId, "empty">;
-  const starterMeta = STARTERS.find((s) => s.id === effective);
+  const effective = scriptKindFor(starter);
+  const starterMeta = starters.find((s) => s.id === starter);
   const [phase, setPhase] = useState<Phase>("idle");
   const [prompt, setPrompt] = useState<string>(DEFAULT_PROMPTS[effective]);
   const [log, setLog] = useState<LogLine[]>([]);

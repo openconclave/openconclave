@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactElement } from "react";
+import { VERSION } from "@openconclave/shared";
 import { api } from "@/lib/api";
-import { I, Sidebar, STEPS, type StarterId } from "./atoms";
+import { EMPTY_STARTER, I, Sidebar, STEPS, type Starter, type StarterId, type StarterVizKind } from "./atoms";
 import { WelcomeStep, type OnboardingPath } from "./steps/welcome";
 import { ClaudeCodeStep, type ClaudeStatus } from "./steps/claude-code";
 import { ProviderStep, type ProviderInfo } from "./steps/provider";
@@ -9,7 +10,36 @@ import { StarterStep } from "./steps/starter";
 import { FirstRunStep } from "./steps/first-run";
 import { ReadyStep } from "./steps/ready";
 
-const VERSION = "1.0.15";
+interface MarketplaceEntry {
+  id: string;
+  title: string;
+  description: string;
+  toolName?: string;
+  tags?: string[];
+  requires?: { providers?: string[]; embeddings?: boolean };
+}
+
+function vizForId(id: string): StarterVizKind {
+  if (id.includes("ledger")) return "ledger";
+  if (id.includes("review")) return "review";
+  if (id.includes("advisor") || id.includes("advice")) return "advisors";
+  return "empty";
+}
+
+function toStarter(entry: MarketplaceEntry): Starter {
+  const needs: Starter["needs"] = [];
+  if (entry.requires?.providers?.includes("anthropic")) needs.push("anthropic");
+  if (entry.requires?.embeddings) needs.push("ollama");
+  return {
+    id: entry.id,
+    title: entry.title,
+    toolName: entry.toolName ?? entry.id,
+    desc: entry.description,
+    nodes: 0,
+    needs,
+    viz: vizForId(entry.id),
+  };
+}
 
 export function OnboardingPage({ onComplete }: { onComplete: () => void }) {
   const [current, setCurrent] = useState(0);
@@ -24,7 +54,8 @@ export function OnboardingPage({ onComplete }: { onComplete: () => void }) {
   const [ollamaStatus, setOllamaStatus] = useState<OllamaState["status"]>("checking");
   const [ollamaModels, setOllamaModels] = useState<OllamaModelInfo[]>([]);
 
-  const [starter, setStarter] = useState<StarterId>("ledger");
+  const [starter, setStarter] = useState<StarterId>("empty");
+  const [starters, setStarters] = useState<Starter[]>([EMPTY_STARTER]);
   const [finishing, setFinishing] = useState(false);
 
   const loadProviders = () => {
@@ -64,6 +95,16 @@ export function OnboardingPage({ onComplete }: { onComplete: () => void }) {
   useEffect(() => {
     loadProviders();
     checkClaude();
+    // Fetch featured starters from the marketplace; show first 2 + always-present empty.
+    api.get<{ entries: MarketplaceEntry[] }>("/starters")
+      .then((data) => {
+        const featured = (data.entries ?? []).slice(0, 2).map(toStarter);
+        setStarters([...featured, EMPTY_STARTER]);
+        if (featured[0]) setStarter(featured[0].id);
+      })
+      .catch(() => {
+        // Marketplace unreachable — just keep the empty option so onboarding still works.
+      });
   }, []);
 
   // Auto-recheck Ollama whenever the Ollama step becomes active.
@@ -100,7 +141,7 @@ export function OnboardingPage({ onComplete }: { onComplete: () => void }) {
     stepId === "starter" ? true :
     true;
 
-  const showSkip = stepId === "cc" || stepId === "ollama" || stepId === "run";
+  const showSkip = stepId === "cc" || stepId === "provider" || stepId === "ollama" || stepId === "run";
   const showBack = current > 0 && stepId !== "ready";
   const showContinue = stepId !== "ready" && stepId !== "run";
 
@@ -124,9 +165,9 @@ export function OnboardingPage({ onComplete }: { onComplete: () => void }) {
   if (stepId === "cc") body = <ClaudeCodeStep status={claudeStatus} version={claudeVersion} onRecheck={checkClaude} />;
   if (stepId === "provider") body = <ProviderStep providers={providers} reload={loadProviders} />;
   if (stepId === "ollama") body = <OllamaStep state={ollamaState} setUrl={saveOllamaUrl} recheck={fetchOllama} />;
-  if (stepId === "starter") body = <StarterStep starter={starter} setStarter={setStarter} hasAnthropic={hasAnthropic} hasEmbed={hasEmbed} />;
-  if (stepId === "run") body = <FirstRunStep starter={starter} onComplete={next} />;
-  if (stepId === "ready") body = <ReadyStep providers={providers} ollama={ollamaState} starter={starter} finishing={finishing} onFinish={finish} />;
+  if (stepId === "starter") body = <StarterStep starter={starter} setStarter={setStarter} starters={starters} hasAnthropic={hasAnthropic} hasEmbed={hasEmbed} />;
+  if (stepId === "run") body = <FirstRunStep starter={starter} starters={starters} onComplete={next} />;
+  if (stepId === "ready") body = <ReadyStep providers={providers} ollama={ollamaState} starter={starter} starters={starters} finishing={finishing} onFinish={finish} />;
 
   return (
     <div className="ob-shell">

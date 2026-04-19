@@ -283,8 +283,11 @@ export function Sidebar({
   );
 }
 
-/* Starter definitions shared between starter + first-run + ready steps */
-export type StarterId = "ledger" | "review" | "advisors" | "empty";
+/* Starter definitions shared between starter + first-run + ready steps.
+   Most entries come live from the marketplace; "empty" is the synthetic
+   blank-slate option we always present alongside. */
+export type StarterId = string;
+export type StarterVizKind = "ledger" | "review" | "advisors" | "empty";
 
 export interface Starter {
   id: StarterId;
@@ -293,44 +296,15 @@ export interface Starter {
   desc: string;
   nodes: number;
   needs: Array<"anthropic" | "ollama">;
-  viz: "ledger" | "review" | "advisors" | "empty";
+  viz: StarterVizKind;
 }
 
-export const STARTERS: Starter[] = [
-  {
-    id: "ledger",
-    title: "The Ledger",
-    toolName: "the_ledger",
-    desc: "For irreversible decisions. Two agents list sunk costs vs. opportunity costs; a code node detects overlap.",
-    nodes: 6,
-    needs: ["anthropic", "ollama"],
-    viz: "ledger",
-  },
-  {
-    id: "review",
-    title: "Light Code Review",
-    toolName: "light_code_review",
-    desc: "Three KB-grounded specialists review a file in parallel — correctness, tests, security — then synthesize.",
-    nodes: 7,
-    needs: ["anthropic"],
-    viz: "review",
-  },
-  {
-    id: "advisors",
-    title: "Three Advisors",
-    toolName: "three_advisors",
-    desc: "Three agents answer independently from different angles. A fourth merges them into one reply.",
-    nodes: 5,
-    needs: ["anthropic"],
-    viz: "advisors",
-  },
-  {
-    id: "empty",
-    title: "Start from blank",
-    toolName: "your_tool_name",
-    desc: "Open the visual editor and build your first conclave from scratch. You can import a starter anytime.",
-    nodes: 0,
-    needs: [],
-    viz: "empty",
-  },
-];
+export const EMPTY_STARTER: Starter = {
+  id: "empty",
+  title: "Start from blank",
+  toolName: "your_tool_name",
+  desc: "Open the visual editor and build your first conclave from scratch. You can import a starter anytime.",
+  nodes: 0,
+  needs: [],
+  viz: "empty",
+};

@@ -22,6 +22,10 @@ import { webSearchRoutes } from "./routes/web-search";
 import { channelRoutes } from "./routes/channel";
 import { createDashboardRoutes } from "./routes/dashboard";
 import { promptRoutes } from "./routes/prompts";
+import { updateRoutes } from "./routes/update";
+import { startUpdateChecker } from "./update/check";
+import { cleanupOldBinary } from "./update/install";
+import { marketplaceRoutes } from "./routes/marketplace";
 import { wsHandler } from "./ws/handler";
 import { setServer, broadcastRunEvent } from "./ws/broadcast";
 import { createMcpServer } from "./mcp/server";
@@ -62,6 +66,8 @@ app.route("/api/agents", agentRoutes);
 app.route("/api/knowledge", knowledgeRoutes);
 app.route("/api/mcp-registry", mcpRegistryRoutes);
 app.route("/api/prompts", promptRoutes);
+app.route("/api/update", updateRoutes);
+app.route("/api/starters", marketplaceRoutes);
 
 // ── Executor ─────────────────────────────────────────────────
 let server: ReturnType<typeof Bun.serve>;
@@ -367,6 +373,10 @@ app.post("/api/scheduler/sync", async (c) => {
   await scheduler.sync();
   return c.json({ schedule: scheduler.getSchedule() });
 });
+
+// ── Update Checker ───────────────────────────────────────────
+void cleanupOldBinary();
+startUpdateChecker();
 
 // ── Telegram Trigger ─────────────────────────────────────────
 telegramTrigger = new TelegramTrigger(executor);

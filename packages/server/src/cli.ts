@@ -6,6 +6,7 @@ export {};
  * Usage:
  *   openconclave              — Start the server (API + UI)
  *   openconclave install      — Install to ~/.openconclave/ and configure PATH + MCP
+ *   openconclave update       — Download and install the latest release
  *   openconclave mcp          — Start the MCP server (for Claude Code)
  *   openconclave channel      — Start the channel bridge (for Claude Code)
  */
@@ -16,6 +17,11 @@ switch (command) {
   case "install": {
     const { runInstall } = await import("./install");
     await runInstall();
+    break;
+  }
+  case "update": {
+    const { runUpdate } = await import("./update/install");
+    await runUpdate();
     break;
   }
   case "mcp": {

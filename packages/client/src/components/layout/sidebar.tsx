@@ -1,4 +1,6 @@
+import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
+import { api } from "@/lib/api";
 import { VERSION } from "@openconclave/shared";
 import {
   LayoutDashboard,
@@ -7,7 +9,21 @@ import {
   Settings,
   Brain,
   Plus,
+  ArrowUpCircle,
 } from "lucide-react";
+
+interface UpdateStatus {
+  latest: string | null;
+  hasUpdate: boolean;
+}
+
+function useUpdateStatus(): UpdateStatus | null {
+  const [status, setStatus] = useState<UpdateStatus | null>(null);
+  useEffect(() => {
+    api.get<UpdateStatus>("/update/status").then(setStatus).catch(() => {});
+  }, []);
+  return status;
+}
 
 const navItems = [
   { label: "Dashboard", icon: LayoutDashboard, href: "/" },
@@ -33,6 +49,7 @@ interface SidebarProps {
 
 export function Sidebar({ open, onToggle }: SidebarProps) {
   const currentPath = window.location.pathname;
+  const update = useUpdateStatus();
 
   return (
     <aside
@@ -107,16 +124,37 @@ export function Sidebar({ open, onToggle }: SidebarProps) {
       </nav>
 
       <div className="border-t border-border p-2 space-y-1">
-        {open && (
+        {open ? (
           <>
             <div className="flex items-center gap-2 rounded-md px-2.5 py-2 text-xs text-muted-foreground">
               <div className="h-2 w-2 rounded-full bg-success shrink-0" />
               Server connected
             </div>
-            <div className="px-2.5 py-1 text-[10px] text-muted-foreground/50">
-              Version {VERSION}
-            </div>
+            {update?.hasUpdate && update.latest ? (
+              <a
+                href="/settings"
+                title={`v${update.latest} is available`}
+                className="flex items-center gap-1.5 px-2.5 py-1 text-[10px] text-primary hover:text-primary/80 transition-colors"
+              >
+                <ArrowUpCircle className="h-3 w-3" />
+                v{update.latest} available →
+              </a>
+            ) : (
+              <div className="px-2.5 py-1 text-[10px] text-muted-foreground/50">
+                Version {VERSION}
+              </div>
+            )}
           </>
+        ) : (
+          update?.hasUpdate && (
+            <a
+              href="/settings"
+              title={`v${update.latest} is available`}
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-primary hover:bg-accent/50 mx-auto"
+            >
+              <ArrowUpCircle className="h-4 w-4" />
+            </a>
+          )
         )}
       </div>
     </aside>

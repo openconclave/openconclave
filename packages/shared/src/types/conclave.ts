@@ -25,6 +25,8 @@ export interface TriggerConfig {
   cron?: string;
   webhookPath?: string;
   chatId?: string;
+  /** Telegram user IDs allowed to trigger (empty = no extra user filter on top of chatId) */
+  allowFromUsers?: string[];
 }
 
 export interface AgentConfig {

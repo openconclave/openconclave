@@ -140,24 +140,29 @@ export class TelegramTrigger {
     if (!message?.text) return;
 
     const chatId = String(message.chat.id);
+    const userId = message.from?.id != null ? String(message.from.id) : "";
     const text = message.text;
     const userName = message.from?.first_name ?? "Unknown";
 
-    console.log(`⚡ Telegram message from ${userName} (${chatId}): ${text.slice(0, 50)}`);
+    console.log(`⚡ Telegram message from ${userName} (user ${userId}, chat ${chatId}): ${text.slice(0, 50)}`);
 
-    // Built-in commands
-    if (text === "/start" || text === "/chatid") {
-      const token = await getBotToken();
-      if (token) {
-        await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            chat_id: chatId,
-            text: `🔮 OpenConclave\n\nYour Chat ID: ${chatId}\n\nUse this ID in the Telegram trigger settings to connect conclaves to this chat.`,
-          }),
-        });
-      }
+    // Built-in commands — always available, never trigger conclaves
+    if (text === "/start" || text === "/chatid" || text === "/whoami") {
+      await this.sendMessage(
+        chatId,
+        `🔮 OpenConclave\n\nChat ID: ${chatId}\nUser ID: ${userId || "(unknown)"}\n\nGive these to the OpenConclave owner so they can allowlist you in the trigger settings.`,
+      );
+      return;
+    }
+
+    if (text === "/restart" || text === "/new") {
+      const cleared = this.clearChatRuns(chatId);
+      await this.sendMessage(
+        chatId,
+        cleared > 0
+          ? `🔄 Cleared ${cleared} active run${cleared === 1 ? "" : "s"}. Your next message will start a fresh conclave run.`
+          : `No active run to clear. Your next message starts a fresh run.`,
+      );
       return;
     }
 
@@ -169,43 +174,55 @@ export class TelegramTrigger {
 
       for (const node of def.nodes ?? []) {
         if (node.data?.type === "trigger" && node.data?.config?.type === "telegram") {
-          const triggerChatId = node.data.config.chatId;
-          if (triggerChatId === chatId || !triggerChatId) {
-            const activeKey = `${chatId}:${wf.id}`;
-            const existingRunId = activeChatRuns.get(activeKey);
+          const triggerChatId: string | undefined = node.data.config.chatId;
+          const allowFromUsers: string[] = Array.isArray(node.data.config.allowFromUsers)
+            ? node.data.config.allowFromUsers.map((s: unknown) => String(s).trim()).filter(Boolean)
+            : [];
 
-            if (existingRunId) {
-              // Continue existing run (chat mode)
-              console.log(`⚡ Continuing run ${existingRunId} for Telegram chat ${chatId}`);
-              try {
-                // Persist user message as event (same as WebChatUI /message route)
-                const now = new Date().toISOString();
-                await db.insert(runEvents).values({
-                  runId: existingRunId,
-                  nodeId: node.id,
-                  type: "chat:userMessage",
-                  data: { content: text },
-                  createdAt: now,
-                });
-                broadcastRunEvent({
-                  type: "chat:userMessage",
-                  runId: existingRunId,
-                  nodeId: node.id,
-                  data: { content: text },
-                });
+          // Default-deny: empty chatId means the trigger is not wired to a specific chat.
+          // We refuse to accept arbitrary traffic — the owner must set a chat ID explicitly.
+          if (!triggerChatId) {
+            console.warn(`⚡ Telegram rejected: conclave "${wf.name}" has no chatId set (default-deny). Set chatId in the trigger inspector.`);
+            continue;
+          }
+          if (triggerChatId !== chatId) continue;
 
-                await this.executor.executeInRun(existingRunId, def, text, node.id);
-              } catch (err: any) {
-                console.error(`⚡ Failed to continue run ${existingRunId}:`, err.message);
-                // Run might have been cancelled/failed — clear tracking and start fresh
-                activeChatRuns.delete(activeKey);
-                runMeta.delete(existingRunId);
-                await this.startNewRun(def, text, node.id, chatId, activeKey, wf.name);
-              }
-            } else {
-              // Start new run
+          // Optional per-user allowlist. Empty = allow everyone in the configured chat.
+          if (allowFromUsers.length > 0 && !allowFromUsers.includes(userId)) {
+            console.warn(`⚡ Telegram rejected: user ${userId} (${userName}) not in allowFromUsers for "${wf.name}"`);
+            continue;
+          }
+
+          const activeKey = `${chatId}:${wf.id}`;
+          const existingRunId = activeChatRuns.get(activeKey);
+
+          if (existingRunId) {
+            console.log(`⚡ Continuing run ${existingRunId} for Telegram chat ${chatId}`);
+            try {
+              const now = new Date().toISOString();
+              await db.insert(runEvents).values({
+                runId: existingRunId,
+                nodeId: node.id,
+                type: "chat:userMessage",
+                data: { content: text },
+                createdAt: now,
+              });
+              broadcastRunEvent({
+                type: "chat:userMessage",
+                runId: existingRunId,
+                nodeId: node.id,
+                data: { content: text },
+              });
+
+              await this.executor.executeInRun(existingRunId, def, text, node.id);
+            } catch (err: any) {
+              console.error(`⚡ Failed to continue run ${existingRunId}:`, err.message);
+              activeChatRuns.delete(activeKey);
+              runMeta.delete(existingRunId);
               await this.startNewRun(def, text, node.id, chatId, activeKey, wf.name);
             }
+          } else {
+            await this.startNewRun(def, text, node.id, chatId, activeKey, wf.name);
           }
         }
       }
@@ -238,6 +255,24 @@ export class TelegramTrigger {
     } catch (err: any) {
       console.error(`⚡ Failed to trigger "${conclaveName}":`, err.message);
     }
+  }
+
+  /**
+   * Clear all active run tracking for this Telegram chat, across every conclave.
+   * Next inbound message from this chat starts a fresh run.
+   * Does not cancel the underlying run — just detaches this chat from it.
+   */
+  private clearChatRuns(chatId: string): number {
+    let cleared = 0;
+    const prefix = `${chatId}:`;
+    for (const [key, rid] of activeChatRuns) {
+      if (key.startsWith(prefix)) {
+        activeChatRuns.delete(key);
+        runMeta.delete(rid);
+        cleared++;
+      }
+    }
+    return cleared;
   }
 
   private async sendMessage(chatId: string, text: string): Promise<void> {

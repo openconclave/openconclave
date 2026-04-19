@@ -715,11 +715,22 @@ function KbCard({ kb, onDelete, onEdit, onRefresh }: KbCardProps) {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-export function KnowledgePage({ embedded = false }: { embedded?: boolean } = {}) {
+export function KnowledgePage({
+  embedded = false,
+  showCreate: controlledShowCreate,
+  onShowCreateChange,
+}: {
+  embedded?: boolean;
+  showCreate?: boolean;
+  onShowCreateChange?: (v: boolean) => void;
+} = {}) {
   const [kbs, setKbs] = useState<KnowledgeBase[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showCreate, setShowCreate] = useState(false);
+  const [internalShowCreate, setInternalShowCreate] = useState(false);
   const [editingKb, setEditingKb] = useState<KnowledgeBase | null>(null);
+
+  const showCreate = controlledShowCreate ?? internalShowCreate;
+  const setShowCreate = onShowCreateChange ?? setInternalShowCreate;
 
   const loadKbs = () => {
     api.get<{ data: KnowledgeBase[] }>("/knowledge")

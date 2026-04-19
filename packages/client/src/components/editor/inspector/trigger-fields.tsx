@@ -65,18 +65,46 @@ export function TriggerFields({ nodeId, config }: TriggerFieldsProps) {
       )}
 
       {config.type === "telegram" && (
-        <Field label="Chat ID">
-          <input
-            type="text"
-            value={config.chatId ?? ""}
-            onChange={(e) => update({ chatId: e.target.value })}
-            placeholder="1470461098"
-            className={MONO_INPUT_CLASS}
-          />
-          <p className="mt-1 text-[10px] text-muted-foreground">
-            Messages from this chat will trigger the conclave.
-          </p>
-        </Field>
+        <>
+          <Field label="Chat ID">
+            <input
+              type="text"
+              value={config.chatId ?? ""}
+              onChange={(e) => update({ chatId: e.target.value.trim() })}
+              placeholder="1470461098"
+              className={MONO_INPUT_CLASS}
+            />
+            <p className="mt-1 text-[10px] text-muted-foreground">
+              Messages from this chat will trigger the conclave. Send <span className="font-mono">/whoami</span> to your bot to get chat and user IDs.
+            </p>
+            {!config.chatId?.trim() && (
+              <p className="mt-1 text-[10px] text-amber-600 dark:text-amber-400">
+                ⚠ Empty chat ID — trigger is <strong>disabled</strong>. Set a chat ID to receive messages.
+              </p>
+            )}
+          </Field>
+
+          <Field label="Allowed user IDs">
+            <AutoTextarea
+              value={(config.allowFromUsers ?? []).join("\n")}
+              onChange={(e) =>
+                update({
+                  allowFromUsers: e.target.value
+                    .split(/\r?\n/)
+                    .map((s) => s.trim())
+                    .filter(Boolean),
+                })
+              }
+              placeholder={"One Telegram user ID per line\ne.g. 1470461098"}
+              minRows={3}
+              label="Allowed user IDs"
+              className={MONO_INPUT_CLASS}
+            />
+            <p className="mt-1 text-[10px] text-muted-foreground">
+              Optional second filter on top of Chat ID. Leave blank to allow anyone in the configured chat. Recommended for group chats.
+            </p>
+          </Field>
+        </>
       )}
 
       {config.type === "cron" && (

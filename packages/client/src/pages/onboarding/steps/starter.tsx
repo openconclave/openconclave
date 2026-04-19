@@ -1,17 +1,19 @@
-import { STARTERS, StarterViz, type StarterId } from "../atoms";
+import { StarterViz, type Starter, type StarterId } from "../atoms";
 
 export function StarterStep({
   starter,
   setStarter,
+  starters,
   hasAnthropic,
   hasEmbed,
 }: {
   starter: StarterId;
   setStarter: (s: StarterId) => void;
+  starters: Starter[];
   hasAnthropic: boolean;
   hasEmbed: boolean;
 }) {
-  const current = STARTERS.find((s) => s.id === starter);
+  const current = starters.find((s) => s.id === starter);
 
   return (
     <div className="ob-page wide">
@@ -23,7 +25,7 @@ export function StarterStep({
       </p>
 
       <div className="starter-grid">
-        {STARTERS.map((s) => {
+        {starters.map((s) => {
           const needsOk = s.needs.every((n) => (n === "anthropic" ? hasAnthropic : hasEmbed));
           const selected = starter === s.id;
           return (

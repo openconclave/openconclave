@@ -1,4 +1,4 @@
-import { I, STARTERS, type StarterId } from "../atoms";
+import { I, type Starter, type StarterId } from "../atoms";
 import type { ProviderInfo } from "./provider";
 import type { OllamaState } from "./ollama";
 
@@ -6,16 +6,18 @@ export function ReadyStep({
   providers,
   ollama,
   starter,
+  starters,
   finishing,
   onFinish,
 }: {
   providers: ProviderInfo[];
   ollama: OllamaState;
   starter: StarterId;
+  starters: Starter[];
   finishing: boolean;
   onFinish: () => void;
 }) {
-  const starterObj = STARTERS.find((s) => s.id === starter);
+  const starterObj = starters.find((s) => s.id === starter);
 
   return (
     <div className="ob-page">

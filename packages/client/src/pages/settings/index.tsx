@@ -9,10 +9,10 @@ import { WebSearchPane } from "./panes/web-search";
 import { ModelsPane } from "./panes/models";
 import { IntegrationsPane } from "./panes/integrations";
 import { AdvancedPane } from "./panes/advanced";
-import { McpPane } from "./panes/mcp";
-import { SecretsPane } from "./panes/secrets";
 import { KnowledgePane } from "./panes/knowledge";
+import { MarketplacePane } from "./panes/marketplace";
 import { StubPane } from "./panes/stub";
+import { UpdateBanner } from "./update-banner";
 
 const DEFAULT_SECTION: SectionId = "models";
 
@@ -68,6 +68,7 @@ export function SettingsPage() {
     <div className="settings-shell">
       <SettingsNav active={section} onSelect={handleSelect} />
       <div className="settings-main">
+        <UpdateBanner />
         <SettingsTopbar active={section} />
         <div className="settings-scroll">
           {loading ? (
@@ -100,9 +101,8 @@ function Pane({
   if (section === "web-search") return <WebSearchPane values={values} setValue={setValue} />;
   if (section === "models") return <ModelsPane values={values} setValue={setValue} />;
   if (section === "integrations") return <IntegrationsPane values={values} setValue={setValue} />;
-  if (section === "mcp") return <McpPane />;
-  if (section === "secrets") return <SecretsPane values={values} />;
   if (section === "knowledge") return <KnowledgePane />;
+  if (section === "marketplace") return <MarketplacePane />;
   if (section === "advanced") return <AdvancedPane />;
   const item = findSection(section);
   return <StubPane title={item?.label ?? section} />;
