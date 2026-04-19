@@ -13,7 +13,7 @@ const navItems = [
   { label: "Dashboard", icon: LayoutDashboard, href: "/" },
   { label: "Conclaves", icon: GitBranch, href: "/conclaves", quickAction: { href: "/conclaves/new", title: "New conclave" } },
   { label: "Runs", icon: Play, href: "/runs" },
-  { label: "Knowledge", icon: Brain, href: "/knowledge" },
+  { label: "Knowledge", icon: Brain, href: "/settings/knowledge" },
   { label: "Settings", icon: Settings, href: "/settings" },
 ];
 

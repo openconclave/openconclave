@@ -18,6 +18,7 @@ import { agentRoutes } from "./routes/agents";
 import { knowledgeRoutes } from "./routes/knowledge";
 import { mcpRegistryRoutes } from "./routes/mcp-registry";
 import { settingsRoutes, providerRoutes, ollamaRoutes, claudeCodeRoutes } from "./routes/settings";
+import { webSearchRoutes } from "./routes/web-search";
 import { channelRoutes } from "./routes/channel";
 import { createDashboardRoutes } from "./routes/dashboard";
 import { promptRoutes } from "./routes/prompts";
@@ -50,6 +51,7 @@ app.get("/api/health", (c) => c.json({ status: "ok", version: VERSION }));
 
 // ── Routes ───────────────────────────────────────────────────
 app.route("/api/settings", settingsRoutes);
+app.route("/api/settings/web-search", webSearchRoutes);
 app.route("/api/providers", providerRoutes);
 app.route("/api/ollama", ollamaRoutes);
 app.route("/api/claude-code", claudeCodeRoutes);

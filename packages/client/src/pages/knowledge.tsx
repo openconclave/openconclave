@@ -715,7 +715,7 @@ function KbCard({ kb, onDelete, onEdit, onRefresh }: KbCardProps) {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-export function KnowledgePage() {
+export function KnowledgePage({ embedded = false }: { embedded?: boolean } = {}) {
   const [kbs, setKbs] = useState<KnowledgeBase[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
@@ -750,12 +750,14 @@ export function KnowledgePage() {
 
   return (
     <>
-      <Header
-        title="Knowledge Bases"
-        actions={
-          <NewButton label="Create Knowledge Base" onClick={() => setShowCreate(true)} />
-        }
-      />
+      {!embedded && (
+        <Header
+          title="Knowledge Bases"
+          actions={
+            <NewButton label="Create Knowledge Base" onClick={() => setShowCreate(true)} />
+          }
+        />
+      )}
 
       <div className="flex-1 overflow-y-auto p-6">
         <div className="max-w-3xl space-y-3">

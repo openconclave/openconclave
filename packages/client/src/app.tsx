@@ -8,9 +8,13 @@ import { ConclaveEditorPage } from "@/pages/conclave-editor";
 import { RunsPage } from "@/pages/runs";
 import { SettingsPage } from "@/pages/settings";
 import { ChatPage } from "@/pages/chat";
-import { KnowledgePage } from "@/pages/knowledge";
 import { OnboardingPage } from "@/pages/onboarding";
 import { api } from "@/lib/api";
+
+// Legacy /knowledge URLs redirect to the settings shell before React boots.
+if (window.location.pathname === "/knowledge") {
+  window.history.replaceState({}, "", "/settings/knowledge");
+}
 
 function getPage() {
   const path = window.location.pathname;
@@ -18,8 +22,7 @@ function getPage() {
   if (path === "/conclaves") return <ConclavesPage />;
   if (path.startsWith("/conclaves/")) return <ConclaveEditorPage />;
   if (path === "/runs" || path.startsWith("/runs/")) return <RunsPage />;
-  if (path === "/settings") return <SettingsPage />;
-  if (path === "/knowledge") return <KnowledgePage />;
+  if (path === "/settings" || path.startsWith("/settings/")) return <SettingsPage />;
   // /:toolName/chat or /:toolName/chat/:sessionId
   if (path.split("/")[2] === "chat") return <ChatPage />;
   return <DashboardPage />;

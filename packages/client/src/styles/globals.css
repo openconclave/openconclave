@@ -1,6 +1,7 @@
 @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
 @import "tailwindcss";
 @import "../pages/onboarding/onboarding.css";
+@import "../pages/settings/settings.css";
 
 @theme {
   /* Warm dark palette with copper accent — matches OC logo + editor node colors */
