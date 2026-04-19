@@ -133,9 +133,6 @@ export function OnboardingPage({ onComplete }: { onComplete: () => void }) {
     }
   };
 
-  const hasAnthropic = providers.some((p) => p.id === "anthropic" || p.baseUrl.includes("anthropic"));
-  const hasEmbed = ollamaModels.some((m) => m.capabilities.includes("embedding"));
-
   const canNext =
     stepId === "provider" ? providers.length > 0 :
     stepId === "starter" ? true :
@@ -165,7 +162,7 @@ export function OnboardingPage({ onComplete }: { onComplete: () => void }) {
   if (stepId === "cc") body = <ClaudeCodeStep status={claudeStatus} version={claudeVersion} onRecheck={checkClaude} />;
   if (stepId === "provider") body = <ProviderStep providers={providers} reload={loadProviders} />;
   if (stepId === "ollama") body = <OllamaStep state={ollamaState} setUrl={saveOllamaUrl} recheck={fetchOllama} />;
-  if (stepId === "starter") body = <StarterStep starter={starter} setStarter={setStarter} starters={starters} hasAnthropic={hasAnthropic} hasEmbed={hasEmbed} />;
+  if (stepId === "starter") body = <StarterStep />;
   if (stepId === "run") body = <FirstRunStep starter={starter} starters={starters} onComplete={next} />;
   if (stepId === "ready") body = <ReadyStep providers={providers} ollama={ollamaState} starter={starter} starters={starters} finishing={finishing} onFinish={finish} />;
 

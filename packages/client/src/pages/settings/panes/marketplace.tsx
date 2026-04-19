@@ -133,6 +133,11 @@ export function MarketplacePane() {
             const needs = entry.requires;
             return (
               <div key={entry.id} className="mp-card">
+                {entry.imageUrl && (
+                  <div className="mp-card-image">
+                    <img src={entry.imageUrl} alt={entry.title} loading="lazy" />
+                  </div>
+                )}
                 <div className="mp-card-head">
                   <div className="mp-card-title">{entry.title}</div>
                   {isInstalled && <span className="mp-badge ok">Installed</span>}
