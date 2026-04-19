@@ -2,17 +2,9 @@ import { testSearxng } from "./providers/searxng";
 import { testTavily } from "./providers/tavily";
 import { testSerper } from "./providers/serper";
 import { testLinkup } from "./providers/linkup";
+import type { TestResult, WebSearchProviderId } from "./types";
 
-export type WebSearchProviderId = "none" | "searxng" | "tavily" | "serper" | "linkup";
-
-export interface TestResult {
-  ok: boolean;
-  latencyMs?: number;
-  sampleTitles?: string[];
-  engines?: string[];
-  error?: string;
-  warn?: string;
-}
+export type { TestResult, WebSearchProviderId } from "./types";
 
 const CANARY_QUERY = "openconclave test query";
 const TIMEOUT_MS = 8000;
@@ -26,8 +18,7 @@ export async function testWebSearch(
   const started = performance.now();
   try {
     const result = await dispatch(provider, credential, controller.signal);
-    const latencyMs = Math.round(performance.now() - started);
-    return { ...result, latencyMs };
+    return { ...result, latencyMs: Math.round(performance.now() - started) };
   } catch (err) {
     const latencyMs = Math.round(performance.now() - started);
     const message = err instanceof Error ? err.message : "Test failed";

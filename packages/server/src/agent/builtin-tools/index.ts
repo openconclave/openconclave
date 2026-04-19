@@ -5,6 +5,7 @@ import { buildFileTools } from "./files";
 import { buildSearchTools } from "./search";
 import { buildKnowledgeTools } from "./knowledge";
 import { buildWebFetchTool } from "./web-fetch";
+import { buildWebSearchTool } from "./web-search";
 
 export type { ToolDef, BuiltinTool } from "./types";
 export { runBash } from "./bash";
@@ -17,6 +18,7 @@ export function createBuiltinTools(workspace: Workspace, runId?: number): Record
     ...buildSearchTools(workspace, resolveIn),
     ...buildKnowledgeTools(),
     ...(runId !== undefined ? buildWebFetchTool(runId) : {}),
+    ...buildWebSearchTool(),
   };
 }
 
@@ -32,4 +34,5 @@ export const TOOL_NAME_MAP: Record<string, string> = {
   Glob: "glob",
   Grep: "grep",
   WebFetch: "web_fetch",
+  WebSearch: "web_search",
 };

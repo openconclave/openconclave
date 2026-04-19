@@ -1,4 +1,6 @@
+import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
+import { api } from "@/lib/api";
 import {
   Terminal,
   FileEdit,
@@ -6,6 +8,7 @@ import {
   FolderSearch,
   Search,
   Globe,
+  GlobeLock,
   GripVertical,
 } from "lucide-react";
 
@@ -18,6 +21,7 @@ const builtinTools = [
   { id: "Glob", label: "Glob", icon: FolderSearch, description: "Find files by pattern" },
   { id: "Grep", label: "Grep", icon: Search, description: "Search file contents" },
   { id: "WebFetch", label: "Web Fetch", icon: Globe, description: "Fetch a URL via headless browser → saved to attachments" },
+  { id: "WebSearch", label: "Web Search", icon: GlobeLock, description: "Search the web (SearXNG / Tavily / Serper / Linkup)", requiresConfig: "web_search_provider" },
 ];
 
 // Known MCP servers (user can add custom ones too)
@@ -59,6 +63,17 @@ export function ToolPicker({
   onToolsChange: (tools: string[]) => void;
   onMcpServersChange: (servers: string[]) => void;
 }) {
+  const [settings, setSettings] = useState<Record<string, string>>({});
+  useEffect(() => {
+    api.get<Record<string, string>>("/settings").then(setSettings).catch(() => {});
+  }, []);
+
+  const isToolUnconfigured = (tool: typeof builtinTools[number]): boolean => {
+    if (!("requiresConfig" in tool) || !tool.requiresConfig) return false;
+    const value = settings[tool.requiresConfig];
+    return !value || value === "none";
+  };
+
   const toggleTool = (id: string) => {
     if (selectedTools.includes(id)) {
       onToolsChange(selectedTools.filter((t) => t !== id));
@@ -82,26 +97,32 @@ export function ToolPicker({
           Built-in Tools
         </p>
         <div className="space-y-1">
-          {builtinTools.map((tool) => (
-            <label
-              key={tool.id}
-              className={cn(
-                "flex items-center gap-2 rounded-md px-2 py-1.5 text-sm cursor-pointer transition-colors",
-                selectedTools.includes(tool.id)
-                  ? "bg-primary/10 text-foreground"
-                  : "text-muted-foreground hover:bg-accent/50"
-              )}
-            >
-              <input
-                type="checkbox"
-                checked={selectedTools.includes(tool.id)}
-                onChange={() => toggleTool(tool.id)}
-                className="rounded border-border"
-              />
-              <tool.icon className="h-3.5 w-3.5 shrink-0" />
-              <span className="flex-1">{tool.label}</span>
-            </label>
-          ))}
+          {builtinTools.map((tool) => {
+            const unconfigured = isToolUnconfigured(tool);
+            return (
+              <label
+                key={tool.id}
+                title={unconfigured ? "Configure a provider in Settings → Web search" : tool.description}
+                className={cn(
+                  "flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
+                  unconfigured ? "opacity-50 cursor-help" : "cursor-pointer",
+                  selectedTools.includes(tool.id)
+                    ? "bg-primary/10 text-foreground"
+                    : "text-muted-foreground hover:bg-accent/50"
+                )}
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedTools.includes(tool.id)}
+                  onChange={() => toggleTool(tool.id)}
+                  className="rounded border-border"
+                />
+                <tool.icon className="h-3.5 w-3.5 shrink-0" />
+                <span className="flex-1">{tool.label}</span>
+                {unconfigured && <span className="text-[10px] text-muted-foreground">not configured</span>}
+              </label>
+            );
+          })}
         </div>
       </div>
 
