@@ -88,6 +88,7 @@ const codeToolItems: ToolItem[] = [
   { toolType: "builtin", toolId: "Glob", toolName: "Glob", icon: FolderSearch, description: "Find files by pattern" },
   { toolType: "builtin", toolId: "Grep", toolName: "Grep", icon: Search, description: "Search file contents" },
   { toolType: "builtin", toolId: "WebFetch", toolName: "Web Fetch", icon: Globe, description: "Fetch a URL via headless browser" },
+  { toolType: "builtin", toolId: "WebSearch", toolName: "Web Search", icon: Globe, description: "Search the web (configure in Settings → Web search)" },
 ];
 
 const builtinMcpItems: ToolItem[] = [
