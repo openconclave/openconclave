@@ -1,11 +1,14 @@
 import { useState } from "react";
 import { CopyBox, FieldRow } from "../../atoms";
 
-const DOCKER_BASH = `mkdir -p ~/searxng && cat > ~/searxng/settings.yml <<'EOF'
+const DOCKER_BASH = `mkdir -p ~/searxng
+SECRET=$(openssl rand -hex 32)
+cat > ~/searxng/settings.yml <<EOF
 use_default_settings: true
 search:
   formats: [html, json]
 server:
+  secret_key: "$SECRET"
   limiter: false
 EOF
 docker rm -f searxng 2>/dev/null
@@ -14,11 +17,13 @@ docker run -d --name searxng -p 8080:8080 --restart unless-stopped \\
 
 const DOCKER_PS = `$dir = "$HOME\\searxng"
 New-Item -ItemType Directory -Force -Path $dir | Out-Null
+$secret = -join ((1..64) | ForEach-Object { '{0:x}' -f (Get-Random -Maximum 16) })
 @"
 use_default_settings: true
 search:
   formats: [html, json]
 server:
+  secret_key: "$secret"
   limiter: false
 "@ | Set-Content "$dir\\settings.yml"
 docker rm -f searxng 2>$null
