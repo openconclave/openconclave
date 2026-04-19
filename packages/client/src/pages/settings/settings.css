@@ -524,6 +524,113 @@
   border-radius: 0;
 }
 
+/* ───── SearXNG managed panel ─────────────────────────────── */
+.managed-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  background: var(--bg-2);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.managed-panel.loading { color: var(--text-faint); font-size: 13px; }
+.managed-panel.ok { border-color: oklch(0.45 0.12 150 / 0.5); }
+.managed-panel.warn { border-color: oklch(0.45 0.12 75 / 0.5); }
+
+.managed-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.managed-endpoint {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.managed-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.managed-body {
+  font-size: 12.5px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+.managed-body code {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--accent);
+  background: var(--bg);
+  padding: 0 4px;
+  border-radius: 3px;
+}
+
+.managed-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.managed-error {
+  padding: 8px 11px;
+  background: oklch(0.30 0.10 25 / 0.25);
+  border: 1px solid oklch(0.55 0.18 25 / 0.45);
+  border-radius: 5px;
+  font-size: 12px;
+  color: var(--danger);
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+/* ───── Advanced expander ─────────────────────────────────── */
+.advanced-expander {
+  border-top: 1px dashed var(--color-border);
+  padding-top: 12px;
+  margin-top: 4px;
+}
+
+.advanced-expander-head {
+  background: transparent;
+  border: none;
+  font-size: 12px;
+  color: var(--text-faint);
+  cursor: pointer;
+  padding: 2px 0;
+  font-family: var(--font-sans);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.advanced-expander-head:hover { color: var(--text-dim); }
+
+.advanced-expander-head .chev {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
+.advanced-expander-body {
+  padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.advanced-manual-label {
+  font-size: 11.5px;
+  color: var(--text-faint);
+  margin-bottom: 6px;
+}
+
 .settings-info code {
   font-family: var(--font-mono);
   color: var(--accent);
