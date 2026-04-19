@@ -474,6 +474,15 @@
   color: var(--text-dim);
 }
 
+.settings-warn {
+  padding: 9px 13px;
+  background: oklch(0.30 0.06 75 / 0.25);
+  border: 1px solid oklch(0.55 0.14 75 / 0.45);
+  border-radius: 6px;
+  font-size: 12.5px;
+  color: var(--accent);
+}
+
 .settings-info code {
   font-family: var(--font-mono);
   color: var(--accent);

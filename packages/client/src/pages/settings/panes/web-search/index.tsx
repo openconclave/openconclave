@@ -5,6 +5,8 @@ import { SearxngConfig } from "./searxng-config";
 import { ApiKeyConfig } from "./api-key-config";
 import { TestButton } from "./test-button";
 
+const DEFAULT_SEARXNG_URL = "http://localhost:8080";
+
 export function WebSearchPane({
   values,
   setValue,
@@ -17,7 +19,15 @@ export function WebSearchPane({
   const credKey = keyFor(provider);
   const credValue = credKey ? (values[credKey] ?? "") : "";
 
-  const handleProvider = (id: WebSearchProviderId) => setValue("web_search_provider", id);
+  const handleProvider = (id: WebSearchProviderId) => {
+    setValue("web_search_provider", id);
+    // When switching to SearXNG for the first time, pre-fill the localhost default
+    // so a naive save actually persists a usable credential. Users almost always
+    // want localhost:8080 — custom endpoints are the exception.
+    if (id === "searxng" && !values.web_search_searxng_url) {
+      setValue("web_search_searxng_url", DEFAULT_SEARXNG_URL);
+    }
+  };
   const handleCred = (v: string) => {
     if (credKey) setValue(credKey, v);
   };
@@ -43,6 +53,13 @@ export function WebSearchPane({
           {info.credential === "url" && <SearxngConfig url={credValue} onUrlChange={handleCred} />}
           {info.credential === "key" && (
             <ApiKeyConfig provider={info} value={credValue} onChange={handleCred} />
+          )}
+          {!credValue && (
+            <div className="settings-warn">
+              {info.credential === "url"
+                ? "Enter an instance URL before saving."
+                : "Paste your API key before saving."}
+            </div>
           )}
           <div className="settings-section-foot">
             <TestButton
