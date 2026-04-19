@@ -433,6 +433,8 @@
   color: var(--text);
   overflow-x: auto;
   white-space: pre;
+  max-height: 220px;
+  overflow-y: auto;
 }
 
 .copy-btn {
@@ -481,6 +483,45 @@
   border-radius: 6px;
   font-size: 12.5px;
   color: var(--accent);
+}
+
+.ws-shell-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+.ws-shell-tabs {
+  display: flex;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.ws-shell-tabs button {
+  flex: 1;
+  background: transparent;
+  border: none;
+  padding: 7px 12px;
+  font-size: 11.5px;
+  font-family: var(--font-mono);
+  color: var(--text-faint);
+  cursor: pointer;
+  transition: background 120ms, color 120ms;
+}
+
+.ws-shell-tabs button:hover { color: var(--text-dim); }
+
+.ws-shell-tabs button.on {
+  color: var(--accent);
+  background: var(--panel);
+}
+
+.ws-shell-picker .copy-box-row {
+  border: none;
+  border-radius: 0;
 }
 
 .settings-info code {
