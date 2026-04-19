@@ -10,7 +10,7 @@ const DEFAULT_PORT = 8080;
 const IMAGE = "searxng/searxng:latest";
 const HEALTH_TIMEOUT_MS = 30_000;
 
-export type DockerState = "missing" | "daemon-down" | "ready";
+export type DockerState = "missing" | "daemon-down" | "permission-denied" | "ready";
 export type ContainerState = "not-found" | "stopped" | "running";
 
 export interface ManagerStatus {
@@ -18,24 +18,32 @@ export interface ManagerStatus {
   container: ContainerState;
   healthy: boolean;
   port: number;
+  platform: NodeJS.Platform;
 }
 
 export async function getManagerStatus(): Promise<ManagerStatus> {
+  const platform = process.platform;
+  const base = { healthy: false, port: DEFAULT_PORT, platform } as const;
+
   const version = await dockerExec(["--version"]);
-  if (version.code !== 0) return { docker: "missing", container: "not-found", healthy: false, port: DEFAULT_PORT };
+  if (version.code !== 0) return { ...base, docker: "missing", container: "not-found" };
 
   const info = await dockerExec(["info"]);
-  if (info.code !== 0) return { docker: "daemon-down", container: "not-found", healthy: false, port: DEFAULT_PORT };
+  if (info.code !== 0) {
+    const err = `${info.stderr}\n${info.stdout}`.toLowerCase();
+    const permission = err.includes("permission denied") || err.includes("got permission denied");
+    return { ...base, docker: permission ? "permission-denied" : "daemon-down", container: "not-found" };
+  }
 
   const inspect = await dockerExec(["inspect", CONTAINER_NAME, "--format", "{{.State.Running}}"]);
-  if (inspect.code !== 0) return { docker: "ready", container: "not-found", healthy: false, port: DEFAULT_PORT };
+  if (inspect.code !== 0) return { ...base, docker: "ready", container: "not-found" };
 
   const running = inspect.stdout.trim() === "true";
   return {
+    ...base,
     docker: "ready",
     container: running ? "running" : "stopped",
     healthy: running ? await probeHealth() : false,
-    port: DEFAULT_PORT,
   };
 }
 
@@ -153,10 +161,18 @@ async function persistUrlSetting(): Promise<void> {
 function simplifyDockerError(stderr: string): string {
   if (!stderr) return "docker command failed";
   const firstLine = stderr.split("\n")[0] ?? stderr;
-  if (firstLine.includes("Cannot connect to the Docker daemon")) {
-    return "Docker Desktop is not running. Start it and try again.";
+  const lower = firstLine.toLowerCase();
+  if (lower.includes("permission denied") || lower.includes("got permission denied")) {
+    return process.platform === "linux"
+      ? "Permission denied talking to the docker daemon. Add your user to the 'docker' group (sudo usermod -aG docker $USER, then log out and back in), or use rootless docker."
+      : "Permission denied talking to the docker daemon.";
   }
-  if (firstLine.includes("port is already allocated") || firstLine.includes("address already in use")) {
+  if (lower.includes("cannot connect to the docker daemon")) {
+    return process.platform === "linux"
+      ? "Docker daemon is not running. Try: sudo systemctl start docker"
+      : "Docker Desktop is not running. Start it and try again.";
+  }
+  if (lower.includes("port is already allocated") || lower.includes("address already in use")) {
     return `Port ${DEFAULT_PORT} is in use. Stop whatever is bound to it and retry.`;
   }
   return firstLine.slice(0, 240);

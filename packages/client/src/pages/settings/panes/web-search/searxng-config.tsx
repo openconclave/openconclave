@@ -4,10 +4,11 @@ import { FieldRow, Pill } from "../../atoms";
 import { SearxngAdvanced } from "./searxng-advanced";
 
 interface ManagerStatus {
-  docker: "missing" | "daemon-down" | "ready";
+  docker: "missing" | "daemon-down" | "permission-denied" | "ready";
   container: "not-found" | "stopped" | "running";
   healthy: boolean;
   port: number;
+  platform: "win32" | "darwin" | "linux" | string;
 }
 
 const POLL_INTERVAL_MS = 5000;
@@ -99,24 +100,53 @@ function ManagedPanel({
   }
 
   if (status.docker === "missing") {
+    const isLinux = status.platform === "linux";
     return (
       <div className="managed-panel warn">
         <div className="managed-title">Docker not detected</div>
         <div className="managed-body">
-          SearXNG runs in a Docker container. Install Docker Desktop, then refresh this page.
+          SearXNG runs in a Docker container. {isLinux ? "Install Docker Engine from your package manager, or Docker Desktop for Linux." : "Install Docker Desktop, then refresh this page."}
         </div>
-        <a className="btn btn-primary" href="https://www.docker.com/products/docker-desktop/" target="_blank" rel="noreferrer">
-          Install Docker Desktop →
+        <a
+          className="btn btn-primary"
+          href={isLinux ? "https://docs.docker.com/engine/install/" : "https://www.docker.com/products/docker-desktop/"}
+          target="_blank"
+          rel="noreferrer"
+        >
+          {isLinux ? "Install Docker Engine →" : "Install Docker Desktop →"}
         </a>
       </div>
     );
   }
 
   if (status.docker === "daemon-down") {
+    const isLinux = status.platform === "linux";
     return (
       <div className="managed-panel warn">
-        <div className="managed-title">Docker Desktop is not running</div>
-        <div className="managed-body">Start Docker Desktop, then click Retry.</div>
+        <div className="managed-title">Docker daemon not reachable</div>
+        <div className="managed-body">
+          {isLinux ? (
+            <>Start the docker service: <code>sudo systemctl start docker</code></>
+          ) : (
+            "Start Docker Desktop, then click Retry."
+          )}
+        </div>
+        <button type="button" className="btn btn-secondary" onClick={() => onAction("start")} disabled={!!working}>
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  if (status.docker === "permission-denied") {
+    return (
+      <div className="managed-panel warn">
+        <div className="managed-title">Permission denied by docker daemon</div>
+        <div className="managed-body">
+          Your user can't talk to the docker socket. Fix with:
+          <pre className="inline-cmd">sudo usermod -aG docker $USER</pre>
+          Log out and back in, then retry. Or run OC under a user that's already in the <code>docker</code> group.
+        </div>
         <button type="button" className="btn btn-secondary" onClick={() => onAction("start")} disabled={!!working}>
           Retry
         </button>
