@@ -110,6 +110,26 @@ export function buildOcFsTools(ws: Workspace, runId: number | undefined, allowed
     );
   }
 
+  // WebSearch is always available in ocBuiltins (not runId-conditional) — it
+  // reads provider config from settings at execute time. Register it under
+  // mcp__oc__web_search so Claude agents get OC's provider-aware search instead
+  // of the Claude Code CLI's native US-only WebSearch tool.
+  if (ocBuiltins.web_search) {
+    const webSearch = ocBuiltins.web_search;
+    OC_TOOL_MAP.WebSearch = () => tool(
+      "web_search",
+      "Search the web and return a ranked list of matching pages with short snippets. Use this to DISCOVER URLs and get quick context; use `web_fetch` afterwards to read a specific page in full. Results come back inline as markdown — no attachments. Default 5 results, cap 10.",
+      {
+        query: z.string().describe("What to search for. Be specific — search engines reward focused queries."),
+        limit: z.number().int().optional().describe("How many results to return (1–10, default 5)."),
+        language: z.string().optional().describe("Language hint like 'en', 'de', 'ja'. Default 'en'."),
+      },
+      async (args) => ({
+        content: [{ type: "text" as const, text: await webSearch.execute(args as Record<string, unknown>) }],
+      }),
+    );
+  }
+
   const out = Object.entries(OC_TOOL_MAP)
     .filter(([name]) => allowedSet.has(name))
     .map(([, factory]) => factory());
@@ -127,9 +147,10 @@ export function buildOcFsTools(ws: Workspace, runId: number | undefined, allowed
 
 /** Filter the agent's allowedTools list for the Claude Code CLI's passthrough
  *  channel: drop names OC replaces in-process so the CLI doesn't sneak its
- *  bugged versions back in, and hard-block WebFetch so the CLI's native
- *  WebFetch (working-dir escape per issue #30) can never leak in — even when
- *  runId is absent and the OC WebFetch shim isn't registered. */
+ *  bugged versions back in, hard-block WebFetch so the CLI's native WebFetch
+ *  (working-dir escape per issue #30) can never leak in, and hard-block
+ *  WebSearch so the CLI's native Anthropic-server-side search (US-only, not
+ *  user-provider-aware) can't replace OC's configurable web_search. */
 export function filterPassthroughTools(
   allowedTools: string[] | undefined,
   runId: number | undefined,
@@ -141,6 +162,7 @@ export function filterPassthroughTools(
       }
       return false;
     }
+    if (t === "WebSearch") return false;
     return !OC_REPLACED_BUILTINS.has(t);
   });
 }
