@@ -395,9 +395,54 @@ export function createMcpServer() {
   return server;
 }
 
+// ── Dynamic conclave tools ───────────────────────────────────
+//
+// Every enabled conclave with a `toolName` in its definition becomes its own
+// MCP tool (e.g. `the_ledger`, `mafia_game_v2`). Claude can then call a
+// conclave directly by name instead of remembering its ID + trigger_conclave.
+//
+// Static registration only at stdio startup — new conclaves appear after
+// /reload-plugins (which respawns the MCP server). Best effort: if the OC
+// server isn't up yet, we log and skip; tools appear on next reload.
+async function registerConclaveTools(server: ReturnType<typeof createMcpServer>): Promise<void> {
+  try {
+    const data = await ocApi("/conclaves") as { conclaves?: Array<Record<string, unknown>> };
+    const list = data.conclaves ?? [];
+    for (const wf of list) {
+      if (!wf.enabled) continue;
+      const def = (wf.definition ?? {}) as Record<string, unknown>;
+      const toolName = (def.toolName ?? wf.toolName) as string | undefined;
+      if (!toolName) continue;
+      const description = String(def.description ?? wf.description ?? `Run conclave: ${wf.name}`);
+      const conclaveId = String(wf.id);
+
+      server.tool(
+        toolName,
+        `${description}. Always pass your current working directory as cwd so agents run in the correct project.`,
+        {
+          input: z.string().optional().describe("Input data to pass to the conclave trigger"),
+          cwd: z.string().describe("Your current working directory — agents will run here"),
+        },
+        async ({ input, cwd }) => {
+          const payload = {
+            ...(input ? { input } : {}),
+            ...(cwd ? { _callerCwd: cwd } : {}),
+          };
+          const result = await ocApi(`/conclaves/${conclaveId}/run`, "POST", { payload });
+          return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+        }
+      );
+    }
+  } catch (err) {
+    // Server not up yet, or API blip. Static tools still work.
+    process.stderr.write(`[mcp] conclave tool sync skipped: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
+}
+
 // Run as standalone stdio MCP server when imported with ?stdio flag or executed directly
 export async function startStdio() {
   const server = createMcpServer();
+  await registerConclaveTools(server);
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }
