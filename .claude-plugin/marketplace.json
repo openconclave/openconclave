@@ -1,19 +1,17 @@
 {
   "name": "openconclave",
-  "version": "1.2.0",
   "owner": {
     "name": "OpenConclave"
   },
+  "metadata": {
+    "description": "OpenConclave — multi-agent conclave platform (self-hosted marketplace for the main plugin).",
+    "version": "1.0.19"
+  },
   "plugins": [
     {
-      "name": "openconclave-channel",
-      "source": "./plugins/openconclave-channel/",
-      "description": "OpenConclave channel — delivers conclave events and prompt questions to Claude Code sessions."
-    },
-    {
-      "name": "openconclave-dev",
-      "source": "./plugins/openconclave-dev/",
-      "description": "OpenConclave conclave development — create, edit, and manage conclaves, nodes, and connections."
+      "name": "openconclave",
+      "source": "./",
+      "description": "OpenConclave server + MCP tools. Installs the local server (http://localhost:4000) and the dev MCP surface for managing conclaves."
     }
   ]
 }

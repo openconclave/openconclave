@@ -16,10 +16,19 @@ if ! command -v bun >/dev/null 2>&1; then
 fi
 
 STAMP="$DATA/bun.lock"
+NEEDS_INSTALL=1
 if [ -f "$STAMP" ] && cmp -s "$ROOT/bun.lock" "$STAMP"; then
-  exit 0
+  NEEDS_INSTALL=0
 fi
 
 cd "$ROOT"
-bun install --frozen-lockfile >&2
-cp bun.lock "$STAMP"
+
+if [ "$NEEDS_INSTALL" = "1" ]; then
+  bun install --frozen-lockfile >&2
+  cp bun.lock "$STAMP"
+fi
+
+if [ ! -f "$ROOT/packages/client/dist/index.html" ]; then
+  echo "openconclave plugin: building client bundle (first run only)…" >&2
+  bun run --filter client build >&2
+fi

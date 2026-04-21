@@ -9,7 +9,15 @@ import { homedir } from "os";
  * Otherwise (dev mode), data goes in <cwd>/.openconclave/.
  */
 function resolveWorkspace(): string {
+  if (process.env.OC_DATA_DIR) {
+    return process.env.OC_DATA_DIR;
+  }
   const homeOc = join(homedir(), ".openconclave");
+  // When launched by the Claude Code plugin, reuse the user's home data dir
+  // instead of creating a fresh one inside the plugin cache.
+  if (process.env.OC_PLUGIN_ROOT) {
+    return homeOc;
+  }
   const execDir = dirname(process.execPath);
   // If the binary lives inside ~/.openconclave/bin/, use ~/.openconclave/ for data
   if (execDir === join(homeOc, "bin")) {

@@ -389,8 +389,12 @@ app.post("/api/telegram/restart", async (c) => {
 
 // ── Static Files (production/compiled mode) ─────────────────
 // Must be registered AFTER all API routes so the catch-all doesn't shadow them.
-// Supports two modes: embedded assets (single binary) or external public/ folder.
-const publicDir = join(dirname(process.execPath), "public");
+// Supports three modes: embedded assets (single binary), external public/
+// folder (installed binary), or a built client/dist/ (plugin/source runs).
+const publicDir = process.env.OC_PUBLIC_DIR
+  ?? (existsSync(join(dirname(process.execPath), "public"))
+    ? join(dirname(process.execPath), "public")
+    : join(import.meta.dir, "..", "..", "client", "dist"));
 if (hasEmbeddedAssets) {
   logger.debug("Serving embedded client assets");
   app.get("*", (c) => {
