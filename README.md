@@ -12,6 +12,19 @@ Run multiple AI agents together — in pipelines, debates, and teams. They work 
 
 ## Install
 
+**As a Claude Code plugin (recommended):**
+
+```
+/plugin marketplace add openconclave/oc
+/plugin install openconclave@openconclave
+```
+
+Starts the OC server automatically, wires up MCP tools for managing conclaves, and delivers conclave events to your Claude Code session as notifications. Run `/openconclave:open` (or visit [localhost:4000](http://localhost:4000)) to open the editor.
+
+Requires [Bun](https://bun.sh) on your PATH. See [Claude Code plugin](#claude-code-plugin) below for details.
+
+**Standalone binary** (no Claude Code required):
+
 ```powershell
 # Windows
 irm https://openconclave.com/install.ps1 | iex
@@ -20,9 +33,7 @@ irm https://openconclave.com/install.ps1 | iex
 curl -fsSL https://openconclave.com/install.sh | bash
 ```
 
-Open [localhost:4000](http://localhost:4000) → import a starter → hit **Run**.
-
-No runtime dependencies. Single binary. [Manual install →](#manual-install)
+Open [localhost:4000](http://localhost:4000) → import a starter → hit **Run**. No runtime dependencies. Single binary. [Manual install →](#manual-install)
 
 ---
 
@@ -102,15 +113,46 @@ Drag nodes, draw connections, write system prompts.
 
 - **Ollama** — for local models and embeddings: `ollama pull nomic-embed-text`
 - **API keys** (optional) — `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or any OpenAI-compatible provider
-- **Claude Code** (optional) — for the channel loop and conclave-as-MCP-tool integration. Two plugins: `openconclave-channel` (events, channel loop) and `openconclave-dev` (manage conclaves from Claude). See [openconclave/claude-plugin](https://github.com/openconclave/claude-plugin) for details.
+- **Bun** — required when installing via the Claude Code plugin (the plugin runs OC from source). The standalone binary install doesn't need it.
+- **Claude Code** (optional) — for the plugin workflow described below.
 
-> **⚠ Important — current install path:** The Claude Code plugin marketplace registration is still being finalized. Until it lands, load the plugins in dev mode every time you start Claude Code:
->
-> ```bash
-> claude --dangerously-load-development-channels plugin:openconclave-channel@openconclave
-> ```
->
-> Without these, conclave channel loops won't reach your Claude Code session and you can't manage conclaves from Claude.
+## Claude Code plugin
+
+The plugin is a single-package install that bundles the OC server, the editor UI, and the MCP surface for managing conclaves from Claude. It replaces the older pair of plugins (`openconclave-channel` + `openconclave-dev`).
+
+### What it does
+
+- **Starts the server automatically** via a Claude Code background monitor. Your editor is live at `http://localhost:4000` for the duration of the session.
+- **Exposes an MCP server** named `openconclave` with tools to list/create/update conclaves, trigger runs, manage the scheduler, and respond to blocked runs.
+- **Delivers conclave events as notifications.** When a conclave emits output or asks Claude a question, the server writes the full payload to disk and prints a single-line pointer to stdout. Claude Code delivers that line as a notification; Claude reads the file and — for prompts — answers via the `respond_to_prompt` MCP tool.
+- **Ships one slash command**, `/openconclave:open`, that opens the editor in your default browser.
+
+### Plugin storage
+
+Data lives at `~/.claude/plugins/data/openconclave-openconclave/`, per [Anthropic's plugin data guidance](https://code.claude.com/docs/en/plugins-reference#persistent-data-directory). This path:
+
+- **Survives plugin updates** — your conclaves, runs, KBs, and session history don't move when the plugin version bumps.
+- **Is auto-deleted on full uninstall** unless you pass `--keep-data` to `claude plugin uninstall`.
+
+**First-run migration:** if you previously installed the standalone `oc` CLI and have data at `~/.openconclave/`, the plugin's SessionStart hook copies `openconclave.db`, `sessions/`, `outputs/`, and `instructions/` into the plugin data dir the first time. The legacy directory is left in place — downgrading back to the standalone CLI still works.
+
+### Uninstall
+
+```
+claude plugin uninstall openconclave@openconclave
+```
+
+By default this also removes the plugin data dir (conclaves, runs, KBs). Pass `--keep-data` to preserve it if you plan to reinstall.
+
+```
+claude plugin uninstall openconclave@openconclave --keep-data
+```
+
+### Troubleshooting
+
+- **Port 4000 in use** — the monitor tries to detect an existing OC server and attaches instead of binding a second one. If you still see `EADDRINUSE`, another process owns `:4000`; stop it and `/reload-plugins`.
+- **UI is 404** — the client bundle didn't build. The SessionStart hook runs `bun install` + `bun run --filter client build` on the first session; if it fails (no Bun, offline), the server runs but has no UI. Check stderr.
+- **`/doctor` shows `CLAUDE_PLUGIN_ROOT missing`** — you have a stale root `.mcp.json` from an older plugin version. Remove it; MCP config lives inline in `.claude-plugin/plugin.json` now.
 
 ## Manual install
 
