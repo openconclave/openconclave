@@ -7,8 +7,10 @@
 set -euo pipefail
 
 ROOT="${1:?plugin root argument required}"
+DATA="${2:?plugin data argument required}"
 
 export OC_PLUGIN_ROOT="$ROOT"
+export OC_DATA_DIR="$DATA"
 
 # If another Claude Code session (or a standalone `oc`) is already serving
 # :4000, don't try to bind again — just exit 0 so Claude Code doesn't mark

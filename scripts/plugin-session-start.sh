@@ -36,3 +36,23 @@ if [ ! -f "$ROOT/packages/client/dist/index.html" ]; then
   echo "openconclave plugin: building client bundle (first run only)…" >&2
   bun run --filter client build >&2
 fi
+
+# ── One-time migration from legacy ~/.openconclave/ ───────────
+# Users who installed the standalone `oc` binary before the plugin have their
+# DB, sessions, and outputs under ~/.openconclave/. Copy (not move) them into
+# the plugin data dir the first time. The legacy directory is preserved so a
+# downgrade back to the standalone CLI keeps working.
+HOME_DIR="${HOME:-$USERPROFILE}"
+LEGACY="$HOME_DIR/.openconclave"
+if [ ! -f "$DATA/.migrated-from-legacy" ] \
+  && [ ! -f "$DATA/openconclave.db" ] \
+  && [ -f "$LEGACY/openconclave.db" ]; then
+  echo "openconclave plugin: migrating data from $LEGACY to $DATA …" >&2
+  for item in openconclave.db openconclave.db-shm openconclave.db-wal sessions outputs instructions; do
+    if [ -e "$LEGACY/$item" ]; then
+      cp -r "$LEGACY/$item" "$DATA/" || true
+    fi
+  done
+  date -u +"%Y-%m-%dT%H:%M:%SZ" > "$DATA/.migrated-from-legacy"
+  echo "openconclave plugin: migration complete. Legacy dir left in place at $LEGACY." >&2
+fi
