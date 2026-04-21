@@ -1,0 +1,7 @@
+[
+  {
+    "name": "openconclave-server",
+    "command": "cd \"${CLAUDE_PLUGIN_ROOT}\" && bun run packages/server/src/cli.ts",
+    "description": "OpenConclave server on http://localhost:4000"
+  }
+]
