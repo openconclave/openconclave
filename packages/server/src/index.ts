@@ -2,8 +2,9 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serveStatic } from "hono/bun";
 import { eq, and, inArray } from "drizzle-orm";
-import { existsSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, unlinkSync } from "fs";
 import { join, dirname } from "path";
+import { WORKSPACE } from "./lib/workspace";
 
 import { logger } from "./lib/logger";
 import { errorHandler } from "./lib/errors";
@@ -349,6 +350,38 @@ app.all("/mcp", async (c) => {
 // ── Server ───────────────────────────────────────────────────
 const port = Number(process.env.PORT ?? API_PORT);
 
+// PID file for the Claude Code plugin monitor: lets a new session detect
+// whether the previous session's server is still alive before trying to
+// bind :4000. Stale files (process already gone) are cleaned up by the
+// plugin-server.sh startup check.
+const PID_FILE = join(WORKSPACE, "oc.pid");
+
+function checkPidfileConflict(): void {
+  if (!existsSync(PID_FILE)) return;
+  try {
+    const raw = readFileSync(PID_FILE, "utf-8").trim();
+    const priorPid = Number(raw);
+    if (!Number.isFinite(priorPid) || priorPid <= 0) {
+      unlinkSync(PID_FILE);
+      return;
+    }
+    // kill(pid, 0) returns true if the process exists and is reachable.
+    try {
+      process.kill(priorPid, 0);
+      // Another instance is alive. Don't overwrite its pidfile; fail fast.
+      logger.error(`Another OC server already runs (pid=${priorPid}). Exiting.`);
+      process.exit(1);
+    } catch {
+      // Prior pid is dead — reap the stale file.
+      unlinkSync(PID_FILE);
+    }
+  } catch (err) {
+    logger.warn("pidfile check failed", { error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+checkPidfileConflict();
+
 server = Bun.serve({
   port,
   idleTimeout: 120,
@@ -420,6 +453,13 @@ if (hasEmbeddedAssets) {
   });
 }
 
+// Write the pidfile now that the server is bound successfully.
+try {
+  writeFileSync(PID_FILE, String(process.pid), "utf-8");
+} catch (err) {
+  logger.warn("pidfile write failed", { error: err instanceof Error ? err.message : String(err) });
+}
+
 // ── Graceful Shutdown ────────────────────────────────────────
 let shuttingDown = false;
 function shutdown() {
@@ -429,6 +469,7 @@ function shutdown() {
   scheduler.stop();
   telegramTrigger?.stop();
   server.stop();
+  try { if (existsSync(PID_FILE)) unlinkSync(PID_FILE); } catch { /* best effort */ }
   logger.info("Shutdown complete");
   process.exit(0);
 }
