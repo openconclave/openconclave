@@ -39,12 +39,15 @@ function createLogFn(level: LogLevel) {
     };
     const output = formatLog(entry);
 
+    // Diagnostics go to stderr so stdout stays reserved for things consumers
+    // should see — the startup banner and plugin __OC_EVENT__ notifications.
+    // Claude Code monitors read stdout only.
     if (level === "error") {
       console.error(output);
     } else if (level === "warn") {
       console.warn(output);
     } else {
-      console.log(output);
+      process.stderr.write(output + "\n");
     }
   };
 }
