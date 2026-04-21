@@ -153,6 +153,54 @@ claude plugin uninstall openconclave@openconclave --keep-data
 - **Port 4000 in use** — the monitor tries to detect an existing OC server and attaches instead of binding a second one. If you still see `EADDRINUSE`, another process owns `:4000`; stop it and `/reload-plugins`.
 - **UI is 404** — the client bundle didn't build. The SessionStart hook runs `bun install` + `bun run --filter client build` on the first session; if it fails (no Bun, offline), the server runs but has no UI. Check stderr.
 - **`/doctor` shows `CLAUDE_PLUGIN_ROOT missing`** — you have a stale root `.mcp.json` from an older plugin version. Remove it; MCP config lives inline in `.claude-plugin/plugin.json` now.
+- **UI / MCP died after closing Claude Code** — on Windows, Claude Code's process tree teardown can leave an orphan bun process holding `:4000`. The plugin now writes a pidfile at `${CLAUDE_PLUGIN_DATA}/oc.pid` and captures stderr at `${CLAUDE_PLUGIN_DATA}/server.log` so restarts detect and reap stale servers. If something still misbehaves, `cat` that log.
+
+## Security & trust model
+
+Installing the OpenConclave plugin is a real trust decision. Here's what it actually does so you can decide whether you're OK with it.
+
+### What the plugin's own code does
+
+- Starts a local HTTP + MCP server on `localhost:4000`. Never listens on a public interface, never binds `0.0.0.0` without you asking.
+- Serves the editor UI and the API from the plugin install directory.
+- Writes its database, per-run session artifacts, and logs under `~/.claude/plugins/data/openconclave-openconclave/`.
+- On first install, copies an existing `~/.openconclave/` directory into the plugin data dir (migration). The source is not modified or deleted.
+- **Does not** phone home. No telemetry, no outbound connection from the plugin's own code. Landing-page manifest polls from your machine for update notifications are opt-in under Settings → Advanced.
+
+### What conclave agents can do
+
+A *conclave* is a graph you (or someone whose graph you installed from the marketplace) build in the editor. Agents in a conclave can use whichever tools their node is configured with — bash, read/write/edit, web fetch, knowledge search, user-registered MCP tools, etc. **These tools run locally with your shell's privileges.**
+
+- Tool access is per-node and opt-in. A new agent node starts with no tools; you add them.
+- Conclaves imported from the marketplace ship their own tool wiring. Review the graph before running anything you didn't build yourself — same posture as running a shell script you pulled off the internet.
+- Conclave runs happen in a worktree when you enable Git isolation on the trigger, so mutating pipelines can't touch your main branch without your opt-in.
+
+### What providers the plugin talks to
+
+Only the ones you configure. OC has no default provider credentials. You supply:
+
+- An `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` or any OpenAI-compatible provider URL + token, stored in OC's settings DB (not in environment, not shipped to Anthropic/OpenAI beyond the model API calls you make).
+- Optionally, a local Ollama endpoint for offline-only runs.
+
+Keys live in `~/.claude/plugins/data/openconclave-openconclave/openconclave.db`. They're never sent to Anthropic, Anthropic's plugin registry, openconclave.com, or anywhere else by the plugin itself.
+
+### What happens on uninstall
+
+```
+claude plugin uninstall openconclave@openconclave
+```
+
+Removes the plugin code AND the plugin data dir by default. That deletes your conclaves, runs, KBs, and API keys stored via OC.
+
+```
+claude plugin uninstall openconclave@openconclave --keep-data
+```
+
+Removes the plugin code but keeps `~/.claude/plugins/data/openconclave-openconclave/` intact. Reinstall picks up where you left off.
+
+### Trust boundary, in one line
+
+The plugin inherits your shell's permissions; it does not escalate them. Everything it can do, you could do yourself by running `oc` standalone. The shape of the trust decision is "do I trust the OC server to run the graphs I build with the tools I wire up" — the same decision you make when writing a Makefile.
 
 ## Manual install
 
