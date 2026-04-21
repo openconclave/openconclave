@@ -1,4 +1,5 @@
 import type { RunEvent } from "../engine/types";
+import { maybeEmitPluginEvent } from "../plugin/event-emitter";
 
 let serverRef: ReturnType<typeof Bun.serve> | null = null;
 
@@ -7,6 +8,7 @@ export function setServer(s: ReturnType<typeof Bun.serve>) {
 }
 
 export function broadcastRunEvent(event: RunEvent) {
+  maybeEmitPluginEvent(event);
   if (!serverRef) return;
   const json = JSON.stringify(event);
   serverRef.publish(`run:${event.runId}`, json);

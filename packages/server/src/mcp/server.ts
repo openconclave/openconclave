@@ -332,6 +332,32 @@ export function createMcpServer() {
     }
   );
 
+  // ── Claude-in-the-loop (replaces channel plugin) ──────────
+
+  server.tool(
+    "list_pending_prompts",
+    "List all prompt:question events currently awaiting a response from Claude. Use this after reconnecting to catch up on anything in flight.",
+    {},
+    async () => {
+      const data = await ocApi("/prompts/pending");
+      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "respond_to_prompt",
+    "Answer a pending prompt:question so the blocked conclave run can continue. Pass the exact runId and nodeId surfaced in the plugin event file (or by list_pending_prompts).",
+    {
+      runId: z.number().describe("Run ID that emitted the prompt:question event"),
+      nodeId: z.string().describe("Node ID inside that run that is waiting"),
+      response: z.string().describe("Text sent back to the blocked agent"),
+    },
+    async ({ runId, nodeId, response }) => {
+      const data = await ocApi("/prompts/respond", "POST", { runId, nodeId, response });
+      return { content: [{ type: "text", text: JSON.stringify(data) }] };
+    }
+  );
+
   // ── MCP Server Registry ────────────────────────────────────
 
   server.tool(
