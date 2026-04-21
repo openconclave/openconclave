@@ -12,6 +12,22 @@ const PLUGIN_EVENT_TYPES = new Set<string>([
 
 let counter = 0;
 
+// When Claude Code exits on Windows, the plugin monitor closes its end of
+// our stdout pipe but the server (an orphaned bun process) keeps running.
+// The next process.stdout.write() then throws EPIPE and crashes the server.
+// Install a one-time error handler that swallows EPIPE so the rest of the
+// server keeps serving MCP/HTTP — just without a notification channel.
+let stdoutAlive = true;
+process.stdout.on("error", (err: NodeJS.ErrnoException) => {
+  if (err.code === "EPIPE" || err.code === "ERR_STREAM_DESTROYED") {
+    stdoutAlive = false;
+    return;
+  }
+  // Real error — re-throw via logger so it lands in server.log instead of
+  // killing the process.
+  logger.warn("stdout error", { error: err.message, code: err.code });
+});
+
 function nextEventId(): string {
   counter += 1;
   return `${Date.now()}-${counter}`;
@@ -47,6 +63,8 @@ export function maybeEmitPluginEvent(event: RunEvent): void {
     const filePath = join(dir, `${id}-${event.type.replace(":", "_")}.json`);
     writeFileSync(filePath, JSON.stringify(event, null, 2), "utf-8");
 
+    if (!stdoutAlive) return; // Monitor pipe already dead; file is still on disk.
+
     const notification = {
       event: event.type,
       run_id: event.runId,
@@ -59,7 +77,16 @@ export function maybeEmitPluginEvent(event: RunEvent): void {
         : {}),
     };
 
-    process.stdout.write(`${EVENT_PREFIX} ${JSON.stringify(notification)}\n`);
+    try {
+      process.stdout.write(`${EVENT_PREFIX} ${JSON.stringify(notification)}\n`);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (code === "EPIPE" || code === "ERR_STREAM_DESTROYED") {
+        stdoutAlive = false;
+      } else {
+        throw err;
+      }
+    }
   } catch (err) {
     logger.warn("plugin event emit failed", { error: err instanceof Error ? err.message : String(err) });
   }
