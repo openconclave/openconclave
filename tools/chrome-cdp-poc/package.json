@@ -1,0 +1,15 @@
+{
+  "name": "oc-chrome-cdp-poc",
+  "version": "0.0.1",
+  "type": "module",
+  "dependencies": {
+    "@mozilla/readability": "^0.5",
+    "jsdom": "^25",
+    "turndown": "^7"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.12",
+    "@types/jsdom": "^21",
+    "@types/turndown": "^5"
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "name": "openconclave-web-fetch-mcp",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "openconclave-web-fetch-mcp": "./dist/index.mjs"
+  },
+  "scripts": {
+    "build": "bun build index.ts --outfile dist/index.mjs --target node --format esm --external playwright",
+    "start": "node dist/index.mjs",
+    "test": "node --import tsx/esm test.ts",
+    "install-browser": "bun x playwright install chromium"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1",
+    "@mozilla/readability": "^0.5",
+    "jsdom": "^25",
+    "playwright": "^1",
+    "turndown": "^7",
+    "zod": "^3"
+  },
+  "devDependencies": {
+    "@types/jsdom": "^21",
+    "@types/turndown": "^5",
+    "tsx": "^4"
+  }
+}

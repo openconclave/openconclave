@@ -1,0 +1,444 @@
+{
+  "name": "Mafia Game v2",
+  "description": "9-player Mafia with discussion node for day phase. Town (6) vs Mafia (3).",
+  "definition": {
+    "id": 16,
+    "name": "Mafia Game v2",
+    "description": "9-player Mafia with discussion node for day phase. Town (6) vs Mafia (3).",
+    "toolName": "mafia_game_v2",
+    "nodes": [
+      {
+        "id": "trigger",
+        "type": "trigger",
+        "position": {
+          "x": 500,
+          "y": 60
+        },
+        "data": {
+          "label": "Trigger",
+          "type": "trigger",
+          "config": {
+            "type": "chat"
+          }
+        }
+      },
+      {
+        "id": "setup",
+        "type": "code",
+        "position": {
+          "x": 500,
+          "y": 220
+        },
+        "data": {
+          "label": "Setup",
+          "type": "code",
+          "config": {
+            "runtime": "python",
+            "code": "import json, sys\n\ndata = json.load(sys.stdin)\n\nplayers = [\n    {\"id\": 1, \"name\": \"Rowan\",  \"nodeId\": \"rowan\",  \"role\": \"godfather\",   \"faction\": \"mafia\", \"alive\": True, \"eliminated_day\": None},\n    {\"id\": 2, \"name\": \"Elara\",  \"nodeId\": \"elara\",  \"role\": \"mafia\",       \"faction\": \"mafia\", \"alive\": True, \"eliminated_day\": None},\n    {\"id\": 3, \"name\": \"Soren\",  \"nodeId\": \"soren\",  \"role\": \"mafia\",       \"faction\": \"mafia\", \"alive\": True, \"eliminated_day\": None},\n    {\"id\": 4, \"name\": \"Mira\",   \"nodeId\": \"mira\",   \"role\": \"detective\",   \"faction\": \"town\",  \"alive\": True, \"eliminated_day\": None},\n    {\"id\": 5, \"name\": \"Kael\",   \"nodeId\": \"kael\",   \"role\": \"doctor\",      \"faction\": \"town\",  \"alive\": True, \"eliminated_day\": None},\n    {\"id\": 6, \"name\": \"Orion\",  \"nodeId\": \"orion\",  \"role\": \"townsperson\", \"faction\": \"town\",  \"alive\": True, \"eliminated_day\": None},\n    {\"id\": 7, \"name\": \"Nico\",   \"nodeId\": \"nico\",   \"role\": \"townsperson\", \"faction\": \"town\",  \"alive\": True, \"eliminated_day\": None},\n    {\"id\": 8, \"name\": \"Linnea\", \"nodeId\": \"linnea\", \"role\": \"townsperson\", \"faction\": \"town\",  \"alive\": True, \"eliminated_day\": None},\n    {\"id\": 9, \"name\": \"Talia\",  \"nodeId\": \"talia\",  \"role\": \"townsperson\", \"faction\": \"town\",  \"alive\": True, \"eliminated_day\": None},\n]\n\nliving_names = \", \".join(p[\"name\"] for p in players)\n\nstate = {\n    \"players\": players,\n    \"day\": 1,\n    \"phase\": \"day_chat\",\n    \"chat_log\": [],\n    \"votes\": [],\n    \"night_log\": [],\n    \"eliminations\": [],\n    \"winner\": None,\n    \"last_protected\": None,\n    \"daySummary\": f\"Day 1. All players alive: {living_names}. Discuss who might be Mafia.\",\n}\n\nprint(json.dumps(state))\n"
+          }
+        }
+      },
+      {
+        "id": "day_discussion",
+        "type": "discussion",
+        "position": {
+          "x": 500,
+          "y": 420
+        },
+        "data": {
+          "label": "Day Discussion",
+          "type": "discussion",
+          "config": {
+            "prompt": "You are {{agentName}} in a Mafia game. {{input.daySummary}}\n\n{{transcript}}\n\nIf you have been eliminated, respond only: \"...\"\nOtherwise, give your day speech (2-3 sentences). Be strategic based on your role.",
+            "maxRounds": 20,
+            "moderator": {
+              "type": "code",
+              "node": {
+                "config": {
+                  "runtime": "python",
+                  "code": "import json, sys\n\ndata = json.load(sys.stdin)\nresponses = data[\"responses\"]\nstate = data[\"input\"]\n\nliving = [p for p in state[\"players\"] if p[\"alive\"]]\nliving_names = [p[\"name\"] for p in living]\nliving_set = set(living_names)\n\nspoken = set()\nfor r in responses:\n    if r[\"agentName\"] in living_set:\n        spoken.add(r[\"agentName\"])\n\n# If last speaker was dead, skip them\nlast = responses[-1][\"agentName\"] if responses else None\nif last and last not in living_set:\n    remaining = [n for n in living_names if n not in spoken]\n    if remaining:\n        print(json.dumps({\"action\": \"call_specific\", \"nextAgent\": remaining[0]}))\n    else:\n        print(json.dumps({\"action\": \"end_discussion\", \"summary\": \"Time to vote.\"}))\n    sys.exit(0)\n\nremaining = [n for n in living_names if n not in spoken]\nif remaining:\n    print(json.dumps({\"action\": \"call_specific\", \"nextAgent\": remaining[0]}))\nelse:\n    print(json.dumps({\"action\": \"end_discussion\", \"summary\": \"Discussion closed. Time to vote.\"}))\n"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "day_vote",
+        "type": "code",
+        "position": {
+          "x": 500,
+          "y": 680
+        },
+        "data": {
+          "label": "Day Vote",
+          "type": "code",
+          "config": {
+            "runtime": "python",
+            "code": "import json, sys, os, random, urllib.request\nfrom collections import Counter\n\ndata = json.load(sys.stdin)\ndisc = data[\"input\"]\nstate = disc[\"input\"]\ntranscript = disc.get(\"transcript\", \"\")\n\napi_url = os.environ[\"OC_API_URL\"]\nwf_id = os.environ[\"OC_WORKFLOW_ID\"]\nrun_id = os.environ[\"OC_RUN_ID\"]\n\ndef call_agent(node_id, prompt, tools=None):\n    body = {\"workflowId\": int(wf_id), \"runId\": int(run_id), \"nodeId\": node_id, \"prompt\": prompt}\n    if tools:\n        body[\"tools\"] = tools\n    req = urllib.request.Request(\n        f\"{api_url}/api/agents/invoke\",\n        data=json.dumps(body).encode(),\n        headers={\"Content-Type\": \"application/json\"}\n    )\n    with urllib.request.urlopen(req, timeout=120) as resp:\n        result = json.loads(resp.read())\n    if \"tool_call\" in result:\n        return result[\"tool_call\"][\"input\"]\n    return result[\"output\"]\n\nif state.get(\"winner\"):\n    print(json.dumps(state))\n    sys.exit(0)\n\npm = {p[\"id\"]: p for p in state[\"players\"]}\nliving = [p for p in state[\"players\"] if p[\"alive\"]]\n\nROLE_HINTS = {\n    \"godfather\": \"You are Mafia. Vote to protect your team.\",\n    \"mafia\": \"You are Mafia. Vote to protect your team.\",\n    \"detective\": \"Use investigation clues to guide your vote.\",\n    \"doctor\": \"Vote for whoever seems most suspicious.\",\n    \"townsperson\": \"Vote for whoever seems most suspicious.\",\n}\n\nrandom.shuffle(living)\nday_votes = []\n\nfor player in living:\n    others = [p for p in living if p[\"id\"] != player[\"id\"]]\n    others_names = [p[\"name\"] for p in others]\n\n    votes_so_far = \"\"\n    for v in day_votes:\n        votes_so_far += f\"- {pm[v['voter']]['name']} voted for {pm[v['target']]['name']}\\n\"\n\n    prompt = f\"# Mafia -- Day {state['day']} Vote\\n\\n\"\n    prompt += f\"You are **{player['name']}**. {ROLE_HINTS[player['role']]}\\n\\n\"\n\n    if player[\"faction\"] == \"mafia\":\n        mates = [p[\"name\"] for p in state[\"players\"] if p[\"faction\"] == \"mafia\" and p[\"id\"] != player[\"id\"]]\n        prompt += f\"Mafia teammates: {', '.join(mates)}\\n\\n\"\n\n    prompt += f\"## Today's Discussion\\n{transcript}\\n\\n\"\n    if votes_so_far:\n        prompt += f\"## Votes So Far\\n{votes_so_far}\\n\"\n    prompt += \"Vote to eliminate one player.\"\n\n    tool = {\n        \"name\": \"vote\",\n        \"description\": \"Cast your vote\",\n        \"input_schema\": {\n            \"type\": \"object\",\n            \"properties\": {\n                \"player_name\": {\"type\": \"string\", \"enum\": others_names, \"description\": \"Player to eliminate\"}\n            },\n            \"required\": [\"player_name\"]\n        }\n    }\n\n    result = call_agent(player[\"nodeId\"], prompt, tools=[tool])\n    voted_name = result[\"player_name\"] if isinstance(result, dict) else str(result)\n\n    target_id = None\n    for p in others:\n        if p[\"name\"] == voted_name:\n            target_id = p[\"id\"]\n            break\n    if target_id is None:\n        target_id = random.choice(others)[\"id\"]\n\n    day_votes.append({\"voter\": player[\"id\"], \"target\": target_id})\n    state[\"votes\"].append({\"day\": state[\"day\"], \"voter_id\": player[\"id\"], \"target_id\": target_id})\n\n# Tally\ncounts = Counter(v[\"target\"] for v in day_votes)\ntop = counts.most_common(2)\n\neliminated_name = None\nif len(top) >= 2 and top[0][1] == top[1][1]:\n    pass  # tie\nelse:\n    elim_id = top[0][0]\n    for p in state[\"players\"]:\n        if p[\"id\"] == elim_id:\n            p[\"alive\"] = False\n            p[\"eliminated_day\"] = state[\"day\"]\n            eliminated_name = p[\"name\"]\n    state[\"eliminations\"].append({\"day\": state[\"day\"], \"player_id\": elim_id, \"method\": \"vote\"})\n\nstate[\"chat_log\"].append({\"day\": state[\"day\"], \"transcript\": transcript})\n\n# Win check\nliving_after = [p for p in state[\"players\"] if p[\"alive\"]]\nmafia_alive = [p for p in living_after if p[\"faction\"] == \"mafia\"]\ntown_alive = [p for p in living_after if p[\"faction\"] == \"town\"]\n\nif len(mafia_alive) == 0:\n    state[\"winner\"] = \"town\"\n    state[\"phase\"] = \"finished\"\nelif len(mafia_alive) >= len(town_alive):\n    state[\"winner\"] = \"mafia\"\n    state[\"phase\"] = \"finished\"\n\nprint(json.dumps(state))\n"
+          }
+        }
+      },
+      {
+        "id": "night_phase",
+        "type": "code",
+        "position": {
+          "x": 500,
+          "y": 860
+        },
+        "data": {
+          "label": "Night Phase",
+          "type": "code",
+          "config": {
+            "runtime": "python",
+            "code": "import json, sys, os, random, urllib.request\nfrom collections import Counter\n\ndata = json.load(sys.stdin)\nstate = data[\"input\"]\n\nif state.get(\"winner\"):\n    print(json.dumps(state))\n    sys.exit(0)\n\napi_url = os.environ[\"OC_API_URL\"]\nwf_id = os.environ[\"OC_WORKFLOW_ID\"]\nrun_id = os.environ[\"OC_RUN_ID\"]\n\ndef call_agent(node_id, prompt, tools=None):\n    body = {\"workflowId\": int(wf_id), \"runId\": int(run_id), \"nodeId\": node_id, \"prompt\": prompt}\n    if tools:\n        body[\"tools\"] = tools\n    req = urllib.request.Request(\n        f\"{api_url}/api/agents/invoke\",\n        data=json.dumps(body).encode(),\n        headers={\"Content-Type\": \"application/json\"}\n    )\n    with urllib.request.urlopen(req, timeout=120) as resp:\n        result = json.loads(resp.read())\n    if \"tool_call\" in result:\n        return result[\"tool_call\"][\"input\"]\n    return result[\"output\"]\n\npm = {p[\"id\"]: p for p in state[\"players\"]}\nliving = [p for p in state[\"players\"] if p[\"alive\"]]\n\n# === MAFIA ===\nliving_mafia = [p for p in living if p[\"faction\"] == \"mafia\"]\nnon_mafia = [p for p in living if p[\"faction\"] != \"mafia\"]\n\nkill_votes = []\nmafia_chat = []\nkill_target_id = None\n\nif living_mafia and non_mafia:\n    target_names = [p[\"name\"] for p in non_mafia]\n    teammates = \", \".join(f\"{p['name']} ({p['role']})\" for p in living_mafia)\n\n    for maf in living_mafia:\n        chat_so_far = \"\\n\".join(f\"**{e['name']}:** {e['msg']}\" for e in mafia_chat)\n\n        prompt = f\"# Mafia Night {state['day']}\\n\\n\"\n        prompt += f\"You are **{maf['name']}** ({maf['role']}). Teammates: {teammates}\\n\"\n        prompt += f\"Town targets: {', '.join(target_names)}\\n\\n\"\n        if chat_so_far:\n            prompt += f\"## Mafia Chat\\n{chat_so_far}\\n\\n\"\n        prompt += \"Discuss and vote who to kill tonight.\"\n\n        tool = {\n            \"name\": \"mafia_action\",\n            \"description\": \"Chat and vote\",\n            \"input_schema\": {\n                \"type\": \"object\",\n                \"properties\": {\n                    \"message\": {\"type\": \"string\", \"description\": \"Message to teammates\"},\n                    \"kill_target\": {\"type\": \"string\", \"enum\": target_names, \"description\": \"Player to kill\"}\n                },\n                \"required\": [\"message\", \"kill_target\"]\n            }\n        }\n\n        result = call_agent(maf[\"nodeId\"], prompt, tools=[tool])\n        msg = result.get(\"message\", \"\") if isinstance(result, dict) else str(result)\n        kill_name = result.get(\"kill_target\") if isinstance(result, dict) else None\n\n        tid = None\n        if kill_name:\n            for p in non_mafia:\n                if p[\"name\"] == kill_name:\n                    tid = p[\"id\"]\n                    break\n        if tid is None:\n            tid = random.choice(non_mafia)[\"id\"]\n\n        mafia_chat.append({\"name\": maf[\"name\"], \"msg\": msg})\n        kill_votes.append(tid)\n        state[\"night_log\"].append({\n            \"day\": state[\"day\"], \"action\": \"mafia_chat\",\n            \"player_id\": maf[\"id\"], \"content\": msg, \"visibility\": \"faction\"\n        })\n\n    counts = Counter(kill_votes)\n    top_count = counts.most_common(1)[0][1]\n    tied = [t for t, c in counts.items() if c == top_count]\n    kill_target_id = random.choice(tied)\n\n# === DETECTIVE ===\ndetective = next((p for p in living if p[\"role\"] == \"detective\"), None)\nif detective:\n    others = [p for p in living if p[\"id\"] != detective[\"id\"]]\n    others_names = [p[\"name\"] for p in others]\n\n    past_inv = \"\"\n    for e in state[\"night_log\"]:\n        if e.get(\"action\") == \"investigate\" and e.get(\"player_id\") == detective[\"id\"]:\n            past_inv += f\"- Night {e['day']}: {pm[e['target_id']]['name']} = {e['result'].upper()}\\n\"\n\n    prompt = f\"# Detective Night {state['day']}\\n\\n\"\n    prompt += f\"You are **{detective['name']}**, Detective.\\n\"\n    prompt += f\"Living: {', '.join(p['name'] for p in living)}\\n\\n\"\n    if past_inv:\n        prompt += f\"## Past Investigations\\n{past_inv}\\n\"\n    prompt += \"Choose one player to investigate.\"\n\n    tool = {\n        \"name\": \"investigate\",\n        \"description\": \"Investigate a player\",\n        \"input_schema\": {\n            \"type\": \"object\",\n            \"properties\": {\n                \"player_name\": {\"type\": \"string\", \"enum\": others_names}\n            },\n            \"required\": [\"player_name\"]\n        }\n    }\n\n    result = call_agent(detective[\"nodeId\"], prompt, tools=[tool])\n    inv_name = result[\"player_name\"] if isinstance(result, dict) else str(result)\n\n    inv_target = None\n    for p in others:\n        if p[\"name\"] == inv_name:\n            inv_target = p\n            break\n    if inv_target is None:\n        inv_target = random.choice(others)\n\n    inv_result = \"innocent\" if inv_target[\"role\"] == \"godfather\" or inv_target[\"faction\"] == \"town\" else \"guilty\"\n\n    state[\"night_log\"].append({\n        \"day\": state[\"day\"], \"action\": \"investigate\",\n        \"player_id\": detective[\"id\"], \"target_id\": inv_target[\"id\"],\n        \"result\": inv_result, \"visibility\": \"self\"\n    })\n\n# === DOCTOR ===\ndoctor = next((p for p in living if p[\"role\"] == \"doctor\"), None)\nprotected_id = None\nif doctor:\n    others = [p for p in living if p[\"id\"] != doctor[\"id\"]]\n    if state.get(\"last_protected\") is not None:\n        others = [p for p in others if p[\"id\"] != state[\"last_protected\"]]\n    others_names = [p[\"name\"] for p in others]\n\n    prompt = f\"# Doctor Night {state['day']}\\n\\n\"\n    prompt += f\"You are **{doctor['name']}**, Doctor.\\n\"\n    prompt += f\"Cannot protect same player two nights in a row.\\n\"\n    prompt += f\"Living: {', '.join(p['name'] for p in living)}\\n\\n\"\n    if state.get(\"last_protected\") and state[\"last_protected\"] in pm:\n        prompt += f\"*(Last protected: {pm[state['last_protected']]['name']})*\\n\\n\"\n    prompt += \"Choose one player to protect tonight.\"\n\n    tool = {\n        \"name\": \"protect\",\n        \"description\": \"Protect a player\",\n        \"input_schema\": {\n            \"type\": \"object\",\n            \"properties\": {\n                \"player_name\": {\"type\": \"string\", \"enum\": others_names}\n            },\n            \"required\": [\"player_name\"]\n        }\n    }\n\n    result = call_agent(doctor[\"nodeId\"], prompt, tools=[tool])\n    prot_name = result[\"player_name\"] if isinstance(result, dict) else str(result)\n\n    prot_target = None\n    for p in others:\n        if p[\"name\"] == prot_name:\n            prot_target = p\n            break\n    if prot_target is None:\n        prot_target = random.choice(others)\n\n    protected_id = prot_target[\"id\"]\n    state[\"last_protected\"] = protected_id\n    state[\"night_log\"].append({\n        \"day\": state[\"day\"], \"action\": \"protect\",\n        \"player_id\": doctor[\"id\"], \"target_id\": protected_id, \"visibility\": \"self\"\n    })\n\n# === RESOLVE NIGHT ===\nif kill_target_id is not None:\n    was_protected = (kill_target_id == protected_id)\n    state[\"night_log\"].append({\n        \"day\": state[\"day\"], \"action\": \"mafia_kill\",\n        \"target_id\": kill_target_id, \"protected\": was_protected, \"visibility\": \"public\"\n    })\n    if not was_protected:\n        for p in state[\"players\"]:\n            if p[\"id\"] == kill_target_id:\n                p[\"alive\"] = False\n                p[\"eliminated_day\"] = state[\"day\"]\n        state[\"eliminations\"].append({\"day\": state[\"day\"], \"player_id\": kill_target_id, \"method\": \"mafia_kill\"})\n\n# Advance day\nstate[\"day\"] += 1\nstate[\"phase\"] = \"day_chat\"\n\n# Win check\nliving_after = [p for p in state[\"players\"] if p[\"alive\"]]\nmafia_alive = [p for p in living_after if p[\"faction\"] == \"mafia\"]\ntown_alive = [p for p in living_after if p[\"faction\"] == \"town\"]\n\nif len(mafia_alive) == 0:\n    state[\"winner\"] = \"town\"\n    state[\"phase\"] = \"finished\"\nelif len(mafia_alive) >= len(town_alive):\n    state[\"winner\"] = \"mafia\"\n    state[\"phase\"] = \"finished\"\nelif state[\"day\"] > 10:\n    state[\"winner\"] = \"draw\"\n    state[\"phase\"] = \"finished\"\n\n# Build summary for next day discussion\nparts = [f\"Day {state['day']}.\"]\nfor e in state[\"night_log\"]:\n    if e.get(\"day\") == state[\"day\"] - 1 and e.get(\"action\") == \"mafia_kill\" and e.get(\"visibility\") == \"public\":\n        tname = pm.get(e[\"target_id\"], {}).get(\"name\", \"unknown\")\n        if e.get(\"protected\"):\n            parts.append(\"Someone was attacked last night but survived!\")\n        else:\n            parts.append(f\"{tname} was killed by the Mafia last night.\")\nfor e in state[\"eliminations\"]:\n    if e.get(\"day\") == state[\"day\"] - 1 and e.get(\"method\") == \"vote\":\n        ename = pm.get(e[\"player_id\"], {}).get(\"name\", \"unknown\")\n        erole = pm.get(e[\"player_id\"], {}).get(\"role\", \"unknown\")\n        parts.append(f\"Yesterday, {ename} was voted out (was {erole}).\")\n\nliving_names = \", \".join(p[\"name\"] for p in living_after)\nparts.append(f\"Living: {living_names}.\")\nstate[\"daySummary\"] = \" \".join(parts)\n\nprint(json.dumps(state))\n"
+          }
+        }
+      },
+      {
+        "id": "game_check",
+        "type": "condition",
+        "position": {
+          "x": 500,
+          "y": 1060
+        },
+        "data": {
+          "label": "Game Over?",
+          "type": "condition",
+          "config": {
+            "expression": "input.winner !== null && input.winner !== undefined"
+          }
+        }
+      },
+      {
+        "id": "game_over",
+        "type": "code",
+        "position": {
+          "x": 300,
+          "y": 1240
+        },
+        "data": {
+          "label": "Game Summary",
+          "type": "code",
+          "config": {
+            "runtime": "python",
+            "code": "import json, sys\n\ndata = json.load(sys.stdin)\nstate = data[\"input\"]\n\npm = {p[\"id\"]: p for p in state[\"players\"]}\nwinner = state.get(\"winner\", \"unknown\")\n\nlines = [f\"# Mafia Game Over -- {winner.upper()} WINS!\\n\"]\n\nfor day in range(1, state[\"day\"] + 1):\n    lines.append(f\"\\n## Day {day}\")\n    for e in state.get(\"eliminations\", []):\n        if e[\"day\"] == day and e[\"method\"] == \"vote\":\n            p = pm[e[\"player_id\"]]\n            lines.append(f\"- Voted out: **{p['name']}** (was {p['role']})\")\n    for e in state.get(\"night_log\", []):\n        if e.get(\"day\") == day and e.get(\"action\") == \"mafia_kill\" and e.get(\"visibility\") == \"public\":\n            t = pm[e[\"target_id\"]]\n            if e.get(\"protected\"):\n                lines.append(f\"- Night: {t['name']} was attacked but **saved** by the Doctor!\")\n            else:\n                lines.append(f\"- Night: **{t['name']}** killed by Mafia (was {t['role']})\")\n\nlines.append(\"\\n## Final Roster\")\nfor p in state[\"players\"]:\n    status = \"ALIVE\" if p[\"alive\"] else f\"eliminated day {p['eliminated_day']}\"\n    lines.append(f\"- {p['name']}: {p['role']} ({p['faction']}) -- {status}\")\n\nprint(\"\\n\".join(lines))\n"
+          }
+        }
+      },
+      {
+        "id": "output",
+        "type": "output",
+        "position": {
+          "x": 300,
+          "y": 1400
+        },
+        "data": {
+          "label": "Output",
+          "type": "output",
+          "config": {
+            "type": "claude-code"
+          }
+        }
+      },
+      {
+        "id": "rowan",
+        "type": "agent",
+        "position": {
+          "x": -100,
+          "y": 200
+        },
+        "data": {
+          "label": "Rowan",
+          "type": "agent",
+          "config": {
+            "engine": "ollama",
+            "model": "haiku",
+            "systemPrompt": "You are Rowan playing Mafia. You are the GODFATHER (Mafia leader). You appear INNOCENT to the Detective.\nYour Mafia teammates: Elara and Soren.\nRules: 9 players, Town (6) vs Mafia (3). Town wins when all Mafia eliminated. Mafia wins when mafia >= town.\nNEVER reveal you are Mafia. Blend in, deflect suspicion, subtly direct votes toward Town.\nKeep responses to 2-3 sentences max.",
+            "maxTurns": 5,
+            "maxBudgetUsd": 0.5,
+            "tools": [],
+            "ollamaModel": "gemma4:e4b"
+          }
+        }
+      },
+      {
+        "id": "elara",
+        "type": "agent",
+        "position": {
+          "x": -100,
+          "y": 320
+        },
+        "data": {
+          "label": "Elara",
+          "type": "agent",
+          "config": {
+            "engine": "ollama",
+            "model": "haiku",
+            "systemPrompt": "You are Elara playing Mafia. You are MAFIA.\nYour teammates: Rowan (Godfather) and Soren.\nRules: 9 players, Town (6) vs Mafia (3). Mafia wins when mafia >= town.\nNEVER reveal you are Mafia. Blend in during day. Support teammates subtly.\nKeep responses to 2-3 sentences max.",
+            "maxTurns": 5,
+            "maxBudgetUsd": 0.5,
+            "tools": [],
+            "ollamaModel": "gemma4:e4b"
+          }
+        }
+      },
+      {
+        "id": "soren",
+        "type": "agent",
+        "position": {
+          "x": -100,
+          "y": 440
+        },
+        "data": {
+          "label": "Soren",
+          "type": "agent",
+          "config": {
+            "engine": "ollama",
+            "model": "haiku",
+            "systemPrompt": "You are Soren playing Mafia. You are MAFIA.\nYour teammates: Rowan (Godfather) and Elara.\nRules: 9 players, Town (6) vs Mafia (3). Mafia wins when mafia >= town.\nNEVER reveal you are Mafia. Blend in during day. Support teammates subtly.\nKeep responses to 2-3 sentences max.",
+            "maxTurns": 5,
+            "maxBudgetUsd": 0.5,
+            "tools": [],
+            "ollamaModel": "gemma4:e4b"
+          }
+        }
+      },
+      {
+        "id": "mira",
+        "type": "agent",
+        "position": {
+          "x": -100,
+          "y": 560
+        },
+        "data": {
+          "label": "Mira",
+          "type": "agent",
+          "config": {
+            "engine": "ollama",
+            "model": "haiku",
+            "systemPrompt": "You are Mira playing Mafia. You are the DETECTIVE (Town).\nEach night you investigate one player: GUILTY (Mafia) or INNOCENT (Town/Godfather). WARNING: The Godfather appears INNOCENT.\nRules: 9 players, Town (6) vs Mafia (3). Town wins when all Mafia eliminated.\nShare findings strategically -- revealing too early makes you a target.\nKeep responses to 2-3 sentences max.",
+            "maxTurns": 5,
+            "maxBudgetUsd": 0.5,
+            "tools": [],
+            "ollamaModel": "gemma4:e4b"
+          }
+        }
+      },
+      {
+        "id": "kael",
+        "type": "agent",
+        "position": {
+          "x": -100,
+          "y": 680
+        },
+        "data": {
+          "label": "Kael",
+          "type": "agent",
+          "config": {
+            "engine": "ollama",
+            "model": "haiku",
+            "systemPrompt": "You are Kael playing Mafia. You are the DOCTOR (Town).\nEach night you protect one player from being killed. Cannot protect the same player two nights in a row.\nRules: 9 players, Town (6) vs Mafia (3). Town wins when all Mafia eliminated.\nProtect likely targets. Don't reveal your role unless necessary.\nKeep responses to 2-3 sentences max.",
+            "maxTurns": 5,
+            "maxBudgetUsd": 0.5,
+            "tools": [],
+            "ollamaModel": "gemma4:e4b"
+          }
+        }
+      },
+      {
+        "id": "orion",
+        "type": "agent",
+        "position": {
+          "x": -100,
+          "y": 800
+        },
+        "data": {
+          "label": "Orion",
+          "type": "agent",
+          "config": {
+            "engine": "ollama",
+            "model": "haiku",
+            "systemPrompt": "You are Orion playing Mafia. You are a TOWNSPERSON (Town). No special abilities.\nRules: 9 players, Town (6) vs Mafia (3). Town wins when all Mafia eliminated.\nUse logic and discussion to find Mafia. Watch for deflection and suspicious behavior.\nKeep responses to 2-3 sentences max.",
+            "maxTurns": 5,
+            "maxBudgetUsd": 0.5,
+            "tools": [],
+            "ollamaModel": "gemma4:e4b"
+          }
+        }
+      },
+      {
+        "id": "nico",
+        "type": "agent",
+        "position": {
+          "x": -100,
+          "y": 920
+        },
+        "data": {
+          "label": "Nico",
+          "type": "agent",
+          "config": {
+            "engine": "ollama",
+            "model": "haiku",
+            "systemPrompt": "You are Nico playing Mafia. You are a TOWNSPERSON (Town). No special abilities.\nRules: 9 players, Town (6) vs Mafia (3). Town wins when all Mafia eliminated.\nUse logic and discussion to find Mafia. Watch for deflection and suspicious behavior.\nKeep responses to 2-3 sentences max.",
+            "maxTurns": 5,
+            "maxBudgetUsd": 0.5,
+            "tools": [],
+            "ollamaModel": "gemma4:e4b"
+          }
+        }
+      },
+      {
+        "id": "linnea",
+        "type": "agent",
+        "position": {
+          "x": -100,
+          "y": 1040
+        },
+        "data": {
+          "label": "Linnea",
+          "type": "agent",
+          "config": {
+            "engine": "ollama",
+            "model": "haiku",
+            "systemPrompt": "You are Linnea playing Mafia. You are a TOWNSPERSON (Town). No special abilities.\nRules: 9 players, Town (6) vs Mafia (3). Town wins when all Mafia eliminated.\nUse logic and discussion to find Mafia. Watch for deflection and suspicious behavior.\nKeep responses to 2-3 sentences max.",
+            "maxTurns": 5,
+            "maxBudgetUsd": 0.5,
+            "tools": [],
+            "ollamaModel": "gemma4:e4b"
+          }
+        }
+      },
+      {
+        "id": "talia",
+        "type": "agent",
+        "position": {
+          "x": -100,
+          "y": 1160
+        },
+        "data": {
+          "label": "Talia",
+          "type": "agent",
+          "config": {
+            "engine": "ollama",
+            "model": "haiku",
+            "systemPrompt": "You are Talia playing Mafia. You are a TOWNSPERSON (Town). No special abilities.\nRules: 9 players, Town (6) vs Mafia (3). Town wins when all Mafia eliminated.\nUse logic and discussion to find Mafia. Watch for deflection and suspicious behavior.\nKeep responses to 2-3 sentences max.",
+            "maxTurns": 5,
+            "maxBudgetUsd": 0.5,
+            "tools": [],
+            "ollamaModel": "gemma4:e4b"
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "e_trigger_setup",
+        "source": "trigger",
+        "target": "setup",
+        "targetHandle": "top"
+      },
+      {
+        "id": "e_setup_discuss",
+        "source": "setup",
+        "target": "day_discussion",
+        "targetHandle": "top"
+      },
+      {
+        "id": "e_discuss_vote",
+        "source": "day_discussion",
+        "target": "day_vote",
+        "targetHandle": "top"
+      },
+      {
+        "id": "e_vote_night",
+        "source": "day_vote",
+        "target": "night_phase",
+        "targetHandle": "top"
+      },
+      {
+        "id": "e_night_check",
+        "source": "night_phase",
+        "target": "game_check",
+        "targetHandle": "top"
+      },
+      {
+        "id": "e_check_over",
+        "source": "game_check",
+        "target": "game_over",
+        "sourceHandle": "true",
+        "targetHandle": "top"
+      },
+      {
+        "id": "e_check_loop",
+        "source": "game_check",
+        "target": "day_discussion",
+        "sourceHandle": "false",
+        "targetHandle": "top"
+      },
+      {
+        "id": "e_over_output",
+        "source": "game_over",
+        "target": "output",
+        "targetHandle": "top"
+      },
+      {
+        "id": "e_rowan_discuss",
+        "source": "rowan",
+        "target": "day_discussion",
+        "targetHandle": "participants"
+      },
+      {
+        "id": "e_elara_discuss",
+        "source": "elara",
+        "target": "day_discussion",
+        "targetHandle": "participants"
+      },
+      {
+        "id": "e_soren_discuss",
+        "source": "soren",
+        "target": "day_discussion",
+        "targetHandle": "participants"
+      },
+      {
+        "id": "e_mira_discuss",
+        "source": "mira",
+        "target": "day_discussion",
+        "targetHandle": "participants"
+      },
+      {
+        "id": "e_kael_discuss",
+        "source": "kael",
+        "target": "day_discussion",
+        "targetHandle": "participants"
+      },
+      {
+        "id": "e_orion_discuss",
+        "source": "orion",
+        "target": "day_discussion",
+        "targetHandle": "participants"
+      },
+      {
+        "id": "e_nico_discuss",
+        "source": "nico",
+        "target": "day_discussion",
+        "targetHandle": "participants"
+      },
+      {
+        "id": "e_linnea_discuss",
+        "source": "linnea",
+        "target": "day_discussion",
+        "targetHandle": "participants"
+      },
+      {
+        "id": "e_talia_discuss",
+        "source": "talia",
+        "target": "day_discussion",
+        "targetHandle": "participants"
+      }
+    ],
+    "enabled": true,
+    "createdAt": "2026-04-05T02:00:01.838Z",
+    "updatedAt": "2026-04-08T23:49:10.882Z"
+  }
+}
