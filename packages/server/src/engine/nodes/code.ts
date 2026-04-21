@@ -10,6 +10,7 @@ import { existsSync } from "fs";
 import { resolve as pathResolve, dirname } from "path";
 import type { Workspace } from "../workspace";
 import { buildSubprocessEnv } from "../../agent/subprocess-env";
+import { sessionDirForRun } from "../../lib/workspace";
 import { logger } from "../../lib/logger";
 
 export interface CodeNodeContext {
@@ -196,6 +197,7 @@ export async function executeCode(
             OC_CONCLAVE_ID: String(context.conclaveId),
             OC_RUN_ID: String(context.runId),
             OC_NODE_ID: context.nodeId,
+            OC_SESSION_DIR: sessionDirForRun(context.runId),
           } : {}),
         }),
       });
