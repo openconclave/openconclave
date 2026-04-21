@@ -4,8 +4,12 @@
 # last successful install.
 set -euo pipefail
 
-ROOT="${CLAUDE_PLUGIN_ROOT:?CLAUDE_PLUGIN_ROOT not set}"
-DATA="${CLAUDE_PLUGIN_DATA:?CLAUDE_PLUGIN_DATA not set}"
+ROOT="${CLAUDE_PLUGIN_ROOT:-}"
+DATA="${CLAUDE_PLUGIN_DATA:-}"
+if [ -z "$ROOT" ] || [ -z "$DATA" ]; then
+  echo "openconclave plugin: hook env missing (CLAUDE_PLUGIN_ROOT / DATA)." >&2
+  exit 0
+fi
 
 mkdir -p "$DATA"
 
