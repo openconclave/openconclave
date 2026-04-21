@@ -1,6 +1,6 @@
 {
   "name": "openconclave",
-  "version": "1.0.22",
+  "version": "1.0.23",
   "description": "OpenConclave — multi-agent conclave platform. Installs the local server and MCP tools for managing conclaves from Claude Code.",
   "author": {
     "name": "OpenConclave",
@@ -9,5 +9,19 @@
   "homepage": "https://openconclave.com",
   "repository": "https://github.com/openconclave/oc",
   "license": "MIT",
-  "keywords": ["multi-agent", "orchestration", "conclave", "mcp"]
+  "keywords": ["multi-agent", "orchestration", "conclave", "mcp"],
+  "mcpServers": {
+    "openconclave": {
+      "command": "bun",
+      "args": [
+        "run",
+        "${CLAUDE_PLUGIN_ROOT}/packages/server/src/cli.ts",
+        "mcp"
+      ],
+      "env": {
+        "OC_PLUGIN_ROOT": "${CLAUDE_PLUGIN_ROOT}",
+        "OC_PLUGIN_DATA": "${CLAUDE_PLUGIN_DATA}"
+      }
+    }
+  }
 }
