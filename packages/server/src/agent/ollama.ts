@@ -291,6 +291,10 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
           `[Tool calls: ${(assistantMsg.tool_calls as any[]).map((tc: any) => tc.function.name).join(", ")}]\n`,
         );
 
+        if (sessionFile) {
+          appendFileSync(sessionFile, JSON.stringify(savedMsg) + "\n");
+        }
+
         let routeTo: string | undefined;
         let routeContent: string | undefined;
 
@@ -327,6 +331,9 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
 
           // Add tool result to messages
           messages.push({ role: "tool", content: result });
+          if (sessionFile) {
+            appendFileSync(sessionFile, JSON.stringify({ role: "tool", content: result }) + "\n");
+          }
 
           onOutput?.(`[${fnName} result: ${result.slice(0, 200)}${result.length > 200 ? "..." : ""}]\n`);
         }

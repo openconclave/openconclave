@@ -1,4 +1,4 @@
-import { readFileSync, existsSync } from "fs";
+import { readFileSync, existsSync, appendFileSync } from "fs";
 import { openaiLog } from "./openai-debug";
 import { createRoutingToolChat } from "./openai-routing-tools";
 import { ROUTING_TOOL_NAME } from "./constants";
@@ -149,6 +149,10 @@ export async function runChatCompletions(options: OpenAIRunOptions): Promise<Ope
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         onOutput?.(`[Tool calls: ${(assistantMsg.tool_calls as any[]).map((tc) => tc.function.name).join(", ")}]\n`);
 
+        if (sessionFile) {
+          appendFileSync(sessionFile, JSON.stringify(assistantMsg) + "\n");
+        }
+
         let routeTo: string | undefined;
         let routeContent: string | undefined;
 
@@ -183,11 +187,11 @@ export async function runChatCompletions(options: OpenAIRunOptions): Promise<Ope
             result = `Unknown tool: ${fnName}`;
           }
 
-          messages.push({
-            role: "tool",
-            content: result,
-            tool_call_id: toolCall.id,
-          });
+          const toolMsg = { role: "tool" as const, content: result, tool_call_id: toolCall.id };
+          messages.push(toolMsg);
+          if (sessionFile) {
+            appendFileSync(sessionFile, JSON.stringify(toolMsg) + "\n");
+          }
         }
 
         if (routeTo) {

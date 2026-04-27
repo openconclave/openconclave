@@ -1,4 +1,4 @@
-import { join } from "path";
+import { join, basename } from "path";
 import { existsSync, appendFileSync } from "fs";
 import type { ConclaveNode, ConclaveEdge, AgentConfig, ResolvedAgentConfig, ToolConfig } from "@openconclave/shared";
 import { executeAgent } from "../agent-executor";
@@ -12,15 +12,13 @@ export async function executeAgentNode(
   node: ConclaveNode,
   nodeMap: Map<string, ConclaveNode>,
   edges: ConclaveEdge[],
-  nodeOutputs: Map<string, unknown>,
+  _nodeOutputs: Map<string, unknown>,
   agentSessions: Map<string, string>,
   conclaveContext: string | null,
   input: unknown,
   emit: (event: RunEvent) => void,
   workspace?: Workspace
 ): Promise<unknown> {
-  void nodeOutputs;
-  // Read tools directly from agent config
   const agentConfig = node.data.config as AgentConfig;
   const connectedTools: string[] = [];
   const connectedMcpServers: string[] = [];
@@ -38,9 +36,6 @@ export async function executeAgentNode(
     }
   }
 
-  // Route targets are now self-resolved by executeAgent from edges/nodeMap
-
-  // Clean input — strip routing metadata
   let userMessage: string | null = null;
   if (input !== undefined && input !== null) {
     const inputStr = typeof input === "string" ? input : JSON.stringify(input);
@@ -52,8 +47,6 @@ export async function executeAgentNode(
     }
   }
 
-  // Build system prompt: agent's instructions + conclave context
-  // Tools are read directly from agentConfig.tools[]
   const mergedConfig: ResolvedAgentConfig = {
     ...agentConfig,
     allowedTools: connectedTools,
@@ -76,21 +69,19 @@ export async function executeAgentNode(
   let output: unknown;
 
   if (engine === "claude") {
-    const existingSessionId = agentSessions.get(nodeId);
+    const existingSessionId = agentSessions.get(`${nodeId}:claude`);
     const agentResult = await executeAgent(runId, nodeId, chatConfig, userMessage ?? input, emit, undefined, existingSessionId, workspace, edges, nodeMap);
     output = agentResult.output;
     if (agentResult.sessionId) {
-      agentSessions.set(nodeId, agentResult.sessionId);
+      agentSessions.set(`${nodeId}:claude`, agentResult.sessionId);
     }
   } else {
-    const sessionFile = agentSessions.get(nodeId) ?? join(sessionDirForRun(runId), `${nodeId}.jsonl`);
+    const safeId = basename(nodeId).replace(/[^\w.\-]/g, "_");
+    const sessionFile = agentSessions.get(`${nodeId}:${engine}`) ?? join(sessionDirForRun(runId), `${safeId}.jsonl`);
 
     if (!existsSync(sessionFile)) {
       appendFileSync(sessionFile, JSON.stringify({ role: "system", content: fullSystemPrompt }) + "\n");
     }
-
-    const userContent = userMessage ?? conclaveContext ?? "Start";
-    appendFileSync(sessionFile, JSON.stringify({ role: "user", content: userContent }) + "\n");
 
     const agentResult = await executeAgent(runId, nodeId, chatConfig, userMessage ?? input, emit, undefined, sessionFile, workspace, edges, nodeMap);
     output = agentResult.output;
@@ -108,7 +99,7 @@ export async function executeAgentNode(
     }
     appendFileSync(sessionFile, JSON.stringify({ role: "assistant", content: assistantContent }) + "\n");
 
-    agentSessions.set(nodeId, sessionFile);
+    agentSessions.set(`${nodeId}:${engine}`, sessionFile);
   }
 
   return output;
