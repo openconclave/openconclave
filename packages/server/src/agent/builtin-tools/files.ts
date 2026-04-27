@@ -12,7 +12,7 @@ export function buildFileTools(resolveIn: PathResolver): Record<string, BuiltinT
         type: "function",
         function: {
           name: "read_file",
-          description: "Read the contents of a file",
+          description: "Read the contents of a file. Path is resolved against the agent's working directory. Files larger than 5MB are rejected.",
           parameters: {
             type: "object",
             required: ["path"],
@@ -24,8 +24,10 @@ export function buildFileTools(resolveIn: PathResolver): Record<string, BuiltinT
       },
       execute: async (args) => {
         try {
-          const file = Bun.file(resolveIn(args.path as string));
-          if (!(await file.exists())) return `Error: file not found: ${args.path}`;
+          const path = typeof args.path === "string" ? args.path : "";
+          if (!path) return "Error: path must be a non-empty string.";
+          const file = Bun.file(resolveIn(path));
+          if (!(await file.exists())) return `Error: file not found: ${path}`;
           if (file.size > READ_FILE_CAP_BYTES) {
             return `Error: file exceeds ${READ_FILE_CAP_BYTES / (1024 * 1024)}MB cap (${file.size} bytes). Use grep or a smaller range.`;
           }
@@ -53,13 +55,15 @@ export function buildFileTools(resolveIn: PathResolver): Record<string, BuiltinT
       },
       execute: async (args) => {
         try {
-          const content = args.content as string;
+          const path = typeof args.path === "string" ? args.path : "";
+          if (!path) return "Error: path must be a non-empty string.";
+          const content = typeof args.content === "string" ? args.content : "";
           const byteLen = Buffer.byteLength(content, "utf-8");
           if (byteLen > WRITE_FILE_CAP_BYTES) {
             return `Error: content exceeds ${WRITE_FILE_CAP_BYTES / (1024 * 1024)}MB cap (${byteLen} bytes).`;
           }
-          await Bun.write(resolveIn(args.path as string), content);
-          return `File written: ${args.path}`;
+          await Bun.write(resolveIn(path), content);
+          return `File written: ${path}`;
         } catch (err: unknown) {
           return `Error: ${err instanceof Error ? err.message : String(err)}`;
         }
@@ -93,9 +97,11 @@ export function buildFileTools(resolveIn: PathResolver): Record<string, BuiltinT
       },
       execute: async (args) => {
         try {
-          const filePath = resolveIn(args.path as string);
-          const oldStr = args.old_string as string;
-          const newStr = args.new_string as string;
+          const path = typeof args.path === "string" ? args.path : "";
+          if (!path) return "Error: path must be a non-empty string.";
+          const filePath = resolveIn(path);
+          const oldStr = typeof args.old_string === "string" ? args.old_string : "";
+          const newStr = typeof args.new_string === "string" ? args.new_string : "";
           const replaceAll = args.replace_all === true;
 
           // An empty old_string matches every zero-width gap between characters.
@@ -108,7 +114,7 @@ export function buildFileTools(resolveIn: PathResolver): Record<string, BuiltinT
 
           const file = Bun.file(filePath);
           if (!(await file.exists())) {
-            return `Error: file not found: ${args.path}`;
+            return `Error: file not found: ${path}`;
           }
           if (file.size > READ_FILE_CAP_BYTES) {
             return `Error: file exceeds ${READ_FILE_CAP_BYTES / (1024 * 1024)}MB cap (${file.size} bytes). Use bash + sed/awk for large files.`;
@@ -130,8 +136,12 @@ export function buildFileTools(resolveIn: PathResolver): Record<string, BuiltinT
             updated = content.slice(0, firstIdx) + newStr + content.slice(firstIdx + oldStr.length);
           }
 
+          const updatedBytes = Buffer.byteLength(updated, "utf8");
+          if (updatedBytes > WRITE_FILE_CAP_BYTES) {
+            return `Error: edited content would exceed ${WRITE_FILE_CAP_BYTES / (1024 * 1024)}MB cap (${updatedBytes} bytes).`;
+          }
           await Bun.write(filePath, updated);
-          return `File edited: ${args.path}`;
+          return `File edited: ${path}`;
         } catch (err: unknown) {
           return `Error: ${err instanceof Error ? err.message : String(err)}`;
         }
