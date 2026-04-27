@@ -62,9 +62,13 @@ export async function consumeStream(
           errors?: string[];
         };
         if (resultMsg.subtype === "success") {
-          resultOutput = resultMsg.result ?? "";
-          costUsd = resultMsg.total_cost_usd;
-          sessionId = resultMsg.session_id;
+          return {
+            kind: "success",
+            output: resultMsg.result ?? "",
+            costUsd: resultMsg.total_cost_usd,
+            sessionId: resultMsg.session_id ?? sessionId,
+            thinking,
+          };
         } else {
           return {
             kind: "error",
@@ -106,19 +110,13 @@ function handleAssistant(
     if (block.type === "thinking" && block.thinking) {
       thinking.push({ thinking: block.thinking, signature: block.signature });
       const preview = block.thinking.length > 100
-        ? block.thinking.slice(0, 100) + "…"
+        ? [...block.thinking].slice(0, 100).join("") + "…"
         : block.thinking;
       onOutput?.(`[thinking: ${preview}]\n`);
     } else if (block.type === "tool_use" && block.name) {
-      // Emit one event per tool invocation for observability. Truncate args
-      // to keep run_events manageable — full input is in the SDK stream.
-      let argSummary = "";
-      try {
-        const json = JSON.stringify(block.input ?? {});
-        argSummary = json.length > 200 ? json.slice(0, 200) + "…" : json;
-      } catch {
-        argSummary = "(unserializable)";
-      }
+      // Truncate args to keep run_events small — full input is in the SDK stream.
+      const json = JSON.stringify(block.input ?? {});
+      const argSummary = json.length > 200 ? [...json].slice(0, 200).join("") + "…" : json;
       onOutput?.(`[tool: ${block.name}(${argSummary})]\n`);
     }
   }
@@ -155,7 +153,7 @@ function handleToolResults(
     // Truncate aggressively — full results are available via the session file
     // and may be large. Keep the event stream lightweight.
     const preview = resultText.length > 300
-      ? resultText.slice(0, 300) + "…"
+      ? [...resultText].slice(0, 300).join("") + "…"
       : resultText;
     const tag = block.is_error ? "tool_error" : "tool_result";
     onOutput?.(`[${tag}: ${preview}]\n`);
