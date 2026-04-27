@@ -15,7 +15,7 @@ import type { AgentRunOptions, AgentResult } from "./types";
 
 export type { ThinkingBlock, AgentResult, AgentRunOptions } from "./types";
 export { getCliPath } from "./cli-resolve";
-export { isAllowedModel, ALLOWED_MODEL_ALIASES } from "./model";
+export { isAllowedModel } from "./model";
 
 const CONCLAVE_MCP_SERVER_ID = "openconclave-conclave";
 
@@ -33,8 +33,7 @@ function parseKnowledgeBaseIds(ids: string[] | undefined, runId: number | undefi
 }
 
 export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentResult> {
-  // Require an explicit workspace so we never silently fall back to process.cwd()
-  // (issue #30: that fallback lets agents escape the run's intended working dir).
+  // Require an explicit workspace so we never silently fall back to process.cwd().
   if (!options.workspace) {
     throw new Error("runClaudeAgent requires options.workspace — none was provided");
   }
@@ -140,11 +139,8 @@ export async function runClaudeAgent(options: AgentRunOptions): Promise<AgentRes
     };
   }
 
-  // On success, if the model called the routing tool, its content replaces the
-  // SDK's result string — the route content is the authoritative message to
-  // hand to the next node.
   const routeTo = routingState.routeTo;
-  const output = routeTo && routingState.routeContent ? routingState.routeContent : outcome.output;
+  const output = routeTo && routingState.routeContent !== undefined ? routingState.routeContent : outcome.output;
 
   return {
     success: true,
