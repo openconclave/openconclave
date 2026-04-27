@@ -23,7 +23,7 @@ export interface RoutingState {
 
 export interface BuildConclaveToolsOptions {
   routeTargets?: RouteTarget[];
-  promptConfig?: { nodeId: string; runId: number; senderNode: string; description?: string };
+  promptConfig?: { nodeId: string; runId: number; senderNode: string; nodeLabel: string; conclaveName?: string; description?: string };
   knowledgeBaseIds: number[];
   abortSignal?: AbortSignal;
 }
@@ -77,12 +77,11 @@ function buildRoutingTool(routeTargets: RouteTarget[], routingState: RoutingStat
       content: z.string().max(ROUTE_CONTENT_MAX).describe("Your output message to pass to the next node"),
     },
     async ({ node_id, content }) => {
-      if (routingState.routeTo) {
+      if (routingState.routeTo !== undefined) {
         return { content: [{ type: "text", text: `Error: route already set to ${routingState.routeTo} — cannot route twice.` }] };
       }
       routingState.routeTo = node_id;
       routingState.routeContent = content;
-      // node_id is validated by z.enum(validIds), so target is always defined.
       const target = routeTargets.find((t) => t.nodeId === node_id)!;
       return {
         content: [{ type: "text", text: `Routing to: ${target.label}` }],
@@ -92,7 +91,7 @@ function buildRoutingTool(routeTargets: RouteTarget[], routingState: RoutingStat
 }
 
 function buildAskUserTool(
-  promptConfig: { nodeId: string; runId: number; senderNode: string; description?: string },
+  promptConfig: { nodeId: string; runId: number; senderNode: string; nodeLabel: string; conclaveName?: string; description?: string },
   abortSignal: AbortSignal | undefined,
 ) {
   // Guard against the model parallelizing ask_user calls within one
@@ -108,6 +107,9 @@ function buildAskUserTool(
       question: z.string().describe("The question to ask the user"),
     },
     async ({ question }) => {
+      if (abortSignal?.aborted) {
+        return { content: [{ type: "text", text: "Error: run was cancelled." }] };
+      }
       if (askInFlight) {
         return { content: [{ type: "text", text: "Error: ask_user is already pending — wait for the user's response before asking again." }] };
       }
@@ -130,9 +132,9 @@ function buildAskUserTool(
           data: {
             question,
             waitingForResponse: true,
-            conclaveName: "",
-            nodeLabel: promptConfig.nodeId,
-            senderNode: promptConfig.senderNode ?? "agent",
+            conclaveName: promptConfig.conclaveName ?? "",
+            nodeLabel: promptConfig.nodeLabel,
+            senderNode: promptConfig.senderNode,
             senderType: "agent",
           },
         });

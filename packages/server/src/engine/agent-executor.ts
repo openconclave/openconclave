@@ -67,7 +67,7 @@ export async function executeAgent(
     execute: (args: Record<string, unknown>) => Promise<string>;
   }> = [];
   const promptToolNodeIds = new Set<string>();
-  let firstPromptConfig: { nodeId: string; runId: number; senderNode: string; description?: string } | undefined;
+  let firstPromptConfig: { nodeId: string; runId: number; senderNode: string; nodeLabel: string; conclaveName?: string; description?: string } | undefined;
 
   if (edges && nodeMap) {
     // Check outgoing edges (Agent→Prompt) AND incoming edges (Prompt→Agent)
@@ -103,7 +103,7 @@ export async function executeAgent(
 
           // Save first prompt config for Claude agents (MCP-based ask_user)
           if (!firstPromptConfig) {
-            firstPromptConfig = { nodeId: promptNodeId, runId, senderNode: agentLabel, description: promptDescription };
+            firstPromptConfig = { nodeId: promptNodeId, runId, senderNode: agentLabel, nodeLabel: promptLabel, description: promptDescription };
           }
 
           askUserExtraTools.push({

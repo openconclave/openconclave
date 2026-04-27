@@ -21,7 +21,7 @@ export interface AgentResult {
 export type AgentRunOptions = {
   config: ResolvedAgentConfig;
   routeTargets?: RouteTarget[];
-  promptConfig?: { nodeId: string; runId: number; senderNode: string; description?: string };
+  promptConfig?: { nodeId: string; runId: number; senderNode: string; nodeLabel: string; conclaveName?: string; description?: string };
   sessionId?: string;
   input?: unknown;
   workspace?: Workspace;
