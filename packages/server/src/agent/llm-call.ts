@@ -1,15 +1,3 @@
-/**
- * llm-call.ts — Single-turn LLM call with dynamic tool definitions.
- *
- * Used by the invoke endpoint when `tools` are provided.
- * Each engine gets a lightweight path: prompt + tools in → tool call result out.
- *
- * - Claude: uses in-process SDK MCP server via Agent SDK query()
- * - Ollama: /api/chat with tools
- * - OpenAI: Chat Completions with function calling
- * - Debug: returns first enum value from first tool
- */
-
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 
@@ -46,23 +34,15 @@ interface ToolCallResult {
   };
 }
 
-// ── Engine name constants ─────────────────────────────────────
-
-const ENGINE_DEBUG = "debug";
-const ENGINE_OLLAMA = "ollama";
-const ENGINE_OPENAI = "openai";
-const ENGINE_CLAUDE = "claude";
-
 // ── Main dispatcher ─────────────────────────────────────────
 
 export async function invokeWithTools(options: InvokeWithToolsOptions): Promise<ToolCallResult> {
   const { engine } = options;
 
-  // Log agent task
   const now = new Date().toISOString();
-  const modelName = engine === ENGINE_DEBUG ? "debug"
-    : engine === ENGINE_OLLAMA ? (options.config.ollamaModel ?? "unknown")
-    : engine === ENGINE_OPENAI ? (options.config.openaiModel ?? "unknown")
+  const modelName = engine === "debug" ? "debug"
+    : engine === "ollama" ? (options.config.ollamaModel ?? "unknown")
+    : engine === "openai" ? (options.config.openaiModel ?? "unknown")
     : (options.config.model ?? "sonnet");
 
   const taskResult = await db.insert(agentTasks).values({
@@ -77,24 +57,23 @@ export async function invokeWithTools(options: InvokeWithToolsOptions): Promise<
     createdAt: now,
   }).returning({ id: agentTasks.id });
 
-  let taskId!: number;
+  if (!taskResult[0]) throw new Error("DB insert did not return task row");
+  const taskId = taskResult[0].id;
   let result: ToolCallResult;
 
   try {
-    if (!taskResult[0]) throw new Error("DB insert did not return task row");
-    taskId = taskResult[0].id;
     options.emit({ type: "agent:started", runId: options.runId, nodeId: options.nodeId, data: { taskId, engine } });
     switch (engine) {
-      case ENGINE_DEBUG:
+      case "debug":
         result = invokeDebug(options);
         break;
-      case ENGINE_OLLAMA:
+      case "ollama":
         result = await invokeOllama(options);
         break;
-      case ENGINE_OPENAI:
+      case "openai":
         result = await invokeOpenAI(options);
         break;
-      case ENGINE_CLAUDE:
+      case "claude":
         result = await invokeClaude(options);
         break;
       default:
@@ -137,6 +116,10 @@ function invokeDebug(options: InvokeWithToolsOptions): ToolCallResult {
       mockInput[key] = 0;
     } else if (schema.type === "boolean") {
       mockInput[key] = true;
+    } else if (schema.type === "object") {
+      mockInput[key] = {};
+    } else if (schema.type === "array") {
+      mockInput[key] = [];
     }
   }
 
@@ -181,6 +164,7 @@ async function invokeOllama(options: InvokeWithToolsOptions): Promise<ToolCallRe
       stream: false,
       options: { num_ctx: 32768 },
     }),
+    signal: options.abortController?.signal,
   });
 
   if (!res.ok) {
@@ -188,18 +172,29 @@ async function invokeOllama(options: InvokeWithToolsOptions): Promise<ToolCallRe
     throw new Error(`Ollama API error ${res.status}: ${errText}`);
   }
 
-  const data = await res.json() as { message: { content?: string; tool_calls?: Array<{ function: { name: string; arguments: Record<string, unknown> } }> } };
+  const data = await res.json() as { message: { content?: string; tool_calls?: Array<{ function: { name: string; arguments: Record<string, unknown> | string } }> } };
   const msg = data.message;
 
   if (msg.tool_calls && msg.tool_calls.length > 0) {
     const tc = msg.tool_calls[0]!;
+    let args: Record<string, unknown>;
+    if (typeof tc.function.arguments === "string") {
+      try {
+        args = JSON.parse(tc.function.arguments);
+      } catch {
+        throw new Error(
+          `Ollama returned unparseable tool arguments for "${tc.function.name}": ${tc.function.arguments.slice(0, 200)}`
+        );
+      }
+    } else {
+      args = tc.function.arguments;
+    }
     return {
-      output: JSON.stringify({ tool_name: tc.function.name, tool_input: tc.function.arguments }),
-      tool_call: { name: tc.function.name, input: tc.function.arguments },
+      output: JSON.stringify({ tool_name: tc.function.name, tool_input: args }),
+      tool_call: { name: tc.function.name, input: args },
     };
   }
 
-  // Fallback: no tool call, return text
   return { output: msg.content ?? "" };
 }
 
@@ -248,6 +243,7 @@ async function invokeOpenAI(options: InvokeWithToolsOptions): Promise<ToolCallRe
       tools: openaiTools,
       tool_choice: "auto",
     }),
+    signal: options.abortController?.signal,
   });
 
   if (!res.ok) {
@@ -309,9 +305,10 @@ export function isPublicHttpUrl(url: string): boolean {
   if (u.protocol !== "http:" && u.protocol !== "https:") return false;
   const host = u.hostname.toLowerCase();
   if (host === "localhost" || host === "0.0.0.0") return false;
-  if (host === "::1" || host === "[::1]") return false;
-  if (host.startsWith("[fe80:") || host.startsWith("[fc") || host.startsWith("[fd")) return false;
-  if (host.includes("::ffff:") || host.includes(":ffff:")) return false;
+  const bareHost = host.startsWith("[") ? host.slice(1, -1) : host;
+  if (bareHost === "::1") return false;
+  if (bareHost.startsWith("fe80:") || bareHost.startsWith("fc") || bareHost.startsWith("fd")) return false;
+  if (bareHost.includes("::ffff:")) return false;
   const m = host.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
   if (m) {
     const a = Number(m[1]);
@@ -464,7 +461,6 @@ async function invokeClaude(options: InvokeWithToolsOptions): Promise<ToolCallRe
   });
 
   for await (const _message of agentQuery) {
-    // Consume the generator — we just need it to complete
     void _message;
   }
 
