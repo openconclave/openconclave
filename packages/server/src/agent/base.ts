@@ -18,7 +18,7 @@ import { Workspace } from "../engine/workspace";
 
 const KNOWLEDGE_TOOL_NAMES = new Set(["search_knowledge", "knowledge_fetch", "knowledge_add"]);
 
-export interface ResolvedTool {
+interface ResolvedTool {
   name: string;
   description: string;
   parameters: Record<string, unknown>;
@@ -112,9 +112,7 @@ export class AgentBase {
       });
       return;
     }
-    const knowledgeToolNames = ["search_knowledge", "knowledge_fetch", "knowledge_add"];
-
-    for (const name of knowledgeToolNames) {
+    for (const name of KNOWLEDGE_TOOL_NAMES) {
       const bt = builtins[name];
       if (!bt) continue;
 
@@ -122,20 +120,19 @@ export class AgentBase {
         const patchedTool = JSON.parse(JSON.stringify(bt.tool));
         const param = patchedTool.function?.parameters?.properties?.knowledge_base_id;
         if (param) {
-          param.description = `Knowledge base ID to search. Available IDs: ${kbIds.join(", ")}. If omitted, searches all connected knowledge bases.`;
+          param.description = `Knowledge base ID to search. Available IDs: ${[...allowedNumericIds].join(", ")}. If omitted, searches all connected knowledge bases.`;
         }
         const scopedExecute = async (args: Record<string, unknown>) => {
-          // Validate query+topK unconditionally — the fast-path (kb_id present)
-          // previously skipped these, letting `top_k: 1_000_000` reach the DB.
+          // query must be non-empty; top_k is capped at 100 to protect the DB.
           if (typeof args.query !== "string" || args.query.length === 0) {
             return "Error: query must be a non-empty string.";
           }
-          const topK = typeof args.top_k === "number" && args.top_k > 0 ? args.top_k : 5;
+          const topK = typeof args.top_k === "number" && args.top_k > 0 ? Math.min(args.top_k, 100) : 5;
 
           if (args.knowledge_base_id !== undefined && args.knowledge_base_id !== null) {
             const id = Number(args.knowledge_base_id);
             if (!allowedNumericIds.has(id)) {
-              return `Error: knowledge_base_id ${args.knowledge_base_id} not connected to this agent. Available IDs: ${kbIds.join(", ")}.`;
+              return `Error: knowledge_base_id ${args.knowledge_base_id} not connected to this agent. Available IDs: ${[...allowedNumericIds].join(", ")}.`;
             }
             return bt.execute({ ...args, knowledge_base_id: id, query: args.query, top_k: topK });
           }
@@ -163,18 +160,18 @@ export class AgentBase {
         const patchedTool = JSON.parse(JSON.stringify(bt.tool));
         const param = patchedTool.function?.parameters?.properties?.knowledge_base_id;
         if (param) {
-          param.description = `${param.description ?? "Knowledge base ID"}. Available IDs: ${kbIds.join(", ")}.`;
+          param.description = `${param.description ?? "Knowledge base ID"}. Available IDs: ${[...allowedNumericIds].join(", ")}.`;
         }
         const scopedExecute = async (args: Record<string, unknown>) => {
           const raw = args.knowledge_base_id;
           // Reject null/undefined explicitly — Number(null) === 0 would otherwise
           // slip into allowedNumericIds.has() with id 0.
           if (raw === null || raw === undefined) {
-            return `Error: knowledge_base_id is required. Available IDs: ${kbIds.join(", ")}.`;
+            return `Error: knowledge_base_id is required. Available IDs: ${[...allowedNumericIds].join(", ")}.`;
           }
           const id = Number(raw);
           if (!allowedNumericIds.has(id)) {
-            return `Error: knowledge_base_id ${raw} not connected to this agent. Available IDs: ${kbIds.join(", ")}.`;
+            return `Error: knowledge_base_id ${raw} not connected to this agent. Available IDs: ${[...allowedNumericIds].join(", ")}.`;
           }
           return bt.execute({ ...args, knowledge_base_id: id });
         };
@@ -339,7 +336,6 @@ export class AgentBase {
 
   private addBuiltin(bt: BuiltinTool): void {
     const name = bt.tool.function.name;
-    // Avoid duplicates
     if (this.toolExecutors.has(name)) return;
     this.tools.push({
       name,
@@ -366,9 +362,5 @@ export class AgentBase {
       description: t.description,
       parameters: t.parameters,
     }));
-  }
-
-  getToolIds(): string[] {
-    return this.tools.map((t) => t.name);
   }
 }
