@@ -12,24 +12,30 @@ import type { ConclaveDefinition, ConclaveNode, ConclaveEdge } from "@openconcla
 import type { QueueEntry, RunEvent } from "./types";
 import { Workspace } from "./workspace";
 
-// Persistent session store for chat conclaves — in-memory cache keyed by runId:nodeId.
-// Falls back to DB checkpoint on miss (survives server restarts).
-// Capped at MAX_PERSISTENT_SESSIONS entries; oldest entry is evicted when the limit is
-// reached to prevent unbounded memory growth on long-running servers.
+// Capped at MAX_PERSISTENT_SESSIONS entries; least-recently-used entry is evicted when
+// the limit is reached to prevent unbounded memory growth on long-running servers.
 const MAX_PERSISTENT_SESSIONS = 256;
 const persistentSessions = new Map<string, string>();
 
-export function getPersistentSession(runId: number, nodeId: string): string | undefined {
-  return persistentSessions.get(`${runId}:${nodeId}`);
+function getPersistentSession(runId: number, nodeId: string): string | undefined {
+  const key = `${runId}:${nodeId}`;
+  const value = persistentSessions.get(key);
+  if (value !== undefined) {
+    persistentSessions.delete(key);
+    persistentSessions.set(key, value);
+  }
+  return value;
 }
 
-export function setPersistentSession(runId: number, nodeId: string, sessionId: string): void {
-  if (persistentSessions.size >= MAX_PERSISTENT_SESSIONS) {
-    // Map preserves insertion order — delete the oldest entry first (FIFO eviction).
-    const oldestKey = persistentSessions.keys().next().value;
-    if (oldestKey !== undefined) persistentSessions.delete(oldestKey);
+function setPersistentSession(runId: number, nodeId: string, sessionId: string): void {
+  const key = `${runId}:${nodeId}`;
+  if (persistentSessions.has(key)) {
+    persistentSessions.delete(key);
+  } else if (persistentSessions.size >= MAX_PERSISTENT_SESSIONS) {
+    // Map preserves insertion order — evict the least-recently-used entry.
+    persistentSessions.delete(persistentSessions.keys().next().value!);
   }
-  persistentSessions.set(`${runId}:${nodeId}`, sessionId);
+  persistentSessions.set(key, sessionId);
 }
 
 // Active run workspaces — allows the API to update cwd dynamically (e.g. from a code node).
@@ -147,7 +153,6 @@ export async function executeGraph(
     }
   }
 
-  // Resolve workspace (working directory) from trigger payload / config
   const triggerNode = triggerNodeId
     ? nodes.find((n) => n.id === triggerNodeId)
     : nodes.find((n) => n.data.type === "trigger");
@@ -163,7 +168,6 @@ export async function executeGraph(
     : null;
 
   try {
-    // Find entry point
     let entryNodes: ConclaveNode[];
     if (triggerNodeId) {
       const triggerNode = nodes.find((n) => n.id === triggerNodeId);
@@ -204,7 +208,6 @@ export async function executeGraph(
         );
       }
 
-      // Check cancellation
       const [run] = await db.select().from(runs).where(eq(runs.id, runId));
       if (run?.status === "cancelled") {
         emit({ type: "run:completed", runId, data: { status: "cancelled" } });
@@ -289,7 +292,8 @@ export async function executeGraph(
               edges,
               nodeMap,
               nodeOutputs,
-              pendingInputs
+              pendingInputs,
+              firedMerges
             );
           }
 
@@ -313,7 +317,7 @@ export async function executeGraph(
           // completedNodes.add + writeCheckpoint come AFTER so a validation error in
           // resolveNextEntries (e.g. unknown __routeTo) does not poison the checkpoint.
           checkpointOutputs.set(entry.nodeId, output);
-          const nextEntries = resolveNextEntries(entry, node, output, edges, nodeMap, nodeOutputs, pendingInputs);
+          const nextEntries = resolveNextEntries(entry, node, output, edges, nodeMap, nodeOutputs, pendingInputs, firedMerges);
           completedNodes.add(entry.nodeId);
           await writeCheckpoint(runId, entry.nodeId, checkpointOutputs, completedNodes, agentSessions);
           return nextEntries;
@@ -344,7 +348,7 @@ export async function executeGraph(
     // the same node (meaning the resume re-executed it). Nodes whose ONLY tasks
     // are interrupted are orphans — the resume skipped them without re-running.
     // This guards against the bug where resume marks runs success without
-    // actually executing everything. See issue #27.
+    // actually executing everything.
     const allTasks = await db
       .select({ nodeId: agentTasks.nodeId, status: agentTasks.status })
       .from(agentTasks)
@@ -409,8 +413,7 @@ export async function executeGraph(
  * stores values that can be safely passed back to `resolveNextEntries` on any future resume
  * cycle, preserving `__conditionResult` and `__routeTo` for conditional/routing nodes.
  *
- * Each row is a complete accumulated snapshot (O(n²) storage for n nodes). Acceptable for
- * Phase 1. Phase 3 cleanup: delete all but the latest checkpoint row once a run succeeds.
+ * Each row is a complete accumulated snapshot (O(n²) storage for n nodes).
  *
  * Never throws — a missed checkpoint must not abort conclave execution. The run falls back
  * to an earlier checkpoint (or re-executes from scratch) on the next resume.
@@ -448,8 +451,10 @@ function propagateDeadBranch(
   prunedStart: string,
   edges: ConclaveEdge[],
   nodeMap: Map<string, ConclaveNode>,
-  pendingInputs: Map<string, Map<string, unknown>>
-): void {
+  pendingInputs: Map<string, Map<string, unknown>>,
+  firedMerges: Set<string>
+): QueueEntry[] {
+  const readyMerges: QueueEntry[] = [];
   const visited = new Set<string>();
   const stack: Array<{ nodeId: string; lastBeforeMerge: string }> = [
     { nodeId: prunedStart, lastBeforeMerge: prunedStart },
@@ -464,10 +469,18 @@ function propagateDeadBranch(
     if (!node) continue;
 
     if (node.data.type === "merge") {
+      if (firedMerges.has(nodeId)) continue;
       if (!pendingInputs.has(nodeId)) {
         pendingInputs.set(nodeId, new Map());
       }
       pendingInputs.get(nodeId)!.set(lastBeforeMerge, undefined);
+      const incomingEdges = getIncomingEdges(nodeId, edges);
+      if (pendingInputs.get(nodeId)!.size >= incomingEdges.length) {
+        readyMerges.push({ nodeId, triggeredBy: lastBeforeMerge });
+        // Leave pendingInputs and firedMerges for the fan-in loop to update when
+        // this entry is dequeued — doing it here would cause firedMerges.has(M)
+        // to be true before executeNode runs, silently dropping the merge.
+      }
       continue;
     }
 
@@ -475,6 +488,8 @@ function propagateDeadBranch(
       stack.push({ nodeId: edge.target, lastBeforeMerge: nodeId });
     }
   }
+
+  return readyMerges;
 }
 
 // ── Next-node resolution ────────────────────────────────────
@@ -486,11 +501,11 @@ function resolveNextEntries(
   edges: ConclaveEdge[],
   nodeMap: Map<string, ConclaveNode>,
   nodeOutputs: Map<string, unknown>,
-  pendingInputs: Map<string, Map<string, unknown>>
+  pendingInputs: Map<string, Map<string, unknown>>,
+  firedMerges: Set<string>
 ): QueueEntry[] {
   const next: QueueEntry[] = [];
 
-  // Chat trigger terminal — don't propagate
   if ((output as Record<string, unknown>)?.__chatTerminal) {
     return next;
   }
@@ -511,7 +526,8 @@ function resolveNextEntries(
       } else if (!edge.sourceHandle) {
         next.push({ nodeId: edge.target, triggeredBy: entry.nodeId });
       } else {
-        propagateDeadBranch(edge.target, edges, nodeMap, pendingInputs);
+        const readyMerges = propagateDeadBranch(edge.target, edges, nodeMap, pendingInputs, firedMerges);
+        next.push(...readyMerges);
       }
     }
   } else if (node.data.type === "agent" && outgoing.length >= 2) {
@@ -551,7 +567,7 @@ function resolveNextEntries(
     }
 
     if (routeTo) {
-      const targetEdge = outgoing.find((e) => e.target === routeTo);
+      const targetEdge = forwardEdges.find((e) => e.target === routeTo);
       if (targetEdge) {
         next.push({ nodeId: targetEdge.target, triggeredBy: entry.nodeId });
       } else {
