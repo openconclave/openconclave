@@ -10,8 +10,6 @@ import type { ConclaveDefinition } from "@openconclave/shared";
 
 import type { RunEvent, EventCallback } from "./types";
 
-// Re-export types for consumers
-export type { RunEvent, EventCallback } from "./types";
 
 // ── Executor ────────────────────────────────────────────────
 
@@ -21,11 +19,12 @@ function applyAttachmentsToPayload(payload: unknown, saved: SavedAttachment[]): 
   const hint = `[${saved.length} attachment(s): ${names}. Call list_attachments to see them, read_attachment to read, grep_attachment to search.]`;
   if (typeof payload === "string") return `${hint}\n\n${payload}`;
   if (payload == null) return hint;
-  return { attachments: saved, payload };
+  return { attachments: saved, payload, _hint: hint };
 }
 
 export class ConclaveExecutor {
   private readonly onEvent?: EventCallback;
+  private readonly runLocks = new Map<number, Promise<void>>();
 
   constructor(onEvent?: EventCallback) {
     this.onEvent = onEvent;
@@ -43,12 +42,17 @@ export class ConclaveExecutor {
     const saved = saveAttachmentsForRun(runId, attachments);
     const payload = applyAttachmentsToPayload(triggerPayload, saved);
 
-    executeGraph(runId, conclave, emit, payload, triggerNodeId).catch(
-      (err: unknown) => {
+    const prev = this.runLocks.get(runId) ?? Promise.resolve();
+    const next = prev.then(() =>
+      executeGraph(runId, conclave, emit, payload, triggerNodeId).catch((err: unknown) => {
         const message = err instanceof Error ? err.message : String(err);
         logger.error(`Run ${runId} continued message failed`, { error: message });
-      }
+      })
     );
+    this.runLocks.set(runId, next);
+    next.then(() => {
+      if (this.runLocks.get(runId) === next) this.runLocks.delete(runId);
+    });
   }
 
   async execute(
@@ -97,12 +101,10 @@ export class ConclaveExecutor {
    * runs from scratch — equivalent to a clean retry with at-least-once semantics.
    */
   async resume(runId: number, conclave: ConclaveDefinition): Promise<void> {
-    const [latestCp] = await db
-      .select()
-      .from(checkpoints)
-      .where(eq(checkpoints.runId, runId))
-      .orderBy(desc(checkpoints.id))
-      .limit(1);
+    const [[latestCp], [run]] = await Promise.all([
+      db.select().from(checkpoints).where(eq(checkpoints.runId, runId)).orderBy(desc(checkpoints.id)).limit(1),
+      db.select({ triggerPayload: runs.triggerPayload }).from(runs).where(eq(runs.id, runId)).limit(1),
+    ]);
 
     const nodes = (conclave.nodes ?? []) as Array<{ id: string; data?: { type?: string } }>;
     const triggerNode = nodes.find((n) => n.data?.type === "trigger");
@@ -110,7 +112,7 @@ export class ConclaveExecutor {
 
     this.emit({ type: "run:started", runId });
 
-    executeGraph(runId, conclave, emit, undefined, triggerNode?.id, latestCp?.id).catch(
+    executeGraph(runId, conclave, emit, run?.triggerPayload ?? undefined, triggerNode?.id, latestCp?.id).catch(
       (err: unknown) => {
         const message = err instanceof Error ? err.message : String(err);
         logger.error(`Run ${runId} resume failed`, { error: message });
