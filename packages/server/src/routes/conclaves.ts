@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
+import { z } from "zod";
 import { eq } from "drizzle-orm";
 
 import { db } from "../db/client";
@@ -7,6 +8,7 @@ import { conclaves, runs, agentTasks, runEvents, checkpoints, knowledgeBases } f
 import {
   createConclaveSchema,
   updateConclaveSchema,
+  importConclaveSchema,
   AppError,
   VERSION,
 } from "@openconclave/shared";
@@ -16,7 +18,6 @@ import type {
   ConclaveExportPayload,
   ConclaveExportRole,
   ConclaveExportKB,
-  ConclaveImportRequest,
 } from "@openconclave/shared";
 
 export const conclaveRoutes = new Hono()
@@ -36,20 +37,22 @@ export const conclaveRoutes = new Hono()
     const body = c.req.valid("json");
     const now = new Date().toISOString();
 
-    const result = await db.insert(conclaves).values({
-      name: body.name,
-      description: body.description,
-      definition: { ...body, version: VERSION, enabled: true, createdAt: now, updatedAt: now },
-      enabled: true,
-      createdAt: now,
-      updatedAt: now,
-    }).returning({ id: conclaves.id });
-
-    const id = result[0]!.id;
-    // Update definition with the generated ID
-    await db.update(conclaves)
-      .set({ definition: { id, ...body, version: VERSION, enabled: true, createdAt: now, updatedAt: now } })
-      .where(eq(conclaves.id, id));
+    const id = db.transaction((tx) => {
+      const rows = tx.insert(conclaves).values({
+        name: body.name,
+        description: body.description,
+        definition: { ...body, version: VERSION, enabled: true, createdAt: now, updatedAt: now },
+        enabled: true,
+        createdAt: now,
+        updatedAt: now,
+      }).returning({ id: conclaves.id }).all();
+      const newId = rows[0]!.id;
+      tx.update(conclaves)
+        .set({ definition: { id: newId, ...body, version: VERSION, enabled: true, createdAt: now, updatedAt: now } })
+        .where(eq(conclaves.id, newId))
+        .run();
+      return newId;
+    });
 
     return c.json({ id, ...body, enabled: true, createdAt: now, updatedAt: now }, 201);
   })
@@ -79,7 +82,6 @@ export const conclaveRoutes = new Hono()
     return c.json(updated.definition);
   })
 
-  // ── Export ─────────────────────────────────────────────────
   .get("/:id/export", async (c) => {
     const id = Number(c.req.param("id"));
     const [row] = await db.select().from(conclaves).where(eq(conclaves.id, id));
@@ -97,7 +99,6 @@ export const conclaveRoutes = new Hono()
       if (node.data.type !== "agent") continue;
       const cfg = node.data.config as AgentConfig;
 
-      // Build a provider signature to group identical configs
       const sig = JSON.stringify({
         engine: cfg.engine,
         model: cfg.model,
@@ -131,16 +132,15 @@ export const conclaveRoutes = new Hono()
       }
       roleMap.get(sig)!.nodeIds.push(node.id);
 
-      // Strip provider fields from exported node, add role ref
-      const exportCfg = node.data.config as Record<string, unknown>;
+      const exportCfg = { ...(node.data.config as Record<string, unknown>) };
+      node.data.config = exportCfg;
       delete exportCfg.engine;
       delete exportCfg.model;
       delete exportCfg.ollamaModel;
       delete exportCfg.providerId;
       delete exportCfg.openaiModel;
-      exportCfg._role = roleMap.get(sig)!.id;
+      exportCfg.__ocExportRole = roleMap.get(sig)!.id;
 
-      // Collect KB references from tools
       if (cfg.tools) {
         for (const tool of cfg.tools) {
           if (tool.toolType === "knowledge" && !kbMap.has(tool.toolId)) {
@@ -150,7 +150,6 @@ export const conclaveRoutes = new Hono()
       }
     }
 
-    // Enrich KB stubs with actual names/descriptions from DB
     if (kbMap.size > 0) {
       const allKbs = await db.select().from(knowledgeBases);
       for (const kb of allKbs) {
@@ -184,25 +183,14 @@ export const conclaveRoutes = new Hono()
     return c.json(payload);
   })
 
-  // ── Import ─────────────────────────────────────────────────
-  .post("/import", async (c) => {
-    let body: ConclaveImportRequest;
-    try {
-      body = await c.req.json() as ConclaveImportRequest;
-    } catch {
-      throw AppError.validation("Invalid JSON body");
-    }
-
-    const { payload, roleMappings } = body;
-    if (payload?.formatVersion !== 1) {
-      throw AppError.validation("Unsupported format version");
-    }
+  .post("/import", zValidator("json", importConclaveSchema), async (c) => {
+    const { payload, roleMappings } = c.req.valid("json");
 
     const nodes = payload.conclave.nodes.map((node) => {
       if (node.data.type !== "agent") return node;
       const cfg = node.data.config as Record<string, unknown>;
-      const roleId = cfg._role as string | undefined;
-      delete cfg._role;
+      const roleId = cfg.__ocExportRole as string | undefined;
+      delete cfg.__ocExportRole;
 
       if (roleId && roleMappings[roleId]) {
         const mapping = roleMappings[roleId];
@@ -216,81 +204,89 @@ export const conclaveRoutes = new Hono()
       return node;
     });
 
-    // Create empty KBs for referenced ones and remap tool IDs
-    const kbIdMap = new Map<string, number>();
-    for (const kbStub of payload.knowledgeBases ?? []) {
+    const { id, kbIdMap } = db.transaction((tx) => {
       const now = new Date().toISOString();
-      const [created] = await db.insert(knowledgeBases).values({
-        name: kbStub.name,
-        description: kbStub.description ?? null,
-        createdAt: now,
-        updatedAt: now,
-      }).returning({ id: knowledgeBases.id });
-      kbIdMap.set(kbStub.originalId, created!.id);
-    }
+      const kbIdMap = new Map<string, number>();
 
-    // Remap KB tool references in agent nodes
-    for (const node of nodes) {
-      if (node.data.type !== "agent") continue;
-      const cfg = node.data.config as AgentConfig;
-      if (!cfg.tools) continue;
-      for (const tool of cfg.tools) {
-        if (tool.toolType === "knowledge") {
-          const newId = kbIdMap.get(tool.toolId);
-          if (newId !== undefined) {
+      for (const kbStub of payload.knowledgeBases) {
+        const [created] = tx.insert(knowledgeBases).values({
+          name: kbStub.name,
+          description: kbStub.description ?? null,
+          createdAt: now,
+          updatedAt: now,
+        }).returning({ id: knowledgeBases.id }).all();
+        kbIdMap.set(kbStub.originalId, created!.id);
+      }
+
+      for (const node of nodes) {
+        if (node.data.type !== "agent") continue;
+        const cfg = node.data.config as AgentConfig;
+        if (!cfg.tools) continue;
+        for (const tool of cfg.tools) {
+          if (tool.toolType === "knowledge") {
+            const newId = kbIdMap.get(tool.toolId);
+            if (newId === undefined) {
+              throw AppError.validation(`Knowledge tool references undeclared KB: ${tool.toolId}`);
+            }
             tool.toolId = String(newId);
           }
         }
       }
-    }
 
-    // Create the conclave
-    const now = new Date().toISOString();
-    const conclaveDef = {
-      name: payload.conclave.name,
-      description: payload.conclave.description,
-      toolName: payload.conclave.toolName,
-      version: payload.conclave.version ?? VERSION,
-      nodes,
-      edges: payload.conclave.edges,
-      enabled: true,
-      createdAt: now,
-      updatedAt: now,
-    };
+      const now2 = new Date().toISOString();
+      const conclaveDef = {
+        name: payload.conclave.name,
+        description: payload.conclave.description,
+        toolName: payload.conclave.toolName,
+        version: payload.conclave.version ?? VERSION,
+        nodes,
+        edges: payload.conclave.edges,
+        enabled: true,
+        createdAt: now2,
+        updatedAt: now2,
+      };
 
-    const result = await db.insert(conclaves).values({
-      name: conclaveDef.name,
-      description: conclaveDef.description,
-      definition: conclaveDef,
-      enabled: true,
-      createdAt: now,
-      updatedAt: now,
-    }).returning({ id: conclaves.id });
+      const rows = tx.insert(conclaves).values({
+        name: conclaveDef.name,
+        description: conclaveDef.description,
+        definition: conclaveDef,
+        enabled: true,
+        createdAt: now2,
+        updatedAt: now2,
+      }).returning({ id: conclaves.id }).all();
 
-    const id = result[0]!.id;
-    await db.update(conclaves)
-      .set({ definition: { ...conclaveDef, id } })
-      .where(eq(conclaves.id, id));
+      const id = rows[0]!.id;
+      tx.update(conclaves)
+        .set({ definition: { ...conclaveDef, id } })
+        .where(eq(conclaves.id, id))
+        .run();
+
+      return { id, kbIdMap };
+    });
 
     return c.json({
       id,
-      name: conclaveDef.name,
+      name: payload.conclave.name,
       knowledgeBasesCreated: [...kbIdMap.entries()].map(([orig, newId]) => ({ originalId: orig, newId })),
     }, 201);
   })
 
-  .delete("/:id", async (c) => {
-    const id = Number(c.req.param("id"));
+  .delete("/:id", zValidator("param", z.object({ id: z.coerce.number().int().positive() })), async (c) => {
+    const { id } = c.req.valid("param");
 
-    // Delete related data first (cascade)
-    const conclaveRuns = await db.select().from(runs).where(eq(runs.conclaveId, id));
-    for (const run of conclaveRuns) {
-      await db.delete(checkpoints).where(eq(checkpoints.runId, run.id));
-      await db.delete(runEvents).where(eq(runEvents.runId, run.id));
-      await db.delete(agentTasks).where(eq(agentTasks.runId, run.id));
-    }
-    await db.delete(runs).where(eq(runs.conclaveId, id));
-    await db.delete(conclaves).where(eq(conclaves.id, id));
+    db.transaction((tx) => {
+      const exists = tx.select({ id: conclaves.id }).from(conclaves).where(eq(conclaves.id, id)).get();
+      if (!exists) throw AppError.notFound("Conclave", String(id));
+
+      const conclaveRuns = tx.select().from(runs).where(eq(runs.conclaveId, id)).all();
+      for (const run of conclaveRuns) {
+        tx.delete(checkpoints).where(eq(checkpoints.runId, run.id)).run();
+        tx.delete(runEvents).where(eq(runEvents.runId, run.id)).run();
+        tx.delete(agentTasks).where(eq(agentTasks.runId, run.id)).run();
+      }
+      tx.delete(runs).where(eq(runs.conclaveId, id)).run();
+      tx.delete(conclaves).where(eq(conclaves.id, id)).run();
+    });
 
     return c.json({ deleted: true });
   });

@@ -139,3 +139,41 @@ export const createConclaveSchema = z.object({
 export const updateConclaveSchema = createConclaveSchema.partial().extend({
   enabled: z.boolean().optional(),
 });
+
+const importRoleValueSchema = z.object({
+  engine: z.string().optional(),
+  model: z.string().optional(),
+  ollamaModel: z.string().optional(),
+  providerId: z.string().optional(),
+  openaiModel: z.string().optional(),
+});
+
+const exportPayloadSchema = z.object({
+  formatVersion: z.literal(1),
+  ocVersion: z.string(),
+  exportedAt: z.string(),
+  conclave: z.object({
+    name: z.string().min(1).max(100),
+    description: z.string().optional(),
+    toolName: z.string().optional(),
+    version: z.string().optional(),
+    nodes: z.array(conclaveNodeSchema),
+    edges: z.array(conclaveEdgeSchema),
+  }),
+  roles: z.array(z.object({
+    id: z.string(),
+    label: z.string(),
+    original: importRoleValueSchema,
+    nodeIds: z.array(z.string()),
+  })),
+  knowledgeBases: z.array(z.object({
+    originalId: z.string(),
+    name: z.string(),
+    description: z.string().optional(),
+  })),
+});
+
+export const importConclaveSchema = z.object({
+  payload: exportPayloadSchema,
+  roleMappings: z.record(importRoleValueSchema).default({}),
+});

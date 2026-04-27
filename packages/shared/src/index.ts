@@ -65,6 +65,7 @@ export {
   conclaveEdgeSchema,
   createConclaveSchema,
   updateConclaveSchema,
+  importConclaveSchema,
 } from "./schemas/conclave.schema";
 
 export { runFilterSchema } from "./schemas/agent.schema";
