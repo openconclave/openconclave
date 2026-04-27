@@ -54,6 +54,8 @@ export interface ResolvedAgentConfig extends AgentConfig {
   /** Full tool configs for registry-sourced MCP servers */
   mcpTools?: ToolConfig[];
   knowledgeBases: string[];
+  /** Expose the send_telegram Ollama tool when true. Prefer this over inferring from mcpServers names. */
+  enableTelegramTool?: boolean;
 }
 
 export interface ConditionConfig {

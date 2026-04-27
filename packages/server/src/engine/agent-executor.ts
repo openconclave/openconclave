@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { join } from "path";
+import { join, basename } from "path";
 
 import { db } from "../db/client";
 import { agentTasks, settings } from "../db/schema";
@@ -32,11 +32,10 @@ export function mapOllamaTools(config: ResolvedAgentConfig): string[] {
     }
   }
 
-  if (config.mcpServers?.includes("telegram-voice")) {
+  if (config.enableTelegramTool) {
     tools.push("send_telegram");
   }
 
-  // Add knowledge tools when agent has knowledge bases attached
   if (config.knowledgeBases && config.knowledgeBases.length > 0) {
     tools.push("search_knowledge", "knowledge_fetch", "knowledge_add");
   }
@@ -74,7 +73,7 @@ export async function executeAgent(
     // Check outgoing edges (Agent→Prompt) AND incoming edges (Prompt→Agent)
     // Both directions indicate a bidirectional Channel Loop connection
     const outEdges = getOutgoingEdges(nodeId, edges);
-    const promptConnections: { promptNodeId: string; promptNode: typeof nodeMap extends Map<string, infer V> ? V : never }[] = [];
+    const promptConnections: { promptNodeId: string; promptNode: ConclaveNode }[] = [];
 
     for (const e of outEdges) {
       const target = nodeMap.get(e.target);
@@ -111,7 +110,7 @@ export async function executeAgent(
             tool: {
               type: "function",
               function: {
-                name: "ask_user",
+                name: `ask_user_${promptLabel.replace(/\W+/g, "_")}`,
                 description: promptDescription || "Ask the user a question and wait for their response. Use when you need clarification or more information.",
                 parameters: {
                   type: "object",
@@ -133,13 +132,17 @@ export async function executeAgent(
                   waitingForResponse: true,
                   conclaveName: "",
                   nodeLabel: promptLabel,
-                  senderNode: agentLabel,
+                  senderNode: nodeMap.get(nodeId)?.data.label ?? nodeId,
                   senderType: "agent",
                 },
               });
               return registerPrompt(runId, promptNodeId, question, null);
             },
           });
+    }
+
+    if (engine === "claude" && promptConnections.length > 1) {
+      logger.warn(`Agent ${nodeId} has ${promptConnections.length} prompt connections; Claude path only uses the first. Connect a single prompt node per agent.`, { runId, nodeId });
     }
   }
 
@@ -150,7 +153,7 @@ export async function executeAgent(
     const outEdges = getOutgoingEdges(nodeId, edges)
       .filter((e) => e.targetHandle !== "participants") // exclude discussion participant edges
       .filter((e) => !promptToolNodeIds.has(e.target)); // exclude prompt tool connections
-    if (outEdges.length >= 1) {
+    if (outEdges.length >= 2) {
       routeTargets = outEdges.map((e) => {
         const target = nodeMap.get(e.target);
         const targetConfig = target?.data.config as Record<string, unknown> | undefined;
@@ -177,7 +180,6 @@ export async function executeAgent(
     : engine === "openai" ? config.openaiModel!
     : (config.model ?? "sonnet");
 
-  // Build routing-aware config
   const augmentedConfig = { ...config };
   if (routeTargets && routeTargets.length >= 2) {
     const routeList = routeTargets
@@ -187,21 +189,17 @@ export async function executeAgent(
       })
       .join("\n");
     const routeInstruction = [
-      "\n\n## ⚠️ CRITICAL: Routing (REQUIRED)",
-      `When you have finished your work, you MUST call the \`${ROUTING_TOOL_NAME}\` tool to exit.`,
-      "Do NOT keep working after your task is complete. Do NOT re-read or re-analyze files you already changed.",
-      `If you have completed the task, STOP and call \`${ROUTING_TOOL_NAME}\` immediately.`,
+      "\n\n## Routing",
+      `When your task is complete, call \`${ROUTING_TOOL_NAME}\` to pass control to the next node.`,
       "",
       "Available routes:",
       routeList,
       "",
-      `Call ${ROUTING_TOOL_NAME} with \`node_id\` (the route) and \`content\` (your summary). You MUST call it exactly once.`,
-      "Failure to call this tool means the conclave hangs forever.",
+      `Call ${ROUTING_TOOL_NAME} with \`node_id\` (the chosen route) and \`content\` (a brief summary of your output).`,
     ].join("\n");
     augmentedConfig.systemPrompt = (config.systemPrompt ?? "") + routeInstruction;
   }
 
-  // Store user message as prompt, augmented system prompt in DB
   const userMessage = typeof input === "string" ? input : (input ? JSON.stringify(input) : null);
   const taskResult = await db.insert(agentTasks).values({
     runId,
@@ -224,6 +222,8 @@ export async function executeAgent(
   let routedTo: string | null = null;
   let retrySessionId = sessionId; // Track session across retries so the agent can resume
   let taskCompleted = false;
+  const executionStart = Date.now();
+  const safeNodeId = basename(nodeId).replace(/[^\w.\-]/g, "_");
 
   try {
   for (let attempt = 0; attempt <= MAX_ROUTE_RETRIES; attempt++) {
@@ -231,42 +231,42 @@ export async function executeAgent(
       // Resolve tools via AgentBase so debug output shows actual tool definitions
       const agent = new AgentBase(augmentedConfig, workspace, runId);
       await agent.connectMcpServers();
-      const resolvedTools = agent.toChatTools();
-      await agent.disconnect();
-
-      // Include ask_user tools in debug output so users can verify the tool was injected
-      const allTools = [
-        ...resolvedTools,
-        ...askUserExtraTools.map((et) => et.tool),
-      ];
-
-      const debugInfo = {
-        debugResponse: config.debugResponse ?? "(no debug response configured)",
-        receivedInput: input,
-        systemPrompt: augmentedConfig.systemPrompt,
-        tools: allTools,
-        knowledgeBases: config.knowledgeBases,
-        routeTargets: routeTargets ?? [],
-        workspace: workspace ? {
-          cwd: workspace.cwd,
-          allowedDirs: workspace.getAllowedDirs(),
-        } : null,
-      };
-      result = {
-        success: true,
-        output: JSON.stringify(debugInfo, null, 2),
-        durationMs: 0,
-      };
+      try {
+        const resolvedTools = agent.toChatTools();
+        // Include ask_user tools in debug output so users can verify the tool was injected
+        const allTools = [
+          ...resolvedTools,
+          ...askUserExtraTools.map((et) => et.tool),
+        ];
+        const debugInfo = {
+          debugResponse: config.debugResponse ?? "(no debug response configured)",
+          receivedInput: input,
+          systemPrompt: augmentedConfig.systemPrompt,
+          tools: allTools,
+          knowledgeBases: config.knowledgeBases,
+          routeTargets: routeTargets ?? [],
+          workspace: workspace ? {
+            cwd: workspace.cwd,
+            allowedDirs: workspace.getAllowedDirs(),
+          } : null,
+        };
+        result = {
+          success: true,
+          output: JSON.stringify(debugInfo, null, 2),
+          durationMs: 0,
+        };
+      } finally {
+        await agent.disconnect();
+      }
       break;
     } else if (engine === "ollama") {
-      // Session file for Ollama — always create path, reuse on subsequent turns
-      const ollamaSessionFile = sessionId ?? join(sessionDirForRun(runId), `${nodeId}.jsonl`);
+      const ollamaSessionFile = sessionId ?? join(sessionDirForRun(runId), `${safeNodeId}.jsonl`);
 
       result = await runOllamaAgent({
         model: modelName,
-        prompt: attempt === 0 ? (augmentedConfig.systemPrompt ?? "") : `Previous attempt failed: you must call ${ROUTING_TOOL_NAME} to choose a route. Try again.`,
+        prompt: augmentedConfig.systemPrompt ?? "",
         systemPrompt: augmentedConfig.systemPrompt,
-        input,
+        input: attempt === 0 ? input : `You did not call ${ROUTING_TOOL_NAME}. Please call it now to select a route.`,
         allowedTools: config.allowedTools,
         knowledgeBases: config.knowledgeBases,
         routeTargets,
@@ -283,7 +283,6 @@ export async function executeAgent(
         },
       });
 
-      // Store session file path for next turn
       result.sessionId = ollamaSessionFile;
     } else if (engine === "openai") {
       // OpenAI-compatible provider — load provider config from settings
@@ -297,13 +296,13 @@ export async function executeAgent(
       }
       const provider = JSON.parse(providerRow.value) as OpenAIProvider;
 
-      const openaiSessionFile = sessionId ?? join(sessionDirForRun(runId), `${nodeId}.jsonl`);
+      const openaiSessionFile = sessionId ?? join(sessionDirForRun(runId), `${safeNodeId}.jsonl`);
 
       result = await runOpenAIAgent({
         provider,
         model: modelName,
         systemPrompt: augmentedConfig.systemPrompt,
-        input,
+        input: attempt === 0 ? input : `You did not call ${ROUTING_TOOL_NAME}. Please call it now to select a route.`,
         allowedTools: config.allowedTools,
         mcpServers: config.mcpServers,
         mcpTools: config.mcpTools,
@@ -323,7 +322,7 @@ export async function executeAgent(
     } else {
       const retryInput = attempt === 0
         ? input
-        : `You completed your task but forgot to call ${ROUTING_TOOL_NAME}. Call it NOW to route to the next step.`;
+        : `You did not call ${ROUTING_TOOL_NAME}. Please call it now to select a route.`;
       result = await agentPool.submit(String(taskId), {
         config: augmentedConfig,
         input: retryInput,
@@ -338,27 +337,22 @@ export async function executeAgent(
       });
     }
 
-    // Capture session for retry resume (all engines)
     if (result.sessionId) {
       retrySessionId = result.sessionId;
     }
 
-    // If no routing needed, break immediately
     if (!routeTargets || routeTargets.length < 2) break;
 
-    // Check if agent called openconclave_next (route written to state file)
     if (result.routeTo) {
       routedTo = result.routeTo;
       break;
     }
 
-    // No route — retry if routing was required
     if (attempt < MAX_ROUTE_RETRIES) {
       logger.warn(`Agent didn't route, retry ${attempt + 1}/${MAX_ROUTE_RETRIES}`, { runId, nodeId });
     }
   }
 
-  // Store route in output metadata
   if (routedTo) {
     result!.output = JSON.stringify({ __routeTo: routedTo, content: result!.output });
   }
@@ -403,13 +397,13 @@ export async function executeAgent(
     thinking: result!.thinking,
     sessionId: result!.sessionId,
   };
-  } finally {
+  } catch (err: unknown) {
     if (!taskCompleted) {
       await db
         .update(agentTasks)
         .set({
           status: "failure",
-          error: "Agent execution failed unexpectedly",
+          error: err instanceof Error ? err.message : String(err),
           completedAt: new Date().toISOString(),
         })
         .where(eq(agentTasks.id, taskId));
@@ -417,8 +411,9 @@ export async function executeAgent(
         type: "agent:completed",
         runId,
         nodeId,
-        data: { taskId, success: false, durationMs: 0 },
+        data: { taskId, success: false, durationMs: Date.now() - executionStart },
       });
     }
+    throw err;
   }
 }

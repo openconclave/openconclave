@@ -25,6 +25,13 @@ export async function runChatCompletions(options: OpenAIRunOptions): Promise<Ope
         messages.push(JSON.parse(line));
       } catch { /* skip malformed lines */ }
     }
+    const inputStr =
+      options.input !== undefined
+        ? (typeof options.input === "string" ? options.input : JSON.stringify(options.input, null, 2))
+        : options.prompt ?? "";
+    if (inputStr) {
+      messages.push({ role: "user", content: inputStr });
+    }
   } else {
     if (options.systemPrompt) {
       messages.push({ role: "system", content: options.systemPrompt });
