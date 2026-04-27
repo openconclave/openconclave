@@ -63,20 +63,23 @@ function resolvePythonCommand(): { cmd: string[]; ok: boolean } {
 let gitBashCache: { path: string; ok: boolean } | null = null;
 function getGitBash(): { path: string; ok: boolean } {
   if (gitBashCache) return gitBashCache;
-  gitBashCache = resolveGitBash();
-  if (!gitBashCache.ok && process.platform === "win32") {
+  const result = resolveGitBash();
+  if (!result.ok && process.platform === "win32") {
     logger.warn(
       "Git Bash not found — bash code nodes will refuse to run on Windows",
       { hint: "Install Git for Windows; falling back to `bash` would resolve to WSL." },
     );
   }
-  return gitBashCache;
+  if (result.ok) gitBashCache = result;
+  return result;
 }
 
 let pythonCmdCache: { cmd: string[]; ok: boolean } | null = null;
 function getPythonCommand(): { cmd: string[]; ok: boolean } {
-  if (!pythonCmdCache) pythonCmdCache = resolvePythonCommand();
-  return pythonCmdCache;
+  if (pythonCmdCache) return pythonCmdCache;
+  const result = resolvePythonCommand();
+  if (result.ok) pythonCmdCache = result;
+  return result;
 }
 
 /**
@@ -98,15 +101,6 @@ export async function executeCode(
   context: CodeNodeContext | undefined,
   workspace: Workspace,
 ): Promise<unknown> {
-  if (!workspace) {
-    // Never silently fall back to process.cwd() — that would let subprocess
-    // code execute in the server's own directory instead of the run's.
-    throw new AppError(
-      ErrorCode.CODE_EXECUTION_FAILED,
-      "executeCode requires a Workspace — caller must scope execution to a run",
-    );
-  }
-
   const { runtime, code } = config;
   if (Buffer.byteLength(code, "utf-8") > CODE_SOURCE_MAX_BYTES) {
     throw new AppError(
@@ -222,7 +216,7 @@ export async function executeCode(
           stderr: string;
           stdoutTruncated: boolean;
           stderrTruncated: boolean;
-          exitCode: number | null;
+          exitCode: number;
           signal: string | null;
         }
       | { kind: "timeout" };
@@ -239,7 +233,7 @@ export async function executeCode(
         stderr: stderrRes.text,
         stdoutTruncated: stdoutRes.truncated,
         stderrTruncated: stderrRes.truncated,
-        exitCode: exitCode ?? null,
+        exitCode,
         signal: proc!.signalCode ?? null,
       };
     })();
@@ -251,9 +245,9 @@ export async function executeCode(
     const timeoutRun: Promise<Outcome> = new Promise((resolveTimeout) => {
       timeoutHandle = setTimeout(() => {
         // Race guard: if the child exited naturally in the last tick, don't
-        // hijack the result with a spurious CODE_TIMEOUT. Leave timeoutRun
-        // pending so Promise.race picks normalRun's real outcome.
-        if (proc && proc.exitCode !== null) return;
+        // hijack the result with a spurious CODE_TIMEOUT. Settle timeoutRun
+        // via normalRun so the promise is never permanently unsettled.
+        if (proc && proc.exitCode !== null) { normalRun.then(resolveTimeout); return; }
         if (proc) killTree(proc, "SIGTERM");
         stdoutReader?.cancel().catch(() => { /* already done */ });
         stderrReader?.cancel().catch(() => { /* already done */ });
@@ -294,6 +288,14 @@ export async function executeCode(
         ErrorCode.CODE_EXECUTION_FAILED,
         `Code node stdout exceeded ${CODE_NODE_OUTPUT_CAP_BYTES} bytes — write less or stream to a file.`,
       );
+    }
+
+    if (outcome.stderrTruncated) {
+      logger.warn("Code node stderr was truncated on a successful exit", {
+        runtime,
+        capBytes: CODE_NODE_OUTPUT_CAP_BYTES,
+        runId: context?.runId,
+      });
     }
 
     try {
