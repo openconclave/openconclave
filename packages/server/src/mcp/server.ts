@@ -57,8 +57,8 @@ export function createMcpServer() {
       try {
         const data = await ocApi(`/conclaves/${conclaveId}`);
         return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
-      } catch {
-        return { content: [{ type: "text", text: "Conclave not found" }], isError: true };
+      } catch (e) {
+        return { content: [{ type: "text", text: e instanceof Error ? e.message : "Conclave not found" }], isError: true };
       }
     }
   );
@@ -209,8 +209,8 @@ export function createMcpServer() {
         const enrichedPayload = { ...(payload ?? {}), _callerCwd: effectiveCwd };
         const data = await ocApi(`/conclaves/${conclaveId}/run`, "POST", { payload: enrichedPayload });
         return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
-      } catch {
-        return { content: [{ type: "text", text: "Conclave not found" }], isError: true };
+      } catch (e) {
+        return { content: [{ type: "text", text: e instanceof Error ? e.message : "Conclave not found" }], isError: true };
       }
     }
   );
@@ -222,9 +222,12 @@ export function createMcpServer() {
       status: z.enum(["queued", "running", "success", "failure", "cancelled"]).optional(),
       limit: z.number().int().positive().max(100).default(20),
     },
-    async () => {
-      const data = await ocApi("/runs") as { runs: unknown[] };
-      return { content: [{ type: "text", text: JSON.stringify(data.runs.slice(0, 20), null, 2) }] };
+    async ({ status, limit }) => {
+      const params = new URLSearchParams();
+      if (status) params.set("status", status);
+      params.set("limit", String(limit));
+      const data = await ocApi(`/runs?${params}`) as { runs: unknown[] };
+      return { content: [{ type: "text", text: JSON.stringify(data.runs, null, 2) }] };
     }
   );
 
@@ -235,7 +238,6 @@ export function createMcpServer() {
     async ({ runId }) => {
       try {
         const data = await ocApi(`/runs/${runId}`) as { run: unknown; tasks: unknown[]; events: unknown[] };
-        // Summarize for readability
         const tasks = (data.tasks as Record<string, unknown>[]).map((t) => ({
           id: t.id,
           nodeId: t.nodeId,
@@ -246,8 +248,8 @@ export function createMcpServer() {
           costUsd: t.costUsd,
         }));
         return { content: [{ type: "text", text: JSON.stringify({ run: data.run, tasks }, null, 2) }] };
-      } catch {
-        return { content: [{ type: "text", text: "Run not found" }], isError: true };
+      } catch (e) {
+        return { content: [{ type: "text", text: e instanceof Error ? e.message : "Run not found" }], isError: true };
       }
     }
   );
@@ -296,8 +298,8 @@ export function createMcpServer() {
       try {
         const data = await ocApi("/scheduler");
         return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
-      } catch {
-        return { content: [{ type: "text", text: "Scheduler not available" }], isError: true };
+      } catch (e) {
+        return { content: [{ type: "text", text: e instanceof Error ? e.message : "Scheduler not available" }], isError: true };
       }
     }
   );
@@ -311,8 +313,8 @@ export function createMcpServer() {
         await ocApi(`/conclaves/${conclaveId}`, "PUT", { enabled: false });
         await ocApi("/scheduler/sync", "POST");
         return { content: [{ type: "text", text: JSON.stringify({ id: conclaveId, status: "paused" }) }] };
-      } catch {
-        return { content: [{ type: "text", text: "Conclave not found" }], isError: true };
+      } catch (e) {
+        return { content: [{ type: "text", text: e instanceof Error ? e.message : "Conclave not found" }], isError: true };
       }
     }
   );
@@ -327,8 +329,8 @@ export function createMcpServer() {
         await ocApi("/scheduler/sync", "POST");
         const schedule = await ocApi("/scheduler") as { schedule: unknown[] };
         return { content: [{ type: "text", text: JSON.stringify({ id: conclaveId, status: "resumed", schedule }, null, 2) }] };
-      } catch {
-        return { content: [{ type: "text", text: "Conclave not found" }], isError: true };
+      } catch (e) {
+        return { content: [{ type: "text", text: e instanceof Error ? e.message : "Conclave not found" }], isError: true };
       }
     }
   );
@@ -359,40 +361,6 @@ export function createMcpServer() {
     }
   );
 
-  // ── MCP Server Registry ────────────────────────────────────
-
-  server.tool(
-    "list_mcp_servers",
-    "List all registered external MCP servers",
-    {},
-    async () => {
-      // This still needs direct API — add endpoint later
-      return { content: [{ type: "text", text: "[]" }] };
-    }
-  );
-
-  server.tool(
-    "register_mcp_server",
-    "Register an external MCP server for agents to use",
-    {
-      name: z.string(),
-      type: z.enum(["stdio", "sse", "http"]),
-      config: z.record(z.unknown()),
-    },
-    async () => {
-      return { content: [{ type: "text", text: "MCP server registration via API not yet implemented" }] };
-    }
-  );
-
-  server.tool(
-    "remove_mcp_server",
-    "Remove a registered MCP server",
-    { name: z.string() },
-    async () => {
-      return { content: [{ type: "text", text: "MCP server removal via API not yet implemented" }] };
-    }
-  );
-
   return server;
 }
 
@@ -409,11 +377,19 @@ async function registerConclaveTools(server: ReturnType<typeof createMcpServer>)
   try {
     const data = await ocApi("/conclaves") as { conclaves?: Array<Record<string, unknown>> };
     const list = data.conclaves ?? [];
+    const seen = new Set<string>();
     for (const wf of list) {
+
       if (!wf.enabled) continue;
       const def = (wf.definition ?? {}) as Record<string, unknown>;
-      const toolName = (def.toolName ?? wf.toolName) as string | undefined;
+      const toolName = def.toolName as string | undefined;
       if (!toolName) continue;
+      if (seen.has(toolName)) {
+        process.stderr.write(`[mcp] duplicate toolName "${toolName}" skipped
+`);
+        continue;
+      }
+      seen.add(toolName);
       const description = String(def.description ?? wf.description ?? `Run conclave: ${wf.name}`);
       const conclaveId = String(wf.id);
 
@@ -462,13 +438,13 @@ export async function startStdio() {
     } catch { /* best effort */ }
   };
   const unregister = async () => {
+    await registered.catch(() => {});
     try {
       await fetch(`${OC_URL}/api/mcp-sessions/${pid}`, { method: "DELETE" });
     } catch { /* best effort */ }
   };
 
-  // Fire register eagerly; don't block connect on it.
-  void register();
+  const registered = register();
 
   // CC closes stdin when the session ends → SDK fires onclose → we unregister
   // and exit. This is the one CC lifecycle signal that's reliable across
