@@ -46,7 +46,7 @@ function fitToolName(prefix: string, name: string): string {
   if (direct.length <= OPENAI_TOOL_NAME_MAX) return direct;
   const hash = cheapHash(direct).toString(36);
   const suffix = `_${hash}`;
-  const sepLen = 2; // "__"
+  const sepLen = 2;
   const budget = OPENAI_TOOL_NAME_MAX - suffix.length - sepLen;
   const prefixBudget = Math.max(1, Math.min(prefix.length, Math.floor(budget / 2)));
   const nameBudget = Math.max(1, budget - prefixBudget);
@@ -161,9 +161,7 @@ export class McpBridge {
    * Connect to MCP servers using resolved configs.
    * Supports stdio, streamable-http, and sse transports.
    *
-   * Returns per-server results so callers can log partial failures — previously
-   * a misconfigured server would be swallowed at console.error and the agent
-   * would run with a silently-reduced tool surface.
+   * Returns per-server results so partial failures don’t take down the whole connect.
    */
   async connectResolved(configs: Record<string, McpResolvedConfig>): Promise<ConnectResult[]> {
     if (this.connected) {
@@ -206,8 +204,6 @@ export class McpBridge {
         } else if (config.transport === "sse") {
           transport = new SSEClientTransport(new URL(config.url as string));
         } else {
-          // Validator above only knew about the three documented values;
-          // anything else here is a typo that would silently route to SSE.
           throw new Error(`Unknown transport: ${String(config.transport)}`);
         }
 
@@ -255,12 +251,6 @@ export class McpBridge {
           });
         }
 
-        if (this.disconnectRequested) {
-          try { await client.close(); } catch { /* already dead */ }
-          try { await transport.close(); } catch { /* already dead */ }
-          results.push({ serverId: id, ok: false, error: "disconnected during connect", reason: "cancelled" });
-          break;
-        }
         // Atomic merge: maps + array are all set inside the same sync tick,
         // so no external caller can observe half-registered state.
         for (const [name, mapping] of pendingToolMap) this.toolMap.set(name, mapping);
