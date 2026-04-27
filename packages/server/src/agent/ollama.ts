@@ -1,11 +1,3 @@
-/**
- * Ollama agent runtime — public entry point.
- *
- * Types:    ollama-types.ts
- * Tools:    base.ts (AgentBase resolves builtin + knowledge + MCP tools)
- * Routing:  ollama-routing.ts
- */
-
 import { spawn } from "bun";
 import { readFileSync, existsSync, appendFileSync } from "fs";
 import { join } from "path";
@@ -18,8 +10,6 @@ import type { ResolvedAgentConfig } from "@openconclave/shared";
 export type { OllamaStatus, OllamaModelInfo, OllamaRunOptions, ThinkingBlock, OllamaResult } from "./ollama-types";
 import type { OllamaTool, OllamaRunOptions, OllamaResult, OllamaStatus, OllamaModelInfo, ThinkingBlock } from "./ollama-types";
 
-// ── Debug logging ─────────────────────────────────────────────
-
 const DEBUG = process.env.OPENCONCLAVE_DEBUG === "1";
 const OLLAMA_LOG = join(SESSIONS_DIR, "ollama-debug.log");
 
@@ -31,11 +21,7 @@ function ollamaLog(label: string, data: unknown): void {
   } catch { /* ignore write failures */ }
 }
 
-// ── Ollama URL ────────────────────────────────────────────────
-
 const OLLAMA_URL = process.env.OLLAMA_URL ?? "http://localhost:11434";
-
-// ── Status check ──────────────────────────────────────────────
 
 export async function checkOllama(): Promise<OllamaStatus> {
   try {
@@ -75,8 +61,6 @@ export async function checkOllama(): Promise<OllamaStatus> {
     }
   }
 }
-
-// ── Ollama streaming response reader ──────────────────────────
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function readOllamaStream(res: Response, onOutput?: (text: string) => void): Promise<any> {
@@ -128,33 +112,30 @@ async function readOllamaStream(res: Response, onOutput?: (text: string) => void
   }
 
   return {
+    ...(finalMsg?.message ?? {}),
     role: "assistant",
+    // Override with accumulated values (streaming chunks are deltas)
     content: content || undefined,
     thinking: thinking || undefined,
     tool_calls: toolCalls,
-    ...(finalMsg?.message ?? {}),
-    // Override with accumulated values (streaming chunks are deltas)
-    ...(content ? { content } : {}),
-    ...(thinking ? { thinking } : {}),
   };
 }
-
-// ── Agent runtime loop ────────────────────────────────────────
 
 export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaResult> {
   const { model, abortSignal, onOutput } = options;
   const maxTurns = options.maxTurns ?? 25;
   const startTime = Date.now();
 
-  // Read messages from session file (managed by executor)
   const sessionFile = options.sessionFile;
-  const messages: Array<{ role: string; content: string }> = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const messages: any[] = [];
 
   if (sessionFile && existsSync(sessionFile)) {
     const lines = readFileSync(sessionFile, "utf8").split("\n").filter(Boolean);
     for (const line of lines) {
       try {
-        messages.push(JSON.parse(line));
+        const parsed = JSON.parse(line);
+        if (typeof parsed.role === "string") messages.push(parsed);
       } catch { /* skip malformed lines */ }
     }
     // Append new input so the model sees the current turn, not just old history
@@ -165,10 +146,13 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
           : JSON.stringify(options.input, null, 2)
         : options.prompt || "";
     if (inputStr) {
-      messages.push({ role: "user", content: inputStr });
+      const userMsg = { role: "user", content: inputStr };
+      messages.push(userMsg);
+      if (sessionFile) {
+        appendFileSync(sessionFile, JSON.stringify(userMsg) + "\n");
+      }
     }
   } else {
-    // No session file — build minimal messages
     if (options.systemPrompt) {
       messages.push({ role: "system", content: options.systemPrompt });
     }
@@ -179,9 +163,13 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
           : JSON.stringify(options.input, null, 2)
         : options.prompt || "Start";
     messages.push({ role: "user", content: inputStr });
+    if (sessionFile) {
+      for (const msg of messages) {
+        appendFileSync(sessionFile, JSON.stringify(msg) + "\n");
+      }
+    }
   }
 
-  // Resolve tools via AgentBase (builtin + knowledge + MCP)
   const resolvedConfig: ResolvedAgentConfig = {
     allowedTools: options.allowedTools ?? [],
     mcpServers: options.mcpServers ?? [],
@@ -189,34 +177,33 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
     knowledgeBases: options.knowledgeBases ?? [],
   };
   const agent = new AgentBase(resolvedConfig, options.workspace, options.runId);
-  await agent.connectMcpServers();
-
-  const activeTools: OllamaTool[] = agent.toChatTools() as OllamaTool[];
-  const toolExecutors = agent.toolExecutors;
-
-  if (agent.tools.length > 0) {
-    onOutput?.(`[Resolved ${agent.tools.length} tools via AgentBase]\n`);
-  }
-
-  // Add routing tool with actual route targets
-  if (options.routeTargets && options.routeTargets.length >= 1) {
-    const routingTool = createOllamaRoutingTool(options.routeTargets);
-    activeTools.push(routingTool.tool);
-    toolExecutors.set(ROUTING_TOOL_NAME, routingTool.execute);
-  }
-
-  // Register extra dynamic tools (e.g., ask_user for channel loops)
-  if (options.extraTools) {
-    for (const et of options.extraTools) {
-      activeTools.push(et.tool);
-      toolExecutors.set(et.tool.function.name, et.execute);
-    }
-  }
-
-  const hasTools = activeTools.length > 0;
-  const thinkingBlocks: ThinkingBlock[] = [];
 
   try {
+    await agent.connectMcpServers();
+
+    const activeTools: OllamaTool[] = agent.toChatTools() as OllamaTool[];
+    const toolExecutors = agent.toolExecutors;
+
+    if (agent.tools.length > 0) {
+      onOutput?.(`[Resolved ${agent.tools.length} tools via AgentBase]\n`);
+    }
+
+    if (options.routeTargets && options.routeTargets.length >= 1) {
+      const routingTool = createOllamaRoutingTool(options.routeTargets);
+      activeTools.push(routingTool.tool);
+      toolExecutors.set(ROUTING_TOOL_NAME, routingTool.execute);
+    }
+
+    if (options.extraTools) {
+      for (const et of options.extraTools) {
+        activeTools.push(et.tool);
+        toolExecutors.set(et.tool.function.name, et.execute);
+      }
+    }
+
+    const hasTools = activeTools.length > 0;
+    const thinkingBlocks: ThinkingBlock[] = [];
+
     for (let turn = 0; turn < maxTurns; turn++) {
       const body: Record<string, unknown> = {
         model,
@@ -270,7 +257,6 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
         tool_calls: assistantMsg.tool_calls,
       });
 
-      // Capture thinking/reasoning from the response
       if (assistantMsg.thinking) {
         thinkingBlocks.push({ thinking: assistantMsg.thinking });
         onOutput?.(`[thinking: ${(assistantMsg.thinking as string).slice(0, 100)}...]\n`);
@@ -280,10 +266,10 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
       const savedMsg = { ...assistantMsg };
       if (assistantMsg.thinking && !assistantMsg.content?.includes(assistantMsg.thinking)) {
         savedMsg.content = `<think>${assistantMsg.thinking}</think>\n${assistantMsg.content ?? ""}`;
+        delete savedMsg.thinking;
       }
       messages.push(savedMsg);
 
-      // Check if the model wants to call tools
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       if ((assistantMsg.tool_calls as any[])?.length > 0) {
         onOutput?.(
@@ -307,14 +293,13 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
             try {
               fnArgs = JSON.parse(rawArgs);
             } catch {
-              messages.push({ role: "tool", content: `Error: malformed JSON arguments for "${fnName}"` });
+              messages.push({ role: "tool", tool_call_id: toolCall.id, name: fnName, content: `Error: malformed JSON arguments for "${fnName}"` });
               continue;
             }
           } else {
             fnArgs = (rawArgs as Record<string, unknown>) ?? {};
           }
 
-          // Capture routing before executing
           if (fnName === ROUTING_TOOL_NAME && fnArgs?.node_id) {
             routeTo = fnArgs.node_id as string;
             routeContent = (fnArgs.content as string) ?? "";
@@ -329,16 +314,14 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
             result = `Error: Unknown tool "${fnName}"`;
           }
 
-          // Add tool result to messages
-          messages.push({ role: "tool", content: result });
+          messages.push({ role: "tool", tool_call_id: toolCall.id, name: fnName, content: result });
           if (sessionFile) {
-            appendFileSync(sessionFile, JSON.stringify({ role: "tool", content: result }) + "\n");
+            appendFileSync(sessionFile, JSON.stringify({ role: "tool", tool_call_id: toolCall.id, name: fnName, content: result }) + "\n");
           }
 
           onOutput?.(`[${fnName} result: ${result.slice(0, 200)}${result.length > 200 ? "..." : ""}]\n`);
         }
 
-        // If agent routed, return immediately with the route info
         if (routeTo) {
           await agent.disconnect();
           return {
@@ -350,13 +333,14 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
           };
         }
 
-        // Continue the loop — model will process tool results
         continue;
       }
 
-      // No tool calls — model produced a final text response
       const output: string = assistantMsg.content ?? "";
       onOutput?.(output);
+      if (sessionFile) {
+        appendFileSync(sessionFile, JSON.stringify(savedMsg) + "\n");
+      }
 
       await agent.disconnect();
       return {
@@ -367,7 +351,6 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
       };
     }
 
-    // Exceeded max turns
     await agent.disconnect();
     return {
       success: false,
