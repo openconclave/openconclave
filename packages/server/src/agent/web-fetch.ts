@@ -65,11 +65,18 @@ class CdpClient {
   private id = 0;
   private pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
   private eventHandlers: Array<(msg: CdpMsg) => void> = [];
+  private closeRejectors = new Set<(e: Error) => void>();
 
   constructor(ws: WebSocket) {
     this.ws = ws;
     this.ws.addEventListener("message", (ev) => {
-      const msg = JSON.parse(ev.data as string) as CdpMsg;
+      let msg: CdpMsg;
+      try {
+        msg = JSON.parse(ev.data as string) as CdpMsg;
+      } catch {
+        logger.warn("web_fetch: malformed CDP frame, ignoring", { data: String(ev.data).slice(0, 100) });
+        return;
+      }
       if (msg.id != null && this.pending.has(msg.id)) {
         const p = this.pending.get(msg.id)!;
         this.pending.delete(msg.id);
@@ -80,8 +87,11 @@ class CdpClient {
       }
     });
     this.ws.addEventListener("close", () => {
-      for (const p of this.pending.values()) p.reject(new Error("CDP socket closed"));
+      const err = new Error("CDP socket closed");
+      for (const p of this.pending.values()) p.reject(err);
       this.pending.clear();
+      for (const r of this.closeRejectors) r(err);
+      this.closeRejectors.clear();
     });
   }
 
@@ -97,19 +107,27 @@ class CdpClient {
 
   waitForEvent(method: string, sessionId?: string, timeoutMs = 30_000): Promise<CdpMsg> {
     return new Promise((resolve, reject) => {
+      this.closeRejectors.add(reject);
       const timer = setTimeout(() => {
         this.eventHandlers = this.eventHandlers.filter((h) => h !== handler);
+        this.closeRejectors.delete(reject);
         reject(new Error(`timeout waiting for ${method}`));
       }, timeoutMs);
       const handler = (msg: CdpMsg) => {
         if (msg.method === method && (!sessionId || msg.sessionId === sessionId)) {
           clearTimeout(timer);
           this.eventHandlers = this.eventHandlers.filter((h) => h !== handler);
+          this.closeRejectors.delete(reject);
           resolve(msg);
         }
       };
       this.eventHandlers.push(handler);
     });
+  }
+
+  on(handler: (msg: CdpMsg) => void): () => void {
+    this.eventHandlers.push(handler);
+    return () => { this.eventHandlers = this.eventHandlers.filter((e) => e !== handler); };
   }
 
   close(): void { this.ws.close(); }
@@ -140,6 +158,15 @@ async function launchBrowser(): Promise<Browser> {
 async function ensureBrowser(): Promise<Browser> {
   if (browser && browser.cdp.isOpen) return browser;
   if (launching) return launching;
+  if (browser) {
+    // Stale handle (crashed or socket dropped) — tear down before relaunching.
+    const dead = browser;
+    browser = null;
+    try { dead.cdp.close(); } catch { /* ignore */ }
+    try { dead.chrome.proc.kill(); await dead.chrome.proc.exited; } catch { /* ignore */ }
+    try { rmSync(dead.chrome.profileDir, { recursive: true, force: true }); } catch { /* ignore */ }
+    releaseProfileDir(dead.chrome.profileDir);
+  }
   launching = launchBrowser()
     .then((b) => { browser = b; return b; })
     .finally(() => { launching = null; });
@@ -200,9 +227,17 @@ function isPrivateV4(ip: string): boolean {
 
 function isPrivateV6(ip: string): boolean {
   const normalized = ip.toLowerCase().replace(/^\[|\]$/g, "");
-  // IPv4-mapped IPv6 (::ffff:a.b.c.d) — check the embedded IPv4.
+  // IPv4-mapped in dotted-decimal form: ::ffff:a.b.c.d
   const mapped = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
   if (mapped) return isPrivateV4(mapped[1]!);
+  // IPv4-mapped in all-hex form: ::ffff:xxxx:xxxx (WHATWG URL normalises to this).
+  // e.g. ::ffff:7f00:1 = 127.0.0.1
+  const mappedHex = normalized.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (mappedHex) {
+    const hi = parseInt(mappedHex[1]!, 16);
+    const lo = parseInt(mappedHex[2]!, 16);
+    return isPrivateV4(`${hi >> 8}.${hi & 0xff}.${lo >> 8}.${lo & 0xff}`);
+  }
   if (normalized === "::" || normalized === "::1") return true;
   if (normalized.startsWith("fc") || normalized.startsWith("fd")) return true; // fc00::/7 ULA
   if (normalized.startsWith("fe80:") || normalized.startsWith("fe8") || normalized.startsWith("fe9") || normalized.startsWith("fea") || normalized.startsWith("feb")) return true; // fe80::/10 link-local
@@ -214,11 +249,9 @@ async function isBlockedHost(hostname: string): Promise<boolean> {
   const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
   if (host === "localhost" || host.endsWith(".localhost")) return true;
 
-  // If host is a literal IP, check it directly.
   if (isIPv4(host)) return isPrivateV4(host);
   if (isIPv6(host)) return isPrivateV6(host);
 
-  // Otherwise resolve DNS and check every returned A/AAAA record.
   try {
     const addrs = await lookup(host, { all: true });
     for (const a of addrs) {
@@ -233,12 +266,20 @@ async function isBlockedHost(hostname: string): Promise<boolean> {
   }
 }
 
+const ALLOWED_PORTS = new Set(["", "80", "443", "8080", "8443"]);
+
 async function validateUrl(raw: string): Promise<URL> {
   if (typeof raw !== "string") throw new Error("URL must be a string");
   if (raw.length > MAX_URL_LENGTH) throw new Error(`URL exceeds max length ${MAX_URL_LENGTH}`);
   const url = new URL(raw);
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error(`Unsupported protocol: ${url.protocol}`);
+  }
+  if (url.username || url.password) {
+    throw new Error("URLs with credentials are not allowed");
+  }
+  if (!ALLOWED_PORTS.has(url.port)) {
+    throw new Error(`Port not allowed: ${url.port}`);
   }
   if (await isBlockedHost(url.hostname)) {
     throw new Error(`Blocked host (private/loopback/unresolvable): ${url.hostname}`);
@@ -254,24 +295,52 @@ async function renderPageHtml(url: string): Promise<string> {
     "Target.createBrowserContext",
     { disposeOnDetach: true },
   );
-  const { targetId } = await b.cdp.send<{ targetId: string }>(
-    "Target.createTarget",
-    { url: "about:blank", browserContextId },
-  );
-  const { sessionId } = await b.cdp.send<{ sessionId: string }>("Target.attachToTarget", { targetId, flatten: true });
+  let targetId: string | undefined;
+  let offIntercept: (() => void) | undefined;
   try {
+    ({ targetId } = await b.cdp.send<{ targetId: string }>(
+      "Target.createTarget",
+      { url: "about:blank", browserContextId },
+    ));
+    const { sessionId } = await b.cdp.send<{ sessionId: string }>("Target.attachToTarget", { targetId, flatten: true });
     await b.cdp.send("Page.enable", {}, sessionId);
+    // Intercept every request so redirects and subsequent navigations are
+    // re-validated against isBlockedHost, closing the redirect-SSRF and
+    // narrowing the DNS-rebinding window.
+    await b.cdp.send("Fetch.enable", { patterns: [{ requestStage: "Request" }] }, sessionId);
+    offIntercept = b.cdp.on(async (msg) => {
+      if (msg.method !== "Fetch.requestPaused" || msg.sessionId !== sessionId) return;
+      const { requestId, request } = msg.params as { requestId: string; request: { url: string } };
+      let blocked = false;
+      try {
+        const reqUrl = new URL(request.url);
+        if ((reqUrl.protocol === "http:" || reqUrl.protocol === "https:") && await isBlockedHost(reqUrl.hostname)) {
+          blocked = true;
+        }
+      } catch { /* unparseable URL — let Chrome handle it */ }
+      if (blocked) {
+        b.cdp.send("Fetch.failRequest", { requestId, errorReason: "AddressUnreachable" }, sessionId).catch(() => {});
+      } else {
+        b.cdp.send("Fetch.continueRequest", { requestId }, sessionId).catch(() => {});
+      }
+    });
     const loadWait = b.cdp.waitForEvent("Page.loadEventFired", sessionId, LOAD_TIMEOUT_MS);
     await b.cdp.send("Page.navigate", { url, transitionType: "typed" }, sessionId);
-    // Race navigation timeout alongside load event
-    await Promise.race([
-      loadWait,
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`navigation timeout after ${NAV_TIMEOUT_MS}ms`)), NAV_TIMEOUT_MS)),
-    ]);
+    let navTimeoutId: ReturnType<typeof setTimeout> | undefined;
+    const navTimeout = new Promise<never>((_, reject) => {
+      navTimeoutId = setTimeout(() => reject(new Error(`navigation timeout after ${NAV_TIMEOUT_MS}ms`)), NAV_TIMEOUT_MS);
+    });
+    // Suppress unhandled rejection on whichever leg of the race loses.
+    navTimeout.catch(() => {});
+    loadWait.catch(() => {});
+    try {
+      await Promise.race([loadWait, navTimeout]);
+    } finally {
+      clearTimeout(navTimeoutId);
+    }
     const result = await b.cdp.send<{ result: { value: string } }>(
       "Runtime.evaluate",
       {
-        // Cap serialized HTML to prevent OOM on pathologically large DOMs.
         expression: `document.documentElement.outerHTML.slice(0, ${MAX_HTML_BYTES})`,
         returnByValue: true,
         timeout: EVAL_TIMEOUT_MS,
@@ -280,10 +349,15 @@ async function renderPageHtml(url: string): Promise<string> {
     );
     return result.result.value;
   } finally {
-    await b.cdp.send("Target.closeTarget", { targetId }).catch((err) => {
-      logger.debug("web_fetch: Target.closeTarget failed", { err: String(err) });
-    });
-    // disposeOnDetach:true on the context cleans itself when the target closes.
+    offIntercept?.();
+    if (targetId) {
+      await b.cdp.send("Target.closeTarget", { targetId }).catch((err) => {
+        logger.debug("web_fetch: Target.closeTarget failed", { err: String(err) });
+      });
+    }
+    // Explicit dispose covers the case where target was created but session never
+    // attached (disposeOnDetach only fires on session disconnect).
+    await b.cdp.send("Target.disposeBrowserContext", { browserContextId }).catch(() => {});
   }
 }
 
