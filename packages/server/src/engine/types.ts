@@ -10,6 +10,7 @@ export interface RunEvent {
 export interface QueueEntry {
   nodeId: string;
   triggeredBy: string | null;
+  triggeredByEdgeId?: string;
 }
 
 export interface RouteTarget {

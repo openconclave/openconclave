@@ -309,6 +309,7 @@ export async function executeGraph(
             emit,
             cleanPayload,
             entry.triggeredBy,
+            entry.triggeredByEdgeId,
             workspace
           );
 
@@ -520,11 +521,11 @@ function resolveNextEntries(
 
     for (const edge of outgoing) {
       if (edge.sourceHandle === "true" && condResult) {
-        next.push({ nodeId: edge.target, triggeredBy: entry.nodeId });
+        next.push({ nodeId: edge.target, triggeredBy: entry.nodeId, triggeredByEdgeId: edge.id });
       } else if (edge.sourceHandle === "false" && !condResult) {
-        next.push({ nodeId: edge.target, triggeredBy: entry.nodeId });
+        next.push({ nodeId: edge.target, triggeredBy: entry.nodeId, triggeredByEdgeId: edge.id });
       } else if (!edge.sourceHandle) {
-        next.push({ nodeId: edge.target, triggeredBy: entry.nodeId });
+        next.push({ nodeId: edge.target, triggeredBy: entry.nodeId, triggeredByEdgeId: edge.id });
       } else {
         const readyMerges = propagateDeadBranch(edge.target, edges, nodeMap, pendingInputs, firedMerges);
         next.push(...readyMerges);
@@ -547,7 +548,7 @@ function resolveNextEntries(
         }
       } catch { /* not JSON */ }
       for (const edge of forwardEdges) {
-        next.push({ nodeId: edge.target, triggeredBy: entry.nodeId });
+        next.push({ nodeId: edge.target, triggeredBy: entry.nodeId, triggeredByEdgeId: edge.id });
       }
       return next;
     }
@@ -569,7 +570,7 @@ function resolveNextEntries(
     if (routeTo) {
       const targetEdge = forwardEdges.find((e) => e.target === routeTo);
       if (targetEdge) {
-        next.push({ nodeId: targetEdge.target, triggeredBy: entry.nodeId });
+        next.push({ nodeId: targetEdge.target, triggeredBy: entry.nodeId, triggeredByEdgeId: targetEdge.id });
       } else {
         logger.warn("Agent routed to invalid target", { routeTo, nodeId: entry.nodeId });
         throw new Error(`Agent "${node.data.label}" routed to unknown target "${routeTo}"`);
@@ -577,13 +578,13 @@ function resolveNextEntries(
     } else {
       // No routing metadata — fan out to all forward targets (parallel execution)
       for (const edge of forwardEdges) {
-        next.push({ nodeId: edge.target, triggeredBy: entry.nodeId });
+        next.push({ nodeId: edge.target, triggeredBy: entry.nodeId, triggeredByEdgeId: edge.id });
       }
     }
   } else {
     for (const edge of outgoing) {
       if (edge.targetHandle === "participants") continue; // discussion participant edges are never data-flow
-      next.push({ nodeId: edge.target, triggeredBy: entry.nodeId });
+      next.push({ nodeId: edge.target, triggeredBy: entry.nodeId, triggeredByEdgeId: edge.id });
     }
   }
 

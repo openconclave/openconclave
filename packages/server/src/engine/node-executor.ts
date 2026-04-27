@@ -25,12 +25,12 @@ export async function executeNode(
   emit: (event: RunEvent) => void,
   triggerPayload?: unknown,
   triggeredBy?: string | null,
+  triggeredByEdgeId?: string,
   workspace?: Workspace
 ): Promise<unknown> {
   const node = nodeMap.get(nodeId);
   if (!node) return undefined;
 
-  // Resolve input
   let input: unknown;
   const incomingEdges = getIncomingEdges(nodeId, edges);
 
@@ -43,12 +43,14 @@ export async function executeNode(
 
   if (triggeredBy) {
     input = nodeOutputs.get(triggeredBy);
-    // Apply discussion output filtering based on sourceHandle
     const triggerNode = nodeMap.get(triggeredBy);
     if (triggerNode?.data.type === "discussion" && input) {
-      const triggerEdge = dataIncomingEdges.find((e) => e.source === triggeredBy);
-      if (triggerEdge?.sourceHandle) {
-        input = filterDiscussionOutput(input, triggerEdge.sourceHandle);
+      const triggerEdge = triggeredByEdgeId
+        ? dataIncomingEdges.find((e) => e.id === triggeredByEdgeId)
+        : dataIncomingEdges.find((e) => e.source === triggeredBy);
+      const h = triggerEdge?.sourceHandle;
+      if (h === "full" || h === "last" || h === "summary") {
+        input = filterDiscussionOutput(input as DiscussionOutput, h);
       }
     }
   } else if (dataIncomingEdges.length > 1) {
@@ -56,10 +58,12 @@ export async function executeNode(
     for (const e of dataIncomingEdges) {
       if (nodeOutputs.has(e.source)) {
         let val = nodeOutputs.get(e.source);
-        // Apply discussion output filtering based on sourceHandle
         const srcNode = nodeMap.get(e.source);
-        if (srcNode?.data.type === "discussion" && val && e.sourceHandle) {
-          val = filterDiscussionOutput(val, e.sourceHandle);
+        if (srcNode?.data.type === "discussion" && val) {
+          const h = e.sourceHandle;
+          if (h === "full" || h === "last" || h === "summary") {
+            val = filterDiscussionOutput(val as DiscussionOutput, h);
+          }
         }
         inputs.push(val);
       }
@@ -68,10 +72,12 @@ export async function executeNode(
   } else if (dataIncomingEdges.length === 1) {
     const edge = dataIncomingEdges[0]!;
     input = nodeOutputs.get(edge.source);
-    // Apply discussion output filtering based on sourceHandle
     const srcNode = nodeMap.get(edge.source);
-    if (srcNode?.data.type === "discussion" && input && edge.sourceHandle) {
-      input = filterDiscussionOutput(input, edge.sourceHandle);
+    if (srcNode?.data.type === "discussion" && input) {
+      const h = edge.sourceHandle;
+      if (h === "full" || h === "last" || h === "summary") {
+        input = filterDiscussionOutput(input as DiscussionOutput, h);
+      }
     }
   }
 
@@ -98,9 +104,23 @@ export async function executeNode(
           workspace ?? new Workspace(),
         );
         break;
-      case "merge":
-        output = executeMerge(nodeId, edges, nodeMap, nodeOutputs);
+      case "merge": {
+        const filteredOutputs = new Map(nodeOutputs);
+        for (const e of getIncomingEdges(nodeId, edges)) {
+          const srcNode = nodeMap.get(e.source);
+          if (srcNode?.data.type === "discussion") {
+            const h = e.sourceHandle;
+            if (h === "full" || h === "last" || h === "summary") {
+              const raw = nodeOutputs.get(e.source);
+              if (raw !== undefined) {
+                filteredOutputs.set(e.source, filterDiscussionOutput(raw as DiscussionOutput, h));
+              }
+            }
+          }
+        }
+        output = executeMerge(nodeId, edges, nodeMap, filteredOutputs);
         break;
+      }
       case "prompt":
         output = await executePrompt(node, input, conclave, runId, nodeId, triggeredBy, nodeMap, emit);
         break;
@@ -141,16 +161,14 @@ export async function executeNode(
   }
 }
 
-// ── Discussion output filtering ──────────────────────────────
-
-export interface SpeechRecord {
+interface SpeechRecord {
   agentName: string;
   agentId: string;
   round: number;
   message: string;
 }
 
-export interface DiscussionOutput {
+interface DiscussionOutput {
   responses: SpeechRecord[];
   transcript: string;
   moderatorSummary: string | null;
@@ -159,31 +177,20 @@ export interface DiscussionOutput {
   input: unknown;
 }
 
-function isDiscussionOutput(val: unknown): val is DiscussionOutput {
-  return (
-    typeof val === "object" &&
-    val !== null &&
-    "responses" in val &&
-    Array.isArray((val as DiscussionOutput).responses) &&
-    "transcript" in val
-  );
-}
-
-export function filterDiscussionOutput(output: unknown, sourceHandle: string): unknown {
-  if (!isDiscussionOutput(output)) return output;
-
+function filterDiscussionOutput(output: DiscussionOutput, sourceHandle: "full" | "last" | "summary"): unknown {
   switch (sourceHandle) {
     case "full":
       return output;
 
     case "last": {
-      // Keep only the last message from each unique agent
       const lastPerAgent = new Map<string, SpeechRecord>();
       for (const r of output.responses) {
         lastPerAgent.set(r.agentId, r);
       }
+      const lastResponses = Array.from(lastPerAgent.values());
       return {
-        responses: Array.from(lastPerAgent.values()),
+        responses: lastResponses,
+        transcript: lastResponses.map(r => `[Round ${r.round}] ${r.agentName}: ${r.message}`).join('\n'),
         moderatorSummary: output.moderatorSummary,
         rounds: output.rounds,
         exitReason: output.exitReason,
@@ -197,8 +204,9 @@ export function filterDiscussionOutput(output: unknown, sourceHandle: string): u
         input: output.input,
       };
 
-    default:
-      // Unknown handle (e.g. legacy "bottom") — return full output
-      return output;
+    default: {
+      const _exhaustive: never = sourceHandle;
+      throw new Error(`Unknown discussion sourceHandle: ${_exhaustive}`);
+    }
   }
 }
