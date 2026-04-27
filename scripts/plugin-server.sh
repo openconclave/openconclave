@@ -12,6 +12,30 @@ DATA="${2:?plugin data argument required}"
 export OC_PLUGIN_ROOT="$ROOT"
 export OC_DATA_DIR="$DATA"
 
+# ── Rebuild PATH from the real Windows environment ───────────
+# Claude Code's monitor subprocess sometimes inherits a trimmed PATH on
+# Windows (depending on how CC itself was launched), which makes
+# Bun.spawn("node" | "bash") exit 66 with empty stderr in code nodes.
+# Ask cmd.exe for the effective system+user PATH so we match whatever the
+# user's interactive shell sees, regardless of install layout (Program
+# Files, scoop, choco, nvm-windows, custom drives). git-bash / MSYS
+# translates the ';'-separated Windows form to ':'-separated form on
+# assignment, and back to Windows form when bun's child processes start.
+case "${OS:-}" in
+  Windows_NT)
+    WIN_PATH="$(cmd //c 'echo %PATH%' 2>/dev/null | tr -d '\r')"
+    # cygpath -up converts ';'-separated Windows PATH to ':'-separated MSYS form
+    # (e.g. 'C:\Program Files\Git\usr\bin' -> '/usr/bin'), which keeps bash's own
+    # utilities (mkdir, tr, curl, kill) findable while adding nodejs, bun, etc.
+    if [ -n "$WIN_PATH" ] && command -v cygpath >/dev/null 2>&1; then
+      MSYS_PATH="$(cygpath -up "$WIN_PATH" 2>/dev/null || true)"
+      if [ -n "$MSYS_PATH" ]; then
+        export PATH="$MSYS_PATH:$PATH"
+      fi
+    fi
+    ;;
+esac
+
 PIDFILE="$DATA/oc.pid"
 LOGFILE="$DATA/server.log"
 

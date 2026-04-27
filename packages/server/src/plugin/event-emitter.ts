@@ -8,6 +8,7 @@ const EVENT_PREFIX = "__OC_EVENT__";
 const PLUGIN_EVENT_TYPES = new Set<string>([
   "channel:output",
   "prompt:question",
+  "run:completed",
 ]);
 
 let counter = 0;
@@ -57,6 +58,11 @@ export function maybeEmitPluginEvent(event: RunEvent): void {
   if (!isPluginMode()) return;
   if (!PLUGIN_EVENT_TYPES.has(event.type)) return;
 
+  if (event.type === "run:completed") {
+    const status = (event.data as { status?: string } | undefined)?.status;
+    if (status !== "failure") return;
+  }
+
   try {
     const id = nextEventId();
     const dir = eventDir(event.runId);
@@ -73,6 +79,13 @@ export function maybeEmitPluginEvent(event: RunEvent): void {
       ...(event.type === "prompt:question"
         ? {
             hint: `Read the file, decide a response, then call respond_to_prompt(runId=${event.runId}, nodeId="${event.nodeId}", response=...) to unblock the run.`,
+          }
+        : {}),
+      ...(event.type === "run:completed"
+        ? {
+            status: (event.data as { status?: string } | undefined)?.status,
+            error: (event.data as { error?: string } | undefined)?.error,
+            hint: `Run ${event.runId} failed. Call get_run(runId=${event.runId}) for full details.`,
           }
         : {}),
     };

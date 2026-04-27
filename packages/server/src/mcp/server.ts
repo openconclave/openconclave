@@ -197,15 +197,16 @@ export function createMcpServer() {
 
   server.tool(
     "trigger_conclave",
-    "Trigger a conclave run. Always pass your current working directory as cwd so agents run in the correct project.",
+    "Trigger a conclave run. Code nodes inherit the Claude Code session's cwd by default; pass cwd to override.",
     {
       conclaveId: z.string().describe("The conclave ID to trigger"),
       payload: z.record(z.unknown()).optional().describe("Optional trigger payload data"),
-      cwd: z.string().describe("Your current working directory — agents will run here"),
+      cwd: z.string().optional().describe("Override working directory for agents (defaults to the MCP client's cwd)"),
     },
     async ({ conclaveId, payload, cwd }) => {
       try {
-        const enrichedPayload = { ...(payload ?? {}), ...(cwd ? { _callerCwd: cwd } : {}) };
+        const effectiveCwd = cwd ?? process.cwd();
+        const enrichedPayload = { ...(payload ?? {}), _callerCwd: effectiveCwd };
         const data = await ocApi(`/conclaves/${conclaveId}/run`, "POST", { payload: enrichedPayload });
         return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
       } catch {
@@ -418,15 +419,16 @@ async function registerConclaveTools(server: ReturnType<typeof createMcpServer>)
 
       server.tool(
         toolName,
-        `${description}. Always pass your current working directory as cwd so agents run in the correct project.`,
+        `${description}. Code nodes inherit the Claude Code session's cwd by default; pass cwd to override.`,
         {
           input: z.string().optional().describe("Input data to pass to the conclave trigger"),
-          cwd: z.string().describe("Your current working directory — agents will run here"),
+          cwd: z.string().optional().describe("Override working directory for agents (defaults to the MCP client's cwd)"),
         },
         async ({ input, cwd }) => {
+          const effectiveCwd = cwd ?? process.cwd();
           const payload = {
             ...(input ? { input } : {}),
-            ...(cwd ? { _callerCwd: cwd } : {}),
+            _callerCwd: effectiveCwd,
           };
           const result = await ocApi(`/conclaves/${conclaveId}/run`, "POST", { payload });
           return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
@@ -444,5 +446,38 @@ export async function startStdio() {
   const server = createMcpServer();
   await registerConclaveTools(server);
   const transport = new StdioServerTransport();
+
+  // Register with the OC server so it can auto-shutdown when all CC sessions
+  // disconnect. Best-effort — if the server isn't up yet (e.g. we're running
+  // during its startup), the belt-and-suspenders reaper on the server side
+  // will catch stale PIDs eventually.
+  const pid = process.pid;
+  const register = async () => {
+    try {
+      await fetch(`${OC_URL}/api/mcp-sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pid }),
+      });
+    } catch { /* best effort */ }
+  };
+  const unregister = async () => {
+    try {
+      await fetch(`${OC_URL}/api/mcp-sessions/${pid}`, { method: "DELETE" });
+    } catch { /* best effort */ }
+  };
+
+  // Fire register eagerly; don't block connect on it.
+  void register();
+
+  // CC closes stdin when the session ends → SDK fires onclose → we unregister
+  // and exit. This is the one CC lifecycle signal that's reliable across
+  // platforms (it's pipe-level, not signal-level).
+  transport.onclose = () => {
+    void unregister().finally(() => process.exit(0));
+  };
+  process.on("SIGINT", () => { void unregister().finally(() => process.exit(0)); });
+  process.on("SIGTERM", () => { void unregister().finally(() => process.exit(0)); });
+
   await server.connect(transport);
 }

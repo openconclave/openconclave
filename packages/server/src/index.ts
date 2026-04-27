@@ -326,6 +326,78 @@ app.post("/api/triggers/telegram", async (c) => {
   return c.json({ triggered });
 });
 
+// ── MCP stdio client tracking (auto-shutdown daemon) ────────
+// Plugin mode: every CC session's stdio MCP child registers its PID here on
+// startup and drops it on transport close. When the last client disconnects
+// we shut ourselves down after a short grace window (so /reload-plugins'
+// rapid restart doesn't cycle the server). In standalone mode (no
+// OC_PLUGIN_ROOT) the server stays up regardless — registrations are
+// tracked but never trigger shutdown.
+const mcpClientPids = new Set<number>();
+const AUTO_SHUTDOWN = Boolean(process.env.OC_PLUGIN_ROOT);
+const SHUTDOWN_GRACE_MS = 5000;
+let hasEverRegistered = false;
+let shutdownTimer: ReturnType<typeof setTimeout> | null = null;
+
+function cancelShutdownTimer(): void {
+  if (shutdownTimer) {
+    clearTimeout(shutdownTimer);
+    shutdownTimer = null;
+  }
+}
+
+function maybeScheduleShutdown(): void {
+  if (!AUTO_SHUTDOWN || !hasEverRegistered) return;
+  if (mcpClientPids.size > 0) return;
+  cancelShutdownTimer();
+  shutdownTimer = setTimeout(() => {
+    if (mcpClientPids.size === 0) {
+      logger.info("No MCP clients remain; shutting down.");
+      shutdown();
+    }
+  }, SHUTDOWN_GRACE_MS);
+}
+
+app.post("/api/mcp-sessions", async (c) => {
+  let body: { pid?: number };
+  try {
+    body = await c.req.json() as { pid?: number };
+  } catch {
+    throw AppError.validation("Invalid JSON in request body");
+  }
+  const pid = Number(body.pid);
+  if (!Number.isFinite(pid) || pid <= 0) {
+    throw AppError.validation("pid is required and must be a positive integer");
+  }
+  mcpClientPids.add(pid);
+  hasEverRegistered = true;
+  cancelShutdownTimer();
+  return c.json({ ok: true, active: mcpClientPids.size });
+});
+
+app.delete("/api/mcp-sessions/:pid", (c) => {
+  const pid = Number(c.req.param("pid"));
+  if (Number.isFinite(pid)) mcpClientPids.delete(pid);
+  maybeScheduleShutdown();
+  return c.json({ ok: true, active: mcpClientPids.size });
+});
+
+// Belt-and-suspenders: reap PIDs whose processes have vanished (crash case,
+// onclose never fired). process.kill(pid, 0) is a probe — it throws iff the
+// PID is gone. Cheap, runs every 30s, no-op in quiescent state.
+setInterval(() => {
+  let reaped = 0;
+  for (const pid of mcpClientPids) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      mcpClientPids.delete(pid);
+      reaped++;
+    }
+  }
+  if (reaped > 0) maybeScheduleShutdown();
+}, 30000).unref();
+
 // ── MCP over Streamable HTTP ────────────────────────────────
 const mcpTransports = new Map<string, WebStandardStreamableHTTPServerTransport>();
 
