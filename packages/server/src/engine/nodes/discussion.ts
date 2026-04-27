@@ -21,15 +21,11 @@ import type {
 import type { RunEvent } from "../types";
 import { Workspace } from "../workspace";
 
-// ── Constants ────────────────────────────────────────────────
-
-/** Transcript truncation ceiling before passing to moderator. Prevents excessive stdin. */
-const TRANSCRIPT_MAX_BYTES = 100_000;
+/** Prevents excessive stdin to the code moderator. */
+const TRANSCRIPT_MAX_CHARS = 100_000;
 
 /** Moderator action whitelist. */
 const VALID_ACTIONS = new Set(["call_next", "call_specific", "end_discussion"]);
-
-// ── Types ────────────────────────────────────────────────────
 
 interface SpeechRecord {
   agentName: string;
@@ -44,8 +40,6 @@ interface ModeratorResult {
   summary?: string;
 }
 
-// ── Main executor ────────────────────────────────────────────
-
 export async function executeDiscussion(
   runId: number,
   nodeId: string,
@@ -59,7 +53,6 @@ export async function executeDiscussion(
   emit: (event: RunEvent) => void,
   workspace?: Workspace,
 ): Promise<unknown> {
-  // Suppress unused param warnings — retained for API consistency with other executors
   void nodeOutputs;
   void agentSessions;
   void conclaveContext;
@@ -99,17 +92,27 @@ export async function executeDiscussion(
     return { responses, transcript, moderatorSummary, rounds: 0, exitReason, input };
   }
 
-  exitReason = "max_rounds";
   let currentParticipantIndex = 0;
 
   const participantLabels = participants.map((p) => p.data.label);
+
+  const [preLoopRun] = await db.select().from(runs).where(eq(runs.id, runId));
+  if (preLoopRun?.status === "cancelled") {
+    exitReason = "cancelled";
+    emit({
+      type: "discussion:completed",
+      runId,
+      nodeId,
+      data: { rounds: 0, exitReason, responseCount: 0 },
+    });
+    return { responses, transcript, moderatorSummary, rounds: 0, exitReason, input };
+  }
 
   // Moderator opening turn — runs before any participant speaks so the moderator
   // can set the stage (e.g. assign tasks, give instructions, pick who goes first).
   if (config.moderator) {
     const openingResult = await runModerator(
       config.moderator,
-      responses,
       transcript,
       0,
       input,
@@ -166,7 +169,6 @@ export async function executeDiscussion(
     const participant = participants[currentParticipantIndex]!;
     const agentConfig = participant.data.config as AgentConfig;
 
-    // Resolve tools from agent config — respect what the conclave setup configured
     const connectedTools: string[] = [];
     const connectedMcpServers: string[] = [];
     const connectedMcpTools: ToolConfig[] = [];
@@ -185,11 +187,10 @@ export async function executeDiscussion(
       knowledgeBases: connectedKnowledgeBases,
     };
 
-    // Render the prompt template for this turn
     // Truncate transcript to avoid context window overflow — same ceiling as moderator
     const safeParticipantTranscript =
-      transcript.length > TRANSCRIPT_MAX_BYTES
-        ? transcript.slice(-TRANSCRIPT_MAX_BYTES)
+      transcript.length > TRANSCRIPT_MAX_CHARS
+        ? transcript.slice(-TRANSCRIPT_MAX_CHARS)
         : transcript;
     const promptContext: Record<string, unknown> = {
       agentName: participant.data.label,
@@ -220,11 +221,9 @@ export async function executeDiscussion(
       data: { agentName: participant.data.label, agentId: participant.id, round, message },
     });
 
-    // Moderator decision
     if (config.moderator) {
       const modResult = await runModerator(
         config.moderator,
-        responses,
         transcript,
         round,
         input,
@@ -260,16 +259,16 @@ export async function executeDiscussion(
         const idx = participants.findIndex(
           (p) => p.id === modResult.nextAgent || p.data.label === modResult.nextAgent,
         );
-        // Fall back to round-robin if nextAgent not found
         currentParticipantIndex = idx >= 0 ? idx : (currentParticipantIndex + 1) % participants.length;
       } else {
-        // "call_next" or unrecognized — advance round-robin
         currentParticipantIndex = (currentParticipantIndex + 1) % participants.length;
       }
     } else {
       currentParticipantIndex = (currentParticipantIndex + 1) % participants.length;
     }
   }
+
+  if (exitReason !== "cancelled" && exitReason !== "end_discussion") exitReason = "max_rounds";
 
   emit({
     type: "discussion:completed",
@@ -281,11 +280,8 @@ export async function executeDiscussion(
   return { responses, transcript, moderatorSummary, rounds: responses.length, exitReason, input };
 }
 
-// ── Moderator dispatch ───────────────────────────────────────
-
 async function runModerator(
   moderator: DiscussionModeratorConfig,
-  responses: SpeechRecord[],
   transcript: string,
   round: number,
   input: unknown,
@@ -297,7 +293,7 @@ async function runModerator(
   workspace: Workspace,
 ): Promise<ModeratorResult> {
   if (moderator.type === "code") {
-    return runCodeModerator(moderator, responses, transcript, round, input, workspace);
+    return runCodeModerator(moderator, transcript, round, input, workspace);
   }
   return runAgentModerator(
     moderator,
@@ -312,11 +308,8 @@ async function runModerator(
   );
 }
 
-// ── Code moderator ───────────────────────────────────────────
-
 async function runCodeModerator(
   moderator: DiscussionModeratorConfig,
-  responses: SpeechRecord[],
   transcript: string,
   round: number,
   input: unknown,
@@ -326,11 +319,11 @@ async function runCodeModerator(
 
   // Truncate transcript to avoid excessive stdin (code.ts passes via new Blob([inputStr]))
   const safeTranscript =
-    transcript.length > TRANSCRIPT_MAX_BYTES
-      ? transcript.slice(-TRANSCRIPT_MAX_BYTES)
+    transcript.length > TRANSCRIPT_MAX_CHARS
+      ? transcript.slice(-TRANSCRIPT_MAX_CHARS)
       : transcript;
 
-  const moderatorInput = { responses, transcript: safeTranscript, round, input };
+  const moderatorInput = { transcript: safeTranscript, round, input };
 
   let rawResult: unknown;
   try {
@@ -359,8 +352,6 @@ async function runCodeModerator(
     summary: typeof r.summary === "string" ? r.summary : undefined,
   };
 }
-
-// ── Agent moderator ──────────────────────────────────────────
 
 async function runAgentModerator(
   moderator: DiscussionModeratorConfig,
@@ -408,14 +399,12 @@ async function runAgentModerator(
   };
 
   const safeTranscript =
-    transcript.length > TRANSCRIPT_MAX_BYTES
-      ? transcript.slice(-TRANSCRIPT_MAX_BYTES)
+    transcript.length > TRANSCRIPT_MAX_CHARS
+      ? transcript.slice(-TRANSCRIPT_MAX_CHARS)
       : transcript;
 
   const topic = typeof input === "string" ? input : JSON.stringify(input);
-  const participantList = participantLabels.length > 0
-    ? participantLabels.map((l) => `- ${l}`).join("\n")
-    : "(none)";
+  const participantList = participantLabels.map((l) => `- ${l}`).join("\n");
 
   const header =
     `You are moderating a multi-agent discussion.\n\n` +
@@ -439,17 +428,13 @@ async function runAgentModerator(
   });
 
   if (!moderatorResult.tool_call) {
-    throw new Error(
-      `Moderator did not call the "moderate" tool. It responded with text instead: "${String(moderatorResult.output).slice(0, 200)}"`
-    );
+    return { action: "call_next" };
   }
 
   const toolInput = moderatorResult.tool_call.input;
   const action = typeof toolInput.action === "string" ? toolInput.action : "";
   if (!VALID_ACTIONS.has(action)) {
-    throw new Error(
-      `Moderator called "moderate" with invalid action "${action}". Valid actions: ${[...VALID_ACTIONS].join(", ")}`
-    );
+    return { action: "call_next" };
   }
 
   return {
