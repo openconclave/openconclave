@@ -29,6 +29,9 @@ export class TelegramTrigger {
   private executor: ConclaveExecutor;
   private offset = 0;
   private running = false;
+  private pollAbort: AbortController | null = null;
+  private pollDone: Promise<void> | null = null;
+  private sendQueues = new Map<string, Promise<void>>();
 
   constructor(executor: ConclaveExecutor) {
     this.executor = executor;
@@ -43,16 +46,20 @@ export class TelegramTrigger {
 
     logger.debug("Telegram trigger started");
     this.running = true;
-    this.poll();
+    this.pollAbort = new AbortController();
+    this.pollDone = this.poll(this.pollAbort.signal);
   }
 
   async restart() {
-    this.stop();
+    await this.stop();
     await this.start();
   }
 
-  stop() {
+  async stop(): Promise<void> {
     this.running = false;
+    this.pollAbort?.abort();
+    await this.pollDone;
+    this.pollDone = null;
   }
 
   /**
@@ -69,7 +76,11 @@ export class TelegramTrigger {
       const data = event.data as { content?: string } | undefined;
       const text = data?.content ?? "";
       if (text) {
-        await this.sendMessage(meta.chatId, text);
+        const chatId = meta.chatId;
+        const prev = this.sendQueues.get(chatId) ?? Promise.resolve();
+        const next = prev.then(() => this.sendMessage(chatId, text)).catch(() => {});
+        this.sendQueues.set(chatId, next);
+        await next;
       }
       return;
     }
@@ -82,7 +93,11 @@ export class TelegramTrigger {
       if (body) {
         const label = meta.nodeLabels.get(event.nodeId);
         const text = label ? `[${label}]\n${body}` : body;
-        await this.sendMessage(meta.chatId, text);
+        const chatId = meta.chatId;
+        const prev = this.sendQueues.get(chatId) ?? Promise.resolve();
+        const next = prev.then(() => this.sendMessage(chatId, text)).catch(() => {});
+        this.sendQueues.set(chatId, next);
+        await next;
       }
       return;
     }
@@ -104,19 +119,19 @@ export class TelegramTrigger {
     }
   }
 
-  private async poll() {
+  private async poll(signal: AbortSignal) {
     while (this.running) {
       try {
         const token = await getBotToken();
         if (!token) {
-          console.log("⚡ Telegram token removed, stopping");
+          logger.info("Telegram token removed, stopping");
           this.running = false;
           return;
         }
 
         const res = await fetch(
           `https://api.telegram.org/bot${token}/getUpdates?offset=${this.offset}&timeout=30`,
-          { signal: AbortSignal.timeout(35000) }
+          { signal }
         );
         const data = (await res.json()) as any;
 
@@ -128,7 +143,7 @@ export class TelegramTrigger {
         }
       } catch (err: any) {
         if (this.running) {
-          console.error("⚡ Telegram poll error:", err.message);
+          logger.error("Telegram poll error", { error: err.message });
           await new Promise((r) => setTimeout(r, 5000));
         }
       }
@@ -144,7 +159,7 @@ export class TelegramTrigger {
     const text = message.text;
     const userName = message.from?.first_name ?? "Unknown";
 
-    console.log(`⚡ Telegram message from ${userName} (user ${userId}, chat ${chatId}): ${text.slice(0, 50)}`);
+    logger.info("Telegram message received", { from: userName, userId, chatId, preview: text.slice(0, 50) });
 
     // Built-in commands — always available, never trigger conclaves
     if (text === "/start" || text === "/chatid" || text === "/whoami") {
@@ -182,14 +197,14 @@ export class TelegramTrigger {
           // Default-deny: empty chatId means the trigger is not wired to a specific chat.
           // We refuse to accept arbitrary traffic — the owner must set a chat ID explicitly.
           if (!triggerChatId) {
-            console.warn(`⚡ Telegram rejected: conclave "${wf.name}" has no chatId set (default-deny). Set chatId in the trigger inspector.`);
+            logger.warn("Telegram rejected: no chatId set (default-deny)", { conclave: wf.name });
             continue;
           }
           if (triggerChatId !== chatId) continue;
 
           // Optional per-user allowlist. Empty = allow everyone in the configured chat.
           if (allowFromUsers.length > 0 && !allowFromUsers.includes(userId)) {
-            console.warn(`⚡ Telegram rejected: user ${userId} (${userName}) not in allowFromUsers for "${wf.name}"`);
+            logger.warn("Telegram rejected: user not in allowFromUsers", { userId, userName, conclave: wf.name });
             continue;
           }
 
@@ -197,30 +212,24 @@ export class TelegramTrigger {
           const existingRunId = activeChatRuns.get(activeKey);
 
           if (existingRunId) {
-            console.log(`⚡ Continuing run ${existingRunId} for Telegram chat ${chatId}`);
-            try {
-              const now = new Date().toISOString();
-              await db.insert(runEvents).values({
-                runId: existingRunId,
-                nodeId: node.id,
-                type: "chat:userMessage",
-                data: { content: text },
-                createdAt: now,
-              });
-              broadcastRunEvent({
-                type: "chat:userMessage",
-                runId: existingRunId,
-                nodeId: node.id,
-                data: { content: text },
-              });
-
-              await this.executor.executeInRun(existingRunId, def, text, node.id);
-            } catch (err: any) {
-              console.error(`⚡ Failed to continue run ${existingRunId}:`, err.message);
-              activeChatRuns.delete(activeKey);
-              runMeta.delete(existingRunId);
-              await this.startNewRun(def, text, node.id, chatId, activeKey, wf.name);
-            }
+            logger.info("Continuing Telegram run", { runId: existingRunId, chatId });
+            const now = new Date().toISOString();
+            await db.insert(runEvents).values({
+              runId: existingRunId,
+              nodeId: node.id,
+              type: "chat:userMessage",
+              data: { content: text },
+              createdAt: now,
+            });
+            broadcastRunEvent({
+              type: "chat:userMessage",
+              runId: existingRunId,
+              nodeId: node.id,
+              data: { content: text },
+            });
+            // Failure recovery is event-driven: graph errors are caught inside executeInRun
+            // and surfaced as run:completed { status: "failure" } via onEvent.
+            await this.executor.executeInRun(existingRunId, def, text, node.id);
           } else {
             await this.startNewRun(def, text, node.id, chatId, activeKey, wf.name);
           }
@@ -237,7 +246,7 @@ export class TelegramTrigger {
     activeKey: string,
     conclaveName: string
   ): Promise<void> {
-    console.log(`⚡ Triggering conclave "${conclaveName}" from Telegram (chat ${chatId})`);
+    logger.info("Triggering conclave from Telegram", { conclave: conclaveName, chatId });
     try {
       const runId = await this.executor.execute(def, text, triggerNodeId);
       // Collect agent node IDs and labels so we can forward their output
@@ -250,10 +259,12 @@ export class TelegramTrigger {
         }
       }
       // Track this run for chat continuation + response forwarding
+      const priorRunId = activeChatRuns.get(activeKey);
+      if (priorRunId !== undefined) runMeta.delete(priorRunId);
       activeChatRuns.set(activeKey, runId);
       runMeta.set(runId, { chatId, agentNodeIds, nodeLabels });
     } catch (err: any) {
-      console.error(`⚡ Failed to trigger "${conclaveName}":`, err.message);
+      logger.error("Failed to trigger conclave from Telegram", { conclave: conclaveName, error: err.message });
     }
   }
 
@@ -287,13 +298,14 @@ export class TelegramTrigger {
 
     for (const chunk of chunks) {
       try {
-        await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ chat_id: chatId, text: chunk }),
         });
+        await res.body?.cancel();
       } catch (err: any) {
-        console.error(`⚡ Failed to send Telegram message to ${chatId}:`, err.message);
+        logger.error("Failed to send Telegram message", { chatId, error: err.message });
       }
     }
   }
