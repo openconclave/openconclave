@@ -14,30 +14,25 @@ type ScheduledJob = {
 };
 
 function parseCron(cron: string, from: Date): Date | null {
-  // Simple cron parser supporting: * and numbers for minute, hour, day, month, weekday
   const parts = cron.trim().split(/\s+/);
   if (parts.length !== 5) return null;
 
   const [minPart, hourPart, dayPart, monthPart, weekdayPart] = parts;
   if (!minPart || !hourPart || !dayPart || !monthPart || !weekdayPart) return null;
 
-  const match = (part: string, value: number): boolean => {
+  const match = (part: string, value: number, min = 0): boolean => {
     if (part === "*") return true;
-    // Handle */N step values
     if (part.startsWith("*/")) {
       const step = parseInt(part.slice(2));
-      return !isNaN(step) && step > 0 && value % step === 0;
+      return !isNaN(step) && step > 0 && (value - min) % step === 0;
     }
-    // Handle comma-separated values
     return part.split(",").some((p) => parseInt(p) === value);
   };
 
-  // Find the next matching time starting from 'from + 1 minute'
   const next = new Date(from);
   next.setSeconds(0, 0);
   next.setMinutes(next.getMinutes() + 1);
 
-  // Search up to 48 hours ahead
   for (let i = 0; i < 2880; i++) {
     const min = next.getMinutes();
     const hour = next.getHours();
@@ -48,8 +43,8 @@ function parseCron(cron: string, from: Date): Date | null {
     if (
       match(minPart, min) &&
       match(hourPart, hour) &&
-      match(dayPart, day) &&
-      match(monthPart, month) &&
+      match(dayPart, day, 1) &&
+      match(monthPart, month, 1) &&
       match(weekdayPart, weekday)
     ) {
       return next;
@@ -64,6 +59,8 @@ function parseCron(cron: string, from: Date): Date | null {
 export class CronScheduler {
   private jobs = new Map<number, ScheduledJob>();
   private timer: ReturnType<typeof setInterval> | null = null;
+  private syncTimer: ReturnType<typeof setInterval> | null = null;
+  private running = false;
   private executor: ConclaveExecutor;
   private checkIntervalMs: number;
 
@@ -85,17 +82,18 @@ export class CronScheduler {
     logger.debug("Cron scheduler started");
     await this.sync();
 
-    // Check for due jobs every N seconds
     this.timer = setInterval(() => this.tick(), this.checkIntervalMs);
-
-    // Re-sync conclave definitions every 60s
-    setInterval(() => this.sync(), 60000);
+    this.syncTimer = setInterval(() => this.sync(), 60000);
   }
 
   stop() {
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
+    }
+    if (this.syncTimer) {
+      clearInterval(this.syncTimer);
+      this.syncTimer = null;
     }
     logger.debug("Cron scheduler stopped");
   }
@@ -110,7 +108,6 @@ export class CronScheduler {
       const def = wf.definition as unknown as ConclaveDefinition;
       if (!def.nodes) continue;
 
-      // Find cron trigger nodes
       for (const node of def.nodes) {
         if (node.data?.type === "trigger") {
           const config = node.data.config as TriggerConfig;
@@ -128,9 +125,7 @@ export class CronScheduler {
                   nextRun,
                   enabled: true,
                 });
-                console.log(
-                  `⏰ Scheduled "${wf.name}" (${config.cron}) — next run: ${nextRun.toLocaleTimeString()}`
-                );
+                logger.info(`Scheduled "${wf.name}" (${config.cron}) — next run: ${nextRun.toLocaleTimeString()}`);
               }
             }
           }
@@ -138,7 +133,6 @@ export class CronScheduler {
       }
     }
 
-    // Remove jobs for deleted/disabled conclaves
     for (const [id] of this.jobs) {
       if (!activeIds.has(id)) {
         this.jobs.delete(id);
@@ -147,35 +141,39 @@ export class CronScheduler {
   }
 
   private async tick() {
-    const now = new Date();
+    if (this.running) return;
+    this.running = true;
+    try {
+      const now = new Date();
 
-    for (const [id, job] of this.jobs) {
-      if (!job.enabled) continue;
-      if (now < job.nextRun) continue;
+      for (const [id, job] of this.jobs) {
+        if (!job.enabled) continue;
+        if (now < job.nextRun) continue;
 
-      // Time to run
-      console.log(`⏰ Triggering conclave ${id} (cron: ${job.cron})`);
+        logger.info(`Triggering conclave ${id} (cron: ${job.cron})`);
 
-      try {
-        const wf = await db.select().from(conclaves).where(eq(conclaves.id, id));
-        if (!wf.length || !wf[0]!.enabled) {
-          job.enabled = false;
-          continue;
+        try {
+          const wf = await db.select().from(conclaves).where(eq(conclaves.id, id));
+          if (!wf.length || !wf[0]!.enabled) {
+            job.enabled = false;
+            continue;
+          }
+
+          const def = wf[0]!.definition as unknown as ConclaveDefinition;
+          await this.executor.execute(def, { cronTrigger: true, scheduledAt: now.toISOString() }, job.triggerNodeId);
+        } catch (err: unknown) {
+          logger.error(`Failed to trigger conclave ${id}`, { error: err instanceof Error ? err.message : String(err) });
         }
 
-        const def = wf[0]!.definition as unknown as ConclaveDefinition;
-        await this.executor.execute(def, { cronTrigger: true, scheduledAt: now.toISOString() }, job.triggerNodeId);
-      } catch (err: any) {
-        console.error(`⏰ Failed to trigger conclave ${id}:`, err.message);
+        const nextRun = parseCron(job.cron, now);
+        if (nextRun) {
+          job.nextRun = nextRun;
+        } else {
+          this.jobs.delete(id);
+        }
       }
-
-      // Calculate next run
-      const nextRun = parseCron(job.cron, now);
-      if (nextRun) {
-        job.nextRun = nextRun;
-      } else {
-        job.enabled = false;
-      }
+    } finally {
+      this.running = false;
     }
   }
 }
