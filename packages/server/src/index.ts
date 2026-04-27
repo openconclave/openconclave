@@ -3,7 +3,7 @@ import { cors } from "hono/cors";
 import { serveStatic } from "hono/bun";
 import { eq, and, inArray } from "drizzle-orm";
 import { existsSync, readFileSync, writeFileSync, unlinkSync } from "fs";
-import { join, dirname } from "path";
+import { join, dirname, basename } from "path";
 import { WORKSPACE } from "./lib/workspace";
 
 import { logger } from "./lib/logger";
@@ -38,7 +38,7 @@ import { agentPool } from "./agent/pool";
 import { listArtifacts } from "./agent/artifact-tools";
 import { sessionDirForRun } from "./lib/workspace";
 import { TelegramTrigger } from "./triggers/telegram";
-import { AppError } from "@openconclave/shared";
+import { AppError, ErrorCode } from "@openconclave/shared";
 import { API_PORT, VERSION } from "@openconclave/shared";
 
 // ── Database ─────────────────────────────────────────────────
@@ -88,7 +88,6 @@ app.post("/api/conclaves/:id/run", async (c) => {
   const wf = await db.select().from(conclaves).where(eq(conclaves.id, id));
   if (!wf[0]) throw AppError.notFound("Conclave", String(id));
 
-  // Body is optional — an empty body means no payload. Malformed JSON is rejected.
   const rawBody = await c.req.text();
   let body: Record<string, unknown> = {};
   if (rawBody.trim()) {
@@ -215,7 +214,6 @@ app.post("/api/runs/:runId/artifacts/:filename/reveal", async (c) => {
   const runId = Number(c.req.param("runId"));
   if (isNaN(runId)) throw AppError.validation("Invalid run ID");
   const raw = c.req.param("filename");
-  const { basename } = await import("path");
   const safe = basename(raw);
   if (safe !== raw || safe.includes("..") || safe.length === 0) {
     throw AppError.validation("Invalid filename");
@@ -253,27 +251,24 @@ app.post("/api/runs/:runId/cwd", async (c) => {
   const nodeId = body.nodeId as string | undefined;
 
   if (!cwd || typeof cwd !== "string") {
-    return c.json({ error: { code: "BAD_REQUEST", message: "cwd is required" } }, 400);
+    throw AppError.validation("cwd is required");
+  }
+  if (!nodeId || typeof nodeId !== "string") {
+    throw AppError.validation("nodeId is required");
   }
 
-  if (nodeId) {
-    const run = await db.select().from(runs).where(eq(runs.id, runId)).get();
-    if (run) {
-      const wf = await db.select().from(conclaves).where(eq(conclaves.id, run.conclaveId)).get();
-      if (wf) {
-        const def = wf.definition as { nodes?: Array<{ id: string; data?: { type?: string } }> };
-        const callingNode = (def.nodes ?? []).find((n) => n.id === nodeId);
-        if (!callingNode || callingNode.data?.type !== "code") {
-          return c.json({ error: { code: "FORBIDDEN", message: "Only code nodes can set the working directory" } }, 403);
-        }
-      }
-    }
+  const run = await db.select().from(runs).where(eq(runs.id, runId)).get();
+  if (!run) throw AppError.notFound("Run", String(runId));
+  const wf = await db.select().from(conclaves).where(eq(conclaves.id, run.conclaveId)).get();
+  if (!wf) throw AppError.notFound("Conclave", String(run.conclaveId));
+  const def = wf.definition as { nodes?: Array<{ id: string; data?: { type?: string } }> };
+  const callingNode = (def.nodes ?? []).find((n) => n.id === nodeId);
+  if (!callingNode || callingNode.data?.type !== "code") {
+    throw new AppError(ErrorCode.UNAUTHORIZED, "Only code nodes can set the working directory", 403);
   }
 
   const workspace = getRunWorkspace(runId);
-  if (!workspace) {
-    return c.json({ error: { code: "NOT_FOUND", message: "No active workspace for this run" } }, 404);
-  }
+  if (!workspace) throw AppError.notFound("Workspace", String(runId));
 
   workspace.setCwd(cwd);
   return c.json({ ok: true, cwd: workspace.cwd });
@@ -287,7 +282,7 @@ app.get("/api/conclaves/by-tool/:toolName", async (c) => {
     const def = w.definition as Record<string, unknown>;
     return def.toolName === toolName;
   });
-  if (!match) return c.json({ error: { code: "NOT_FOUND", message: `No conclave with toolName "${toolName}"` } }, 404);
+  if (!match) throw AppError.notFound("Conclave", toolName);
   return c.json({ conclave: match });
 });
 
@@ -390,9 +385,11 @@ setInterval(() => {
   for (const pid of mcpClientPids) {
     try {
       process.kill(pid, 0);
-    } catch {
-      mcpClientPids.delete(pid);
-      reaped++;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ESRCH") {
+        mcpClientPids.delete(pid);
+        reaped++;
+      }
     }
   }
   if (reaped > 0) maybeScheduleShutdown();
@@ -402,14 +399,18 @@ setInterval(() => {
 const mcpTransports = new Map<string, WebStandardStreamableHTTPServerTransport>();
 
 app.all("/mcp", async (c) => {
-  // Each session gets its own transport + server instance
   const sessionId = c.req.header("mcp-session-id");
   let transport = sessionId ? mcpTransports.get(sessionId) : undefined;
+
+  if (sessionId && !transport) {
+    return c.json({ error: { code: "NOT_FOUND", message: "Unknown session" } }, 404);
+  }
 
   if (!transport) {
     transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: () => crypto.randomUUID(),
       onsessioninitialized: (id) => { mcpTransports.set(id, transport!); },
+      onsessionclosed: (id) => { mcpTransports.delete(id); },
     });
     const mcpServer = createMcpServer();
     await mcpServer.connect(transport);
@@ -420,7 +421,7 @@ app.all("/mcp", async (c) => {
 });
 
 // ── Server ───────────────────────────────────────────────────
-const port = Number(process.env.PORT ?? API_PORT);
+const port = Number.isFinite(Number(process.env.PORT)) ? Number(process.env.PORT) : API_PORT;
 
 // PID file for the Claude Code plugin monitor: lets a new session detect
 // whether the previous session's server is still alive before trying to
@@ -443,8 +444,12 @@ function checkPidfileConflict(): void {
       // Another instance is alive. Don't overwrite its pidfile; fail fast.
       logger.error(`Another OC server already runs (pid=${priorPid}). Exiting.`);
       process.exit(1);
-    } catch {
-      // Prior pid is dead — reap the stale file.
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ESRCH") {
+        // EPERM means process is alive but unreachable — treat as conflict.
+        logger.error(`Another OC server may still be running (pid=${priorPid}). Exiting.`);
+        process.exit(1);
+      }
       unlinkSync(PID_FILE);
     }
   } catch (err) {
@@ -456,6 +461,7 @@ checkPidfileConflict();
 
 server = Bun.serve({
   port,
+  hostname: "127.0.0.1",
   idleTimeout: 120,
   fetch(req, srv) {
     if (srv.upgrade(req, { data: { topics: new Set() } })) {
@@ -466,6 +472,7 @@ server = Bun.serve({
   websocket: wsHandler,
 });
 setServer(server);
+writeFileSync(PID_FILE, String(process.pid), "utf-8");
 
 // ── Scheduler ────────────────────────────────────────────────
 const scheduler = new CronScheduler(executor);
@@ -485,7 +492,7 @@ startUpdateChecker();
 
 // ── Telegram Trigger ─────────────────────────────────────────
 telegramTrigger = new TelegramTrigger(executor);
-telegramTrigger.start();
+void telegramTrigger.start().catch((err: Error) => logger.error("telegram start failed", { error: err.message }));
 
 app.post("/api/telegram/restart", async (c) => {
   await telegramTrigger.restart();
@@ -519,17 +526,11 @@ if (hasEmbeddedAssets) {
     if (path.startsWith("/api") || path.startsWith("/mcp") || path.startsWith("/ws")) {
       return c.notFound();
     }
+    if (!existsSync(join(publicDir, "index.html"))) return c.notFound();
     return c.body(Bun.file(join(publicDir, "index.html")).stream(), {
       headers: { "Content-Type": "text/html; charset=utf-8" },
     });
   });
-}
-
-// Write the pidfile now that the server is bound successfully.
-try {
-  writeFileSync(PID_FILE, String(process.pid), "utf-8");
-} catch (err) {
-  logger.warn("pidfile write failed", { error: err instanceof Error ? err.message : String(err) });
 }
 
 // ── Graceful Shutdown ────────────────────────────────────────
@@ -541,13 +542,20 @@ function shutdown() {
   scheduler.stop();
   telegramTrigger?.stop();
   server.stop();
-  try { if (existsSync(PID_FILE)) unlinkSync(PID_FILE); } catch { /* best effort */ }
+  try { if (existsSync(PID_FILE)) unlinkSync(PID_FILE); } catch { }
   logger.info("Shutdown complete");
   process.exit(0);
 }
 
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
+process.on("unhandledRejection", (reason) => {
+  logger.error("Unhandled rejection", { reason: String(reason) });
+  shutdown();
+});
+process.on("exit", () => {
+  try { if (existsSync(PID_FILE)) unlinkSync(PID_FILE); } catch { }
+});
 
 // ── Ready ────────────────────────────────────────────────────
 const a = "\x1b[38;5;214m";
