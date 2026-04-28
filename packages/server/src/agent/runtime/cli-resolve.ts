@@ -12,12 +12,12 @@ function findSystemClaude(): string | undefined {
     const result = execFileSync(cmd, ["claude"], { encoding: "utf8", timeout: 3000 }).trim();
     const bin = result.split(/\r?\n/)[0];
     if (bin && existsSync(bin)) return bin;
-  } catch { /* not installed */ }
+  } catch {}
 }
 
 // SDK's extractFromBunfs only checks for "$bunfs" but Bun on Windows uses "B:/~BUN/".
 // Re-extract here to cover both patterns.
-function resolveCliPathWithSource(path: string): { path: string; source: "system" | "embedded" | "passthrough" } {
+export function resolveCliPathWithSource(path: string): { path: string; source: "system" | "embedded" | "passthrough" } {
   const system = findSystemClaude();
   if (system) return { path: system, source: "system" };
   if (!path.includes("$bunfs") && !path.includes("~BUN")) return { path, source: "passthrough" };
@@ -41,6 +41,9 @@ function resolveCliPathWithSource(path: string): { path: string; source: "system
       const mode = st.mode & 0o777;
       if (mode !== 0o700) {
         throw new Error(`CLI cache dir ${dir} has mode ${mode.toString(8)}, expected 700`);
+      }
+      if (st.uid !== process.getuid!()) {
+        throw new Error(`CLI cache dir ${dir} is owned by uid ${st.uid}, expected ${process.getuid!()}`);
       }
     }
 
