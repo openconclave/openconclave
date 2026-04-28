@@ -53,5 +53,19 @@ describe("evaluateExpression", () => {
     test("returns false for unmatched expression", () => {
       expect(evaluateExpression("input > 5", 2)).toBe(false);
     });
+
+    test("contains() finds substring anywhere in string", () => {
+      const trailing = "All checks complete.\n\nVERDICT:APPROVED";
+      expect(evaluateExpression('contains(input, "VERDICT:APPROVED")', trailing)).toBe(true);
+    });
+
+    test("contains() returns false when substring is absent", () => {
+      expect(evaluateExpression('contains(input, "X")', "no match here")).toBe(false);
+    });
+
+    test("startsWith() and endsWith() match at the boundaries", () => {
+      expect(evaluateExpression('startsWith(input, "VERDICT")', "VERDICT:APPROVED")).toBe(true);
+      expect(evaluateExpression('endsWith(input, "APPROVED")', "VERDICT:APPROVED")).toBe(true);
+    });
   });
 });
