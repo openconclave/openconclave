@@ -13,9 +13,14 @@ export async function executePrompt(
   nodeMap: Map<string, ConclaveNode>,
   emit: (event: RunEvent) => void
 ): Promise<unknown> {
-  const content = typeof input === "string" ? input : JSON.stringify(input, null, 2);
+  const content = typeof input === "string" ? input : input === undefined ? "" : (JSON.stringify(input, null, 2) ?? "");
 
   const senderNode = triggeredBy ? nodeMap.get(triggeredBy) : null;
+
+  const responsePromise = registerPrompt(runId, nodeId, content, input);
+  // A pre-rejected responsePromise (duplicate registration) wins the race and throws here,
+  // suppressing the emit below; a pending responsePromise loses to Promise.resolve().
+  await Promise.race([responsePromise, Promise.resolve()]);
 
   emit({
     type: "prompt:question",
@@ -32,5 +37,5 @@ export async function executePrompt(
   });
 
   logger.info("Channel-in-the-loop waiting for response", { runId, nodeId });
-  return registerPrompt(runId, nodeId, content, input);
+  return responsePromise;
 }
