@@ -48,7 +48,17 @@ await recoverStaleRuns();
 // ── App ──────────────────────────────────────────────────────
 const app = new Hono();
 
-app.use("*", cors());
+app.use("*", cors({
+  origin: (origin: string) => {
+    if (!origin) return undefined;
+    const allowed = [
+      "http://localhost:5173", "http://127.0.0.1:5173",
+      "http://localhost:4000",  "http://127.0.0.1:4000",
+    ];
+    return allowed.includes(origin) ? origin : null;
+  },
+  credentials: false,
+}));
 app.onError(errorHandler);
 
 // ── Health ───────────────────────────────────────────────────

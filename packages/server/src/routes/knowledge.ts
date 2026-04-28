@@ -3,14 +3,13 @@ import { eq, sql } from "drizzle-orm";
 
 import { db } from "../db/client";
 import { knowledgeBases, documents, chunks } from "../db/schema";
-import { ingestText, ingestFile } from "../knowledge/ingest";
+import { ingestText } from "../knowledge/ingest";
 import { searchKnowledgeBase } from "../knowledge/search";
 import { logger } from "../lib/logger";
 import { AppError } from "@openconclave/shared";
 
 export const knowledgeRoutes = new Hono()
 
-  // ── List all knowledge bases (with doc/chunk counts) ──────
   .get("/", async (c) => {
     const kbs = await db.select().from(knowledgeBases);
 
@@ -39,7 +38,6 @@ export const knowledgeRoutes = new Hono()
     return c.json({ data: result });
   })
 
-  // ── Create knowledge base ─────────────────────────────────
   .post("/", async (c) => {
     const body = (await c.req.json()) as {
       name?: string;
@@ -51,6 +49,10 @@ export const knowledgeRoutes = new Hono()
 
     if (!body.name) {
       return c.json({ error: { code: "VALIDATION", message: "name is required" } }, 400);
+    }
+
+    if (body.embeddingModel !== undefined && !/^\w[\w.:/-]{0,199}$/.test(String(body.embeddingModel))) {
+      return c.json({ error: { code: "VALIDATION", message: "Invalid embeddingModel" } }, 400);
     }
 
     const now = new Date().toISOString();
@@ -71,7 +73,6 @@ export const knowledgeRoutes = new Hono()
     return c.json({ data: result[0]! }, 201);
   })
 
-  // ── Get knowledge base details ────────────────────────────
   .get("/:id", async (c) => {
     const id = Number(c.req.param("id"));
     const kb = await db
@@ -103,7 +104,6 @@ export const knowledgeRoutes = new Hono()
     });
   })
 
-  // ── Update knowledge base ─────────────────────────────────
   .put("/:id", async (c) => {
     const id = Number(c.req.param("id"));
     const body = (await c.req.json()) as {
@@ -138,7 +138,6 @@ export const knowledgeRoutes = new Hono()
     return c.json({ data: updated });
   })
 
-  // ── Delete knowledge base (cascade) ───────────────────────
   .delete("/:id", async (c) => {
     const id = Number(c.req.param("id"));
     const existing = await db
@@ -149,41 +148,43 @@ export const knowledgeRoutes = new Hono()
 
     if (!existing) throw AppError.notFound("KnowledgeBase", String(id));
 
-    // Delete chunks first (FK), then documents, then KB
-    await db.delete(chunks).where(eq(chunks.knowledgeBaseId, id));
-    await db.delete(documents).where(eq(documents.knowledgeBaseId, id));
-    await db.delete(knowledgeBases).where(eq(knowledgeBases.id, id));
+    // FK ordering: chunks → documents → KB
+    db.transaction((tx) => {
+      tx.delete(chunks).where(eq(chunks.knowledgeBaseId, id)).run();
+      tx.delete(documents).where(eq(documents.knowledgeBaseId, id)).run();
+      tx.delete(knowledgeBases).where(eq(knowledgeBases.id, id)).run();
+    });
 
     logger.info(`Deleted knowledge base "${existing.name}"`, { id });
     return c.json({ data: { ok: true } });
   })
 
-  // ── Ingest text or file ───────────────────────────────────
   .post("/:id/ingest", async (c) => {
     const id = Number(c.req.param("id"));
     const body = (await c.req.json()) as {
       text?: string;
       filename?: string;
-      filePath?: string;
     };
 
-    let documentId: number;
+    const kb = await db
+      .select()
+      .from(knowledgeBases)
+      .where(eq(knowledgeBases.id, id))
+      .get();
 
-    if (body.filePath) {
-      documentId = await ingestFile(id, body.filePath);
-    } else if (body.text && body.filename) {
-      documentId = await ingestText(id, body.filename, body.text);
-    } else {
-      return c.json(
-        { error: { code: "VALIDATION", message: "Provide { text, filename } or { filePath }" } },
-        400,
-      );
+    if (!kb) throw AppError.notFound("KnowledgeBase", String(id));
+
+    if (typeof body.text === "string" && typeof body.filename === "string") {
+      const documentId = await ingestText(id, body.filename, body.text);
+      return c.json({ data: { documentId } }, 201);
     }
 
-    return c.json({ data: { documentId } }, 201);
+    return c.json(
+      { error: { code: "VALIDATION", message: "Provide { text, filename }" } },
+      400,
+    );
   })
 
-  // ── Search knowledge base ─────────────────────────────────
   .post("/:id/search", async (c) => {
     const id = Number(c.req.param("id"));
     const body = (await c.req.json()) as {
@@ -195,11 +196,19 @@ export const knowledgeRoutes = new Hono()
       return c.json({ error: { code: "VALIDATION", message: "query is required" } }, 400);
     }
 
-    const results = await searchKnowledgeBase(id, body.query, body.topK ?? 5);
+    const kb = await db
+      .select()
+      .from(knowledgeBases)
+      .where(eq(knowledgeBases.id, id))
+      .get();
+
+    if (!kb) throw AppError.notFound("KnowledgeBase", String(id));
+
+    const topK = Math.max(1, Math.min(100, Math.floor(Number(body.topK) || 5)));
+    const results = await searchKnowledgeBase(id, body.query, topK);
     return c.json({ data: results });
   })
 
-  // ── List documents in KB ──────────────────────────────────
   .get("/:id/documents", async (c) => {
     const id = Number(c.req.param("id"));
 
@@ -216,7 +225,6 @@ export const knowledgeRoutes = new Hono()
       .from(documents)
       .where(eq(documents.knowledgeBaseId, id));
 
-    // Add chunk counts per document
     const result = await Promise.all(
       docs.map(async (doc) => {
         const chunkCount = await db
@@ -235,7 +243,6 @@ export const knowledgeRoutes = new Hono()
     return c.json({ data: result });
   })
 
-  // ── Get single document (with content) ─────────────────────
   .get("/:id/documents/:docId", async (c) => {
     const id = Number(c.req.param("id"));
     const docId = Number(c.req.param("docId"));
@@ -264,7 +271,6 @@ export const knowledgeRoutes = new Hono()
     });
   })
 
-  // ── Get document chunks ────────────────────────────────────
   .get("/:id/documents/:docId/chunks", async (c) => {
     const id = Number(c.req.param("id"));
     const docId = Number(c.req.param("docId"));
@@ -297,7 +303,6 @@ export const knowledgeRoutes = new Hono()
     });
   })
 
-  // ── Delete document (cascade chunks) ──────────────────────
   .delete("/:id/documents/:docId", async (c) => {
     const id = Number(c.req.param("id"));
     const docId = Number(c.req.param("docId"));
@@ -312,8 +317,11 @@ export const knowledgeRoutes = new Hono()
       throw AppError.notFound("Document", String(docId));
     }
 
-    await db.delete(chunks).where(eq(chunks.documentId, docId));
-    await db.delete(documents).where(eq(documents.id, docId));
+    // FK ordering: chunks → document
+    db.transaction((tx) => {
+      tx.delete(chunks).where(eq(chunks.documentId, docId)).run();
+      tx.delete(documents).where(eq(documents.id, docId)).run();
+    });
 
     logger.info(`Deleted document "${doc.filename}"`, { docId, knowledgeBaseId: id });
     return c.json({ data: { ok: true } });
