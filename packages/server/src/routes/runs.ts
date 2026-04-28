@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { eq, desc, inArray } from "drizzle-orm";
+import { eq, desc, inArray, and, asc } from "drizzle-orm";
 
 import { db } from "../db/client";
 import { runs, agentTasks, runEvents, checkpoints } from "../db/schema";
@@ -10,10 +10,6 @@ export const runRoutes = new Hono()
   .get("/", async (c) => {
     const allRuns = await db.select().from(runs).orderBy(desc(runs.createdAt)).limit(50);
     const runIds = allRuns.map((r) => r.id);
-    // Filter tasks to only the 50 runs we're rendering. Previously this
-    // selected every row in agent_tasks unbounded, which got linearly slower
-    // as the DB grew and competed with active INSERT/UPDATE writes during
-    // agent runs.
     const allTasks = runIds.length > 0
       ? await db.select().from(agentTasks).where(inArray(agentTasks.runId, runIds))
       : [];
@@ -48,8 +44,16 @@ export const runRoutes = new Hono()
     const [run] = await db.select().from(runs).where(eq(runs.id, id));
     if (!run) throw AppError.notFound("Run", String(id));
 
-    const tasks = await db.select().from(agentTasks).where(eq(agentTasks.runId, id));
-    const events = await db.select().from(runEvents).where(eq(runEvents.runId, id));
+    const tasks = await db
+      .select()
+      .from(agentTasks)
+      .where(eq(agentTasks.runId, id))
+      .orderBy(asc(agentTasks.id));
+    const events = await db
+      .select()
+      .from(runEvents)
+      .where(eq(runEvents.runId, id))
+      .orderBy(asc(runEvents.id));
 
     const [latestCp] = await db
       .select()
@@ -70,15 +74,16 @@ export const runRoutes = new Hono()
 
   .post("/:id/cancel", async (c) => {
     const id = Number(c.req.param("id"));
+    if (!Number.isInteger(id) || id <= 0) throw AppError.notFound("Run", c.req.param("id"));
     const now = new Date().toISOString();
     await db
       .update(runs)
       .set({ status: "cancelled", completedAt: now })
-      .where(eq(runs.id, id));
+      .where(and(eq(runs.id, id), inArray(runs.status, ["queued", "running"])));
     await db
       .update(agentTasks)
       .set({ status: "cancelled", completedAt: now })
-      .where(eq(agentTasks.runId, id));
+      .where(and(eq(agentTasks.runId, id), inArray(agentTasks.status, ["queued", "pending"])));
     clearPromptsForRun(id);
     return c.json({ cancelled: true });
   });
