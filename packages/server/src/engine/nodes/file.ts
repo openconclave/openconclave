@@ -1,39 +1,51 @@
 import { dirname } from "path";
-import { readFileSync, writeFileSync, mkdirSync } from "fs";
-import type { ConclaveNode } from "@openconclave/shared";
+import { readFile, writeFile, mkdir, stat } from "fs/promises";
+import { AppError, ErrorCode } from "@openconclave/shared";
+import type { ConclaveNode, FileConfig } from "@openconclave/shared";
 import { logger } from "../../lib/logger";
 import type { Workspace } from "../workspace";
 
-export function executeFile(node: ConclaveNode, input: unknown, workspace?: Workspace): unknown {
-  const fileConfig = node.data.config as { path: string; mode?: "read" | "write" };
+const FILE_NODE_READ_CAP_BYTES = 4 * 1024 * 1024;
+
+export async function executeFile(
+  node: ConclaveNode,
+  input: unknown,
+  workspace: Workspace,
+): Promise<unknown> {
+  const fileConfig = node.data.config as FileConfig;
   const filePath = fileConfig.path;
   const mode = fileConfig.mode ?? "read";
+  const encoding = (fileConfig.encoding ?? "utf8") as BufferEncoding;
 
   if (!filePath) {
-    return "Error: no file path configured";
+    throw new AppError(ErrorCode.VALIDATION, "File node: no file path configured");
   }
 
-  const resolvedPath = workspace ? workspace.resolve(filePath) : filePath;
+  const resolvedPath = workspace.resolveInside(filePath);
 
   if (mode === "write") {
-    try {
-      mkdirSync(dirname(resolvedPath), { recursive: true });
+    await mkdir(dirname(resolvedPath), { recursive: true });
+    if (input instanceof Uint8Array) {
+      await writeFile(resolvedPath, input);
+      logger.info("File node wrote output", { path: resolvedPath, bytes: input.byteLength });
+    } else {
       const content = typeof input === "string" ? input : JSON.stringify(input, null, 2);
-      writeFileSync(resolvedPath, content, "utf8");
-      logger.info("File node wrote output", { path: resolvedPath, bytes: content.length });
-      return `File saved to ${resolvedPath}`;
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      logger.error("File node write failed", { path: resolvedPath, error: msg });
-      return `Error writing file: ${msg}`;
+      await writeFile(resolvedPath, content, encoding);
+      logger.info("File node wrote output", { path: resolvedPath, bytes: Buffer.byteLength(content, encoding) });
     }
+    return input;
   }
 
-  try {
-    return readFileSync(resolvedPath, "utf8");
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    logger.error("File node read failed", { path: resolvedPath, error: msg });
-    return `Error reading file: ${msg}`;
+  if (mode === "read") {
+    const info = await stat(resolvedPath);
+    if (info.size > FILE_NODE_READ_CAP_BYTES) {
+      throw new AppError(
+        ErrorCode.INTERNAL,
+        `File node: ${filePath} (${info.size} bytes) exceeds read cap of ${FILE_NODE_READ_CAP_BYTES} bytes`,
+      );
+    }
+    return await readFile(resolvedPath, encoding);
   }
+
+  throw new AppError(ErrorCode.VALIDATION, `File node: unknown mode "${mode}"`);
 }

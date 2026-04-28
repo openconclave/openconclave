@@ -83,6 +83,8 @@ export interface OutputConfig {
 
 export interface FileConfig {
   path: string;
+  mode?: "read" | "write";
+  encoding?: string;
 }
 
 export interface DiscussionModeratorConfig {

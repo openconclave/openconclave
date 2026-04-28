@@ -16,6 +16,7 @@ export type {
   MergeConfig,
   PromptConfig,
   OutputConfig,
+  FileConfig,
   ToolConfig,
   ConclaveNodeConfig,
   ConclaveNodeData,

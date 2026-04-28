@@ -125,7 +125,7 @@ export async function executeNode(
         output = await executePrompt(node, input, conclave, runId, nodeId, triggeredBy, nodeMap, emit);
         break;
       case "file":
-        output = executeFile(node, input, workspace);
+        output = await executeFile(node, input, workspace ?? new Workspace());
         break;
       case "output":
         output = await executeOutput(node, input, runId, nodeId, conclave.name, emit);
