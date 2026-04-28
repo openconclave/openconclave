@@ -1,4 +1,4 @@
-import { searchWeb } from "../../web-search/search";
+import { searchWeb, WebSearchNotConfiguredError, WebSearchTimeoutError } from "../../web-search/search";
 import type { SearchResult } from "../../web-search/types";
 import type { BuiltinTool } from "./types";
 
@@ -52,7 +52,8 @@ export function buildWebSearchTool(): Record<string, BuiltinTool> {
   };
 }
 
-function clampLimit(raw: unknown): number {
+export function clampLimit(raw: unknown): number {
+  if (raw == null) return DEFAULT_LIMIT;
   const n = Number(raw);
   if (!Number.isFinite(n)) return DEFAULT_LIMIT;
   return Math.max(1, Math.min(MAX_LIMIT, Math.floor(n)));
@@ -80,21 +81,20 @@ function formatResults(
   return head + body;
 }
 
-function formatError(err: unknown, query: string): string {
+export function formatError(err: unknown, query: string): string {
   const message = err instanceof Error ? err.message : String(err);
-  const lower = message.toLowerCase();
   const code = extractCode(err);
 
-  if (message.includes("not configured")) {
+  if (err instanceof WebSearchNotConfiguredError) {
     return "Web search is not configured. Open Settings → Web search, pick a provider, and save.";
   }
-  if (code === "ECONNREFUSED" || lower.includes("econnrefused") || lower.includes("connection refused")) {
+  if (code === "ECONNREFUSED") {
     return `Web search failed: the search endpoint refused the connection. If you're using SearXNG, check that Docker Desktop is running and the container is up — try 'docker start searxng'. Query was: "${query}"`;
   }
-  if (code === "ENOTFOUND" || lower.includes("enotfound") || lower.includes("getaddrinfo")) {
+  if (code === "ENOTFOUND") {
     return `Web search failed: could not resolve the host. Check the URL in Settings → Web search. Query was: "${query}"`;
   }
-  if (lower.includes("timed out") || lower.includes("timeout")) {
+  if (err instanceof WebSearchTimeoutError) {
     return `Web search timed out. The provider may be slow or unreachable. Query was: "${query}"`;
   }
   if (message.startsWith("401") || message.startsWith("403")) {

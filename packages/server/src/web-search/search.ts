@@ -7,6 +7,20 @@ import { searchSerper } from "./providers/serper";
 import { searchLinkup } from "./providers/linkup";
 import type { SearchOptions, SearchResponse, WebSearchProviderId } from "./types";
 
+export class WebSearchNotConfiguredError extends Error {
+  constructor() {
+    super("Web search is not configured. Enable it in Settings → Web search.");
+    this.name = "WebSearchNotConfiguredError";
+  }
+}
+
+export class WebSearchTimeoutError extends Error {
+  constructor(timeoutSecs: number) {
+    super(`Web search timed out after ${timeoutSecs}s`);
+    this.name = "WebSearchTimeoutError";
+  }
+}
+
 const TIMEOUT_MS = 10_000;
 
 interface ResolvedConfig {
@@ -39,7 +53,7 @@ export async function resolveWebSearchConfig(): Promise<ResolvedConfig | null> {
 export async function searchWeb(query: string, opts: SearchOptions = {}): Promise<SearchResponse & { provider: string; tookMs: number }> {
   const config = await resolveWebSearchConfig();
   if (!config) {
-    throw new Error("Web search is not configured. Enable it in Settings → Web search.");
+    throw new WebSearchNotConfiguredError();
   }
 
   const controller = new AbortController();
@@ -52,7 +66,7 @@ export async function searchWeb(query: string, opts: SearchOptions = {}): Promis
     });
     return { ...response, provider: config.provider, tookMs: Math.round(performance.now() - started) };
   } catch (err) {
-    if (controller.signal.aborted) throw new Error(`Web search timed out after ${TIMEOUT_MS / 1000}s`);
+    if (controller.signal.aborted) throw new WebSearchTimeoutError(TIMEOUT_MS / 1000);
     throw err;
   } finally {
     clearTimeout(timeout);
