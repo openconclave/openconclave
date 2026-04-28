@@ -2,15 +2,13 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { ListToolsRequestSchema, CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { writeFileSync, mkdirSync } from "fs";
+import { writeFileSync, mkdirSync, readdirSync, unlinkSync, writeSync } from "fs";
 import { join } from "path";
 import { z } from "zod";
 import { VERSION } from "@openconclave/shared";
 
 const OC_URL = process.env.OPENCONCLAVE_URL ?? "http://localhost:4000";
 const OC_WS_URL = process.env.OPENCONCLAVE_WS_URL ?? "ws://localhost:4000";
-
-// ── MCP Server ──────────────────────────────────────────────
 
 const server = new Server(
   { name: "openconclave", version: VERSION },
@@ -39,8 +37,6 @@ const server = new Server(
   }
 );
 
-// ── API helper ──────────────────────────────────────────────
-
 async function ocApi(path: string, method = "GET", body?: unknown) {
   const res = await fetch(`${OC_URL}/api${path}`, {
     method,
@@ -49,8 +45,6 @@ async function ocApi(path: string, method = "GET", body?: unknown) {
   });
   return res.json();
 }
-
-// ── Tool definitions ────────────────────────────────────────
 
 interface ToolDef {
   name: string;
@@ -89,8 +83,6 @@ function defineTool(name: string, description: string, params: Record<string, z.
   });
 }
 
-// ── Core tools ──────────────────────────────────────────────
-
 defineTool(
   "oc_list_conclaves",
   "List all conclaves in OpenConclave",
@@ -115,7 +107,7 @@ defineTool(
     cwd: z.string().describe("Your current working directory — agents will run here"),
   },
   async ({ conclave_id, payload, cwd }) => {
-    const enrichedPayload = { ...((payload as Record<string, unknown>) ?? {}), ...(cwd ? { _callerCwd: cwd } : {}) };
+    const enrichedPayload = { ...((payload as Record<string, unknown>) ?? {}), _callerCwd: cwd as string };
     const data = await ocApi(`/conclaves/${conclave_id}/run`, "POST", { payload: enrichedPayload });
     return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
   }
@@ -180,8 +172,7 @@ defineTool(
   }
 );
 
-// ── Dynamic conclave tools ──────────────────────────────────
-
+const MAX_OUTPUT_FILES = 200;
 const registeredConclaveTools = new Set<string>();
 
 async function syncConclaveTools() {
@@ -198,6 +189,10 @@ async function syncConclaveTools() {
 
       seen.add(toolName);
       if (!registeredConclaveTools.has(toolName)) {
+        if (tools.has(toolName)) {
+          console.error(`[channel] skipping conclave tool "${toolName}": name conflicts with a built-in tool`);
+          continue;
+        }
         const description = ((def.description ?? wf.description ?? `Run conclave: ${wf.name}`) as string);
         const conclaveId = String(wf.id);
 
@@ -209,7 +204,7 @@ async function syncConclaveTools() {
             cwd: z.string().describe("Your current working directory — agents will run here"),
           },
           async ({ input, cwd }) => {
-            const payload = { ...((input as string) ? { input } : {}), ...(cwd ? { _callerCwd: cwd } : {}) };
+            const payload = { ...((input as string) ? { input } : {}), _callerCwd: cwd as string };
             const result = await ocApi(`/conclaves/${conclaveId}/run`, "POST", { payload });
             return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
           }
@@ -237,8 +232,6 @@ async function syncConclaveTools() {
   }
 }
 
-// ── MCP request handlers ────────────────────────────────────
-
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [...tools.values()].map((t) => ({
@@ -262,22 +255,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 });
 
-// ── Sync & Connect ──────────────────────────────────────────
-
 await syncConclaveTools();
 console.error(`[channel] synced ${registeredConclaveTools.size} conclave tools`);
 
 // Workaround: Bun compiled binaries on Windows buffer piped stdout.
 // Use writeSync(fd=1) to bypass Node.js stream layer entirely.
-import { writeSync } from "fs";
-
-const originalWrite = process.stdout.write.bind(process.stdout);
 process.stdout.write = function (chunk: any, encoding?: any, callback?: any) {
   const data = typeof chunk === "string" ? chunk : chunk.toString();
   try {
     writeSync(1, data);
-  } catch {
-    return originalWrite(chunk, encoding, callback);
+  } catch (err: any) {
+    if (typeof encoding === "function") encoding(err);
+    else if (typeof callback === "function") callback(err);
+    return false;
   }
   if (typeof encoding === "function") encoding();
   else if (typeof callback === "function") callback();
@@ -286,8 +276,6 @@ process.stdout.write = function (chunk: any, encoding?: any, callback?: any) {
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
-
-// ── WebSocket: subscribe to OpenConclave events ─────────────
 
 function connectWebSocket() {
   try {
@@ -323,15 +311,20 @@ function connectWebSocket() {
               ? data.data
               : JSON.stringify(data.data ?? {}, null, 2);
 
-          // Save full output to temp file
           const outputDir = join(process.cwd(), ".openconclave", "outputs");
           mkdirSync(outputDir, { recursive: true });
-          const fileName = `output-${data.runId ?? "unknown"}-${Date.now()}.md`;
+          const existingFiles = readdirSync(outputDir);
+          if (existingFiles.length >= MAX_OUTPUT_FILES) {
+            existingFiles.sort();
+            for (const f of existingFiles.slice(0, existingFiles.length - MAX_OUTPUT_FILES + 1)) {
+              try { unlinkSync(join(outputDir, f)); } catch {}
+            }
+          }
+          const fileName = `output-${data.runId ?? "unknown"}-${Date.now()}-${crypto.randomUUID().slice(0, 8)}.md`;
           const filePath = join(outputDir, fileName);
           writeFileSync(filePath, fullContent);
           meta.output_file = filePath;
 
-          // Truncate inline content if too large
           const MAX_INLINE = 2000;
           const content = fullContent.length > MAX_INLINE
             ? fullContent.slice(0, MAX_INLINE) + `\n\n--- truncated (${fullContent.length} chars) ---\nFull output: ${filePath}`
@@ -422,6 +415,14 @@ function connectWebSocket() {
               meta: { event_type: "channel:output", node_label: "Improve Code" },
             },
           });
+        }
+
+        if (
+          eventType === "conclave:updated" ||
+          eventType === "conclave:created" ||
+          eventType === "conclave:deleted"
+        ) {
+          await syncConclaveTools();
         }
       } catch {
         // ignore parse errors
