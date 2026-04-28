@@ -25,14 +25,28 @@ export async function executeOutput(
       await sendTelegram(config.chatId, input);
       break;
 
+    case "log": {
+      let preview: string;
+      if (input === undefined) {
+        preview = "undefined";
+      } else if (typeof input === "string") {
+        preview = input.slice(0, 200);
+      } else {
+        try { preview = (JSON.stringify(input) ?? "undefined").slice(0, 200); }
+        catch { preview = String(input).slice(0, 200); }
+      }
+      logger.info(`[Output: ${config.type}]`, { data: preview });
+      break;
+    }
+
     default:
-      logger.info(`[Output: ${config.type}]`, {
-        data: typeof input === "string" ? input.slice(0, 200) : JSON.stringify(input).slice(0, 200),
-      });
+      throw new Error(`Unhandled output type: ${(config as { type: string }).type}`);
   }
 
   return input;
 }
+
+const TELEGRAM_MAX = 4096;
 
 async function sendTelegram(chatId: string | undefined, data: unknown): Promise<void> {
   const [tokenRow] = await db
@@ -48,16 +62,26 @@ async function sendTelegram(chatId: string | undefined, data: unknown): Promise<
     throw new AppError(ErrorCode.TELEGRAM_SEND_FAILED, "No chat ID on Telegram output node");
   }
 
-  const text = typeof data === "string" ? data : JSON.stringify(data, null, 2);
+  let text: string;
+  if (typeof data === "string") {
+    text = data;
+  } else {
+    try { text = JSON.stringify(data, null, 2); }
+    catch { text = String(data); }
+  }
 
-  const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text }),
-  });
+  for (let i = 0; i < text.length; i += TELEGRAM_MAX) {
+    const chunk = text.slice(i, i + TELEGRAM_MAX);
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text: chunk }),
+      signal: AbortSignal.timeout(30_000),
+    });
 
-  if (!res.ok) {
-    const err = await res.text();
-    throw new AppError(ErrorCode.TELEGRAM_SEND_FAILED, `Telegram API error: ${err}`);
+    if (!res.ok) {
+      const err = await res.text();
+      throw new AppError(ErrorCode.TELEGRAM_SEND_FAILED, `Telegram API error: ${err}`);
+    }
   }
 }
