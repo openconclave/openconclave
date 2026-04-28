@@ -16,6 +16,7 @@
     "@openconclave/shared": "workspace:*",
     "@puppeteer/browsers": "^2",
     "drizzle-orm": "^0.38",
+    "expr-eval": "^2.0.2",
     "hono": "^4",
     "linkedom": "^0.18.12",
     "nanoid": "^5",
