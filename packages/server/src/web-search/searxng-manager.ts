@@ -1,9 +1,9 @@
-import { homedir } from "os";
 import path from "path";
 import crypto from "crypto";
 import { writeFile, mkdir } from "fs/promises";
 import { db } from "../db/client";
 import { settings as settingsTable } from "../db/schema";
+import { WORKSPACE } from "../lib/workspace";
 
 const CONTAINER_NAME = "searxng";
 const DEFAULT_PORT = 8080;
@@ -19,6 +19,17 @@ export interface ManagerStatus {
   healthy: boolean;
   port: number;
   platform: NodeJS.Platform;
+}
+
+let lifecycleLock: Promise<unknown> = Promise.resolve();
+
+function withLifecycleLock<T>(fn: () => Promise<T>): Promise<T> {
+  const result = lifecycleLock.then(fn);
+  lifecycleLock = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
 }
 
 export async function getManagerStatus(): Promise<ManagerStatus> {
@@ -47,48 +58,59 @@ export async function getManagerStatus(): Promise<ManagerStatus> {
   };
 }
 
-export async function startContainer(): Promise<{ ok: boolean; error?: string }> {
-  await writeSettingsYml();
-  await dockerExec(["rm", "-f", CONTAINER_NAME]);
-  const mount = dockerMountPath();
-  const run = await dockerExec([
-    "run", "-d",
-    "--name", CONTAINER_NAME,
-    "-p", `${DEFAULT_PORT}:8080`,
-    "--restart", "unless-stopped",
-    "-v", `${mount}:/etc/searxng`,
-    IMAGE,
-  ]);
-  if (run.code !== 0) {
-    return { ok: false, error: simplifyDockerError(run.stderr) };
-  }
-  const healthy = await waitHealthy();
-  if (!healthy) {
-    const logs = await dockerExec(["logs", "--tail", "20", CONTAINER_NAME]);
-    return { ok: false, error: `container started but didn't become healthy in ${HEALTH_TIMEOUT_MS / 1000}s. Logs:\n${logs.stdout.slice(-800)}` };
-  }
-  await persistUrlSetting();
-  return { ok: true };
+export function startContainer(): Promise<{ ok: boolean; error?: string }> {
+  return withLifecycleLock(async () => {
+    await writeSettingsYml();
+    await dockerExec(["rm", "-f", CONTAINER_NAME]);
+    const mount = dockerMountPath();
+    const run = await dockerExec([
+      "run", "-d",
+      "--name", CONTAINER_NAME,
+      "-p", `127.0.0.1:${DEFAULT_PORT}:8080`,
+      "--restart", "unless-stopped",
+      "-v", `${mount}:/etc/searxng`,
+      IMAGE,
+    ]);
+    if (run.code !== 0) {
+      return { ok: false, error: simplifyDockerError(run.stderr) };
+    }
+    const healthy = await waitHealthy();
+    if (!healthy) {
+      const logs = await dockerExec(["logs", "--tail", "20", CONTAINER_NAME]);
+      return { ok: false, error: `container started but didn't become healthy in ${HEALTH_TIMEOUT_MS / 1000}s. Logs:\n${logs.stdout.slice(-800)}` };
+    }
+    await persistUrlSetting();
+    return { ok: true };
+  });
 }
 
-export async function stopContainer(): Promise<{ ok: boolean; error?: string }> {
-  const res = await dockerExec(["stop", CONTAINER_NAME]);
-  if (res.code !== 0) return { ok: false, error: simplifyDockerError(res.stderr) };
-  return { ok: true };
+export function stopContainer(): Promise<{ ok: boolean; error?: string }> {
+  return withLifecycleLock(async () => {
+    const res = await dockerExec(["stop", CONTAINER_NAME]);
+    if (res.code !== 0) return { ok: false, error: simplifyDockerError(res.stderr) };
+    return { ok: true };
+  });
 }
 
-export async function restartContainer(): Promise<{ ok: boolean; error?: string }> {
-  const res = await dockerExec(["restart", CONTAINER_NAME]);
-  if (res.code !== 0) return { ok: false, error: simplifyDockerError(res.stderr) };
-  const healthy = await waitHealthy();
-  if (!healthy) return { ok: false, error: "container restarted but didn't become healthy" };
-  return { ok: true };
+export function restartContainer(): Promise<{ ok: boolean; error?: string }> {
+  return withLifecycleLock(async () => {
+    const res = await dockerExec(["restart", CONTAINER_NAME]);
+    if (res.code !== 0) return { ok: false, error: simplifyDockerError(res.stderr) };
+    const healthy = await waitHealthy();
+    if (!healthy) {
+      const logs = await dockerExec(["logs", "--tail", "20", CONTAINER_NAME]);
+      return { ok: false, error: `container restarted but didn't become healthy. Logs:\n${logs.stdout.slice(-800)}` };
+    }
+    return { ok: true };
+  });
 }
 
-export async function removeContainer(): Promise<{ ok: boolean; error?: string }> {
-  const res = await dockerExec(["rm", "-f", CONTAINER_NAME]);
-  if (res.code !== 0) return { ok: false, error: simplifyDockerError(res.stderr) };
-  return { ok: true };
+export function removeContainer(): Promise<{ ok: boolean; error?: string }> {
+  return withLifecycleLock(async () => {
+    const res = await dockerExec(["rm", "-f", CONTAINER_NAME]);
+    if (res.code !== 0) return { ok: false, error: simplifyDockerError(res.stderr) };
+    return { ok: true };
+  });
 }
 
 // ── internals ──────────────────────────────────────────────────────
@@ -96,10 +118,10 @@ export async function removeContainer(): Promise<{ ok: boolean; error?: string }
 async function dockerExec(args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
   try {
     const proc = Bun.spawn({ cmd: ["docker", ...args], stdout: "pipe", stderr: "pipe" });
-    await proc.exited;
     const [stdout, stderr] = await Promise.all([
       new Response(proc.stdout).text(),
       new Response(proc.stderr).text(),
+      proc.exited,
     ]);
     return { code: proc.exitCode ?? -1, stdout: stdout.trim(), stderr: stderr.trim() };
   } catch (err) {
@@ -108,7 +130,7 @@ async function dockerExec(args: string[]): Promise<{ code: number; stdout: strin
 }
 
 function settingsDir(): string {
-  return path.join(homedir(), ".openconclave", "searxng");
+  return path.join(WORKSPACE, "searxng");
 }
 
 function dockerMountPath(): string {
@@ -118,7 +140,7 @@ function dockerMountPath(): string {
 
 async function writeSettingsYml(): Promise<void> {
   const dir = settingsDir();
-  await mkdir(dir, { recursive: true });
+  await mkdir(dir, { recursive: true, mode: 0o700 });
   const secret = crypto.randomBytes(32).toString("hex");
   const yml = `use_default_settings: true
 search:
@@ -127,7 +149,7 @@ server:
   secret_key: "${secret}"
   limiter: false
 `;
-  await writeFile(path.join(dir, "settings.yml"), yml);
+  await writeFile(path.join(dir, "settings.yml"), yml, { mode: 0o600 });
 }
 
 async function probeHealth(): Promise<boolean> {
@@ -158,7 +180,7 @@ async function persistUrlSetting(): Promise<void> {
     .onConflictDoUpdate({ target: settingsTable.key, set: { value, updatedAt: now } });
 }
 
-function simplifyDockerError(stderr: string): string {
+export function simplifyDockerError(stderr: string): string {
   if (!stderr) return "docker command failed";
   const firstLine = stderr.split("\n")[0] ?? stderr;
   const lower = firstLine.toLowerCase();
@@ -174,6 +196,9 @@ function simplifyDockerError(stderr: string): string {
   }
   if (lower.includes("port is already allocated") || lower.includes("address already in use")) {
     return `Port ${DEFAULT_PORT} is in use. Stop whatever is bound to it and retry.`;
+  }
+  if (lower.includes("conflict") || lower.includes("name is already in use")) {
+    return `Container name conflict. Run: docker rm -f ${CONTAINER_NAME}`;
   }
   return firstLine.slice(0, 240);
 }
