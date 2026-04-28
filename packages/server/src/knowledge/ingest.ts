@@ -3,11 +3,9 @@ import { db } from "../db/client";
 import { documents, chunks, knowledgeBases } from "../db/schema";
 import { chunkText } from "./chunker";
 import { generateEmbeddings } from "./embeddings";
+import { AppError } from "@openconclave/shared";
 import { logger } from "../lib/logger";
 
-/**
- * Compute a hex content hash using Web Crypto API (available in Bun).
- */
 async function contentHash(text: string): Promise<string> {
   const encoded = new TextEncoder().encode(text);
   const hashBuffer = await crypto.subtle.digest("SHA-256", encoded);
@@ -17,17 +15,13 @@ async function contentHash(text: string): Promise<string> {
     .join("");
 }
 
-/**
- * Ingest raw text into a knowledge base.
- * Returns the document ID (or existing document ID if content hash matches).
- */
+/** Returns the existing document ID if content was already ingested; otherwise inserts and returns the new ID. */
 export async function ingestText(
   knowledgeBaseId: number,
   filename: string,
   text: string,
   sourcePath?: string,
 ): Promise<number> {
-  // Get the KB config
   const kb = await db
     .select()
     .from(knowledgeBases)
@@ -38,91 +32,71 @@ export async function ingestText(
     throw new Error(`Knowledge base ${knowledgeBaseId} not found`);
   }
 
-  // Compute content hash
   const hash = await contentHash(text);
+  const textChunks = chunkText(text, kb.chunkSize, kb.chunkOverlap);
 
-  // Check for existing document with same hash in this KB
-  const existing = await db
-    .select()
-    .from(documents)
-    .where(
-      and(
-        eq(documents.knowledgeBaseId, knowledgeBaseId),
-        eq(documents.contentHash, hash),
-      ),
-    )
-    .get();
-
-  if (existing) {
-    logger.info(`Document "${filename}" already ingested (hash match)`, {
-      documentId: existing.id,
-    });
-    return existing.id;
+  if (textChunks.length === 0) {
+    throw AppError.validation("text produces no content after chunking");
   }
 
   logger.info(`Ingesting "${filename}" into knowledge base "${kb.name}"`, {
     knowledgeBaseId,
     textLength: text.length,
   });
-
-  // Chunk the text
-  const textChunks = chunkText(text, kb.chunkSize, kb.chunkOverlap);
   logger.info(`Split into ${textChunks.length} chunks`, { chunkSize: kb.chunkSize });
 
-  // Generate embeddings for all chunks
   const embeddings = await generateEmbeddings(kb.embeddingModel, textChunks);
 
-  // Insert document
   const now = new Date().toISOString();
-  const docResult = await db
-    .insert(documents)
-    .values({
-      knowledgeBaseId,
-      filename,
-      sourcePath: sourcePath ?? null,
-      content: text,
-      contentHash: hash,
-      createdAt: now,
-    })
-    .returning({ id: documents.id });
+  const documentId = db.transaction((tx) => {
+    const inserted = tx
+      .insert(documents)
+      .values({
+        knowledgeBaseId,
+        filename,
+        sourcePath: sourcePath ?? null,
+        content: text,
+        contentHash: hash,
+        createdAt: now,
+      })
+      .onConflictDoNothing()
+      .returning({ id: documents.id })
+      .get();
 
-  const documentId = docResult[0]!.id;
+    if (inserted) {
+      for (let i = 0; i < textChunks.length; i++) {
+        tx.insert(chunks).values({
+          documentId: inserted.id,
+          knowledgeBaseId,
+          content: textChunks[i]!,
+          metadata: { chunkIndex: i, filename },
+          embedding: JSON.stringify(embeddings[i]!),
+          chunkIndex: i,
+        }).run();
+      }
+      logger.info(`Ingestion complete for "${filename}"`, {
+        documentId: inserted.id,
+        chunkCount: textChunks.length,
+      });
+      return inserted.id;
+    }
 
-  // Insert chunks with embeddings
-  for (let i = 0; i < textChunks.length; i++) {
-    await db.insert(chunks).values({
-      documentId,
-      knowledgeBaseId,
-      content: textChunks[i]!,
-      metadata: { chunkIndex: i, filename } as Record<string, unknown>,
-      embedding: JSON.stringify(embeddings[i]!),
-      chunkIndex: i,
+    const existing = tx
+      .select({ id: documents.id })
+      .from(documents)
+      .where(
+        and(
+          eq(documents.knowledgeBaseId, knowledgeBaseId),
+          eq(documents.contentHash, hash),
+        ),
+      )
+      .get();
+
+    logger.info(`Document "${filename}" already ingested (hash match)`, {
+      documentId: existing!.id,
     });
-  }
-
-  logger.info(`Ingestion complete for "${filename}"`, {
-    documentId,
-    chunkCount: textChunks.length,
+    return existing!.id;
   });
 
   return documentId;
-}
-
-/**
- * Ingest a file from disk into a knowledge base.
- */
-export async function ingestFile(
-  knowledgeBaseId: number,
-  filePath: string,
-): Promise<number> {
-  const file = Bun.file(filePath);
-  const exists = await file.exists();
-  if (!exists) {
-    throw new Error(`File not found: ${filePath}`);
-  }
-
-  const text = await file.text();
-  const filename = filePath.split(/[/\\]/).pop() ?? filePath;
-
-  return ingestText(knowledgeBaseId, filename, text, filePath);
 }

@@ -129,6 +129,11 @@ export function runMigrations(): void {
   db.run(sql`CREATE INDEX IF NOT EXISTS idx_run_events_run_id ON run_events(run_id)`);
   db.run(sql`CREATE INDEX IF NOT EXISTS idx_run_events_type ON run_events(type)`);
   db.run(sql`CREATE INDEX IF NOT EXISTS idx_documents_kb_id ON documents(knowledge_base_id)`);
+  try {
+    db.run(sql`CREATE UNIQUE INDEX idx_documents_kb_hash ON documents(knowledge_base_id, content_hash)`);
+  } catch {
+    // Index already exists on upgraded databases
+  }
   db.run(sql`CREATE INDEX IF NOT EXISTS idx_chunks_doc_id ON chunks(document_id)`);
   db.run(sql`CREATE INDEX IF NOT EXISTS idx_chunks_kb_id ON chunks(knowledge_base_id)`);
   db.run(sql`CREATE INDEX IF NOT EXISTS idx_checkpoints_run_id ON checkpoints(run_id)`);

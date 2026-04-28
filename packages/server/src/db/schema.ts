@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const conclaves = sqliteTable("conclaves", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -86,7 +86,9 @@ export const documents = sqliteTable("documents", {
   content: text("content"),
   contentHash: text("content_hash").notNull(),
   createdAt: text("created_at").notNull(),
-});
+}, (table) => ({
+  kbHashUnique: uniqueIndex("idx_documents_kb_hash").on(table.knowledgeBaseId, table.contentHash),
+}));
 
 export const chunks = sqliteTable("chunks", {
   id: integer("id").primaryKey({ autoIncrement: true }),
