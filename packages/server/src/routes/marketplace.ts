@@ -2,12 +2,8 @@ import { Hono } from "hono";
 import { eq } from "drizzle-orm";
 import { db } from "../db/client";
 import { conclaves } from "../db/schema";
-import { VERSION, createConclaveSchema } from "@openconclave/shared";
-import {
-  getMarketplaceIndex,
-  getEntryById,
-  fetchDefinition,
-} from "../marketplace";
+import { VERSION, createConclaveSchema, AppError } from "@openconclave/shared";
+import { getMarketplaceIndex, fetchDefinition } from "../marketplace";
 
 export const marketplaceRoutes = new Hono()
   .get("/", async (c) => {
@@ -18,44 +14,64 @@ export const marketplaceRoutes = new Hono()
 
   .post("/:id/import", async (c) => {
     const id = c.req.param("id");
-    const entry = await getEntryById(id);
-    if (!entry) return c.json({ ok: false, error: `Unknown starter: ${id}` }, 404);
+    const index = await getMarketplaceIndex();
+    if (index.error && index.entries.length === 0) {
+      throw new Error(`Marketplace index unavailable: ${index.error}`);
+    }
+    const entry = index.entries.find((e) => e.id === id) ?? null;
+    if (!entry) throw AppError.notFound("MarketplaceEntry", id);
 
     let raw: unknown;
     try {
       raw = await fetchDefinition(entry);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      return c.json({ ok: false, error: `Failed to download: ${message}` }, 502);
+      throw new Error(`Failed to download: ${message}`);
     }
 
-    // Accept both shapes: { conclave: {...} } (exported format) or a bare conclave object.
+    // /:id/export wraps in { conclave: … }; raw fixtures don't
     const wrapped = raw as { conclave?: unknown };
     const candidate = wrapped && typeof wrapped === "object" && wrapped.conclave ? wrapped.conclave : raw;
 
     const parsed = createConclaveSchema.safeParse(candidate);
     if (!parsed.success) {
-      return c.json(
-        { ok: false, error: `Invalid conclave definition: ${parsed.error.issues[0]?.message ?? "validation failed"}` },
-        400,
+      throw AppError.validation(
+        `Invalid conclave definition: ${parsed.error.issues[0]?.message ?? "validation failed"}`,
       );
     }
     const body = parsed.data;
 
-    const now = new Date().toISOString();
-    const result = await db.insert(conclaves).values({
-      name: body.name,
-      description: body.description,
-      definition: { ...body, version: VERSION, enabled: true, createdAt: now, updatedAt: now },
-      enabled: true,
-      createdAt: now,
-      updatedAt: now,
-    }).returning({ id: conclaves.id });
+    for (const node of body.nodes) {
+      if (node.data.type !== "agent") continue;
+      const cfg = node.data.config as { tools?: Array<{ toolType: string }> };
+      if (cfg.tools?.some((t) => t.toolType === "knowledge")) {
+        throw AppError.validation(
+          "Marketplace starters with knowledge tools are not supported for direct import",
+        );
+      }
+    }
 
-    const newId = result[0]!.id;
-    await db.update(conclaves)
-      .set({ definition: { id: newId, ...body, version: VERSION, enabled: true, createdAt: now, updatedAt: now } })
-      .where(eq(conclaves.id, newId));
+    const now = new Date().toISOString();
+    const newId = db.transaction((tx) => {
+      const rows = tx
+        .insert(conclaves)
+        .values({
+          name: body.name,
+          description: body.description,
+          definition: { ...body, version: VERSION, enabled: true, createdAt: now, updatedAt: now },
+          enabled: true,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning({ id: conclaves.id })
+        .all();
+      const insertedId = rows[0]!.id;
+      tx.update(conclaves)
+        .set({ definition: { id: insertedId, ...body, version: VERSION, enabled: true, createdAt: now, updatedAt: now } })
+        .where(eq(conclaves.id, insertedId))
+        .run();
+      return insertedId;
+    });
 
     return c.json({ ok: true, id: newId, name: body.name });
   });
