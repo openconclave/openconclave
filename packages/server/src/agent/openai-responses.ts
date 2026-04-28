@@ -6,16 +6,12 @@ import { AgentBase } from "./base";
 import type { ResolvedAgentConfig } from "@openconclave/shared";
 import type { OpenAIRunOptions, OpenAIResult } from "./openai-types";
 
-/**
- * Runs the OpenAI Responses API agentic loop.
- * Handles multi-turn reasoning, function calling, MCP bridges, and routing.
- */
+// Responses API: reasoning items must be replayed in full each turn — unlike openai-chat.ts.
 export async function runResponsesAPI(options: OpenAIRunOptions): Promise<OpenAIResult> {
   const { provider, model, sessionFile, onOutput } = options;
   const maxTurns = options.maxTurns ?? 25;
   const startTime = Date.now();
 
-  // Build input array from session file
   const input: Array<Record<string, unknown>> = [];
 
   if (sessionFile && existsSync(sessionFile)) {
@@ -37,7 +33,6 @@ export async function runResponsesAPI(options: OpenAIRunOptions): Promise<OpenAI
     input.push({ role: "user", content: inputStr });
   }
 
-  // Resolve tools via AgentBase
   const resolvedConfig: ResolvedAgentConfig = {
     allowedTools: options.allowedTools ?? [],
     mcpServers: options.mcpServers ?? [],
@@ -50,7 +45,7 @@ export async function runResponsesAPI(options: OpenAIRunOptions): Promise<OpenAI
   const tools: Array<Record<string, unknown>> = [...agent.toResponsesTools()];
   const toolExecutors = agent.toolExecutors;
 
-  // Add routing tool if conclave has ≥2 branches
+  // Add routing tool when route targets are present
   if (options.routeTargets && options.routeTargets.length >= 1) {
     tools.push(createRoutingToolResponses(options.routeTargets));
   }
@@ -107,7 +102,6 @@ export async function runResponsesAPI(options: OpenAIRunOptions): Promise<OpenAI
         reasoning_tokens: data.usage?.output_tokens_details?.reasoning_tokens,
       });
 
-      // Process output items
       let textOutput = "";
       let routeTo: string | undefined;
       let routeContent: string | undefined;
@@ -118,7 +112,6 @@ export async function runResponsesAPI(options: OpenAIRunOptions): Promise<OpenAI
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       for (const item of (data.output ?? []) as any[]) {
-        // Capture reasoning summaries
         if (item.type === "reasoning" && item.summary) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const summaryText = (item.summary as any[])
@@ -131,7 +124,6 @@ export async function runResponsesAPI(options: OpenAIRunOptions): Promise<OpenAI
           }
         }
 
-        // Capture text output
         if (item.type === "message" && item.content) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           for (const block of item.content as any[]) {
@@ -141,12 +133,11 @@ export async function runResponsesAPI(options: OpenAIRunOptions): Promise<OpenAI
           }
         }
 
-        // Execute function calls
         if (item.type === "function_call") {
           hasFunctionCalls = true;
           let fnArgs: Record<string, unknown>;
           try {
-            fnArgs = typeof item.arguments === "string" ? JSON.parse(item.arguments) : item.arguments;
+            fnArgs = typeof item.arguments === "string" ? JSON.parse(item.arguments) : (item.arguments ?? {});
           } catch {
             fnArgs = {};
           }
@@ -171,17 +162,14 @@ export async function runResponsesAPI(options: OpenAIRunOptions): Promise<OpenAI
           functionResults.push({ call_id: item.call_id as string, output: result });
         }
 
-        // Add every output item to input (reasoning + function_call + message)
         input.push(item);
       }
 
-      // Append function call results after all output items
       for (const fr of functionResults) {
         input.push({ type: "function_call_output", call_id: fr.call_id, output: fr.output });
       }
 
       if (routeTo) {
-        await agent.disconnect();
         return {
           success: true,
           output: routeContent ?? "",
@@ -196,15 +184,11 @@ export async function runResponsesAPI(options: OpenAIRunOptions): Promise<OpenAI
         continue;
       }
 
-      // Final text response
-      if (textOutput) {
-        onOutput?.(textOutput);
-      }
-
-      await agent.disconnect();
+      const finalText = textOutput || data.output_text || "";
+      if (finalText) onOutput?.(finalText);
       return {
         success: true,
-        output: textOutput || data.output_text || "",
+        output: finalText,
         durationMs: Date.now() - startTime,
         thinking: thinkingBlocks.length > 0 ? thinkingBlocks : undefined,
         sessionId: sessionFile,
@@ -225,5 +209,7 @@ export async function runResponsesAPI(options: OpenAIRunOptions): Promise<OpenAI
       error: message,
       durationMs: Date.now() - startTime,
     };
+  } finally {
+    await agent.disconnect().catch(() => {});
   }
 }
