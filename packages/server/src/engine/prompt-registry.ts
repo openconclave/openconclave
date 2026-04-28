@@ -1,16 +1,13 @@
-/**
- * Registry for pending prompt responses.
- * When a Prompt node fires, it registers a pending question and waits.
- * When a response arrives (via API/MCP), the promise resolves and the conclave continues.
- */
-
 interface PendingPrompt {
   runId: number;
   nodeId: string;
   question: string;
   input: unknown;
   resolve: (response: string) => void;
+  reject: (err: Error) => void;
   createdAt: string;
+  abortSignal?: AbortSignal;
+  abortListener?: () => void;
 }
 
 const pending = new Map<string, PendingPrompt>();
@@ -25,14 +22,21 @@ export function registerPrompt(
   const key = `${runId}:${nodeId}`;
 
   return new Promise<string>((resolve, reject) => {
-    pending.set(key, {
+    if (pending.has(key)) {
+      reject(new Error("duplicate prompt registration"));
+      return;
+    }
+
+    const entry: PendingPrompt = {
       runId,
       nodeId,
       question,
       input,
       resolve,
+      reject,
       createdAt: new Date().toISOString(),
-    });
+    };
+    pending.set(key, entry);
 
     if (abortSignal) {
       if (abortSignal.aborted) {
@@ -40,16 +44,15 @@ export function registerPrompt(
         reject(new Error("prompt aborted"));
         return;
       }
-      abortSignal.addEventListener(
-        "abort",
-        () => {
-          if (pending.has(key)) {
-            pending.delete(key);
-            reject(new Error("prompt aborted"));
-          }
-        },
-        { once: true },
-      );
+      const listener = () => {
+        if (pending.get(key) === entry) {
+          pending.delete(key);
+          reject(new Error("prompt aborted"));
+        }
+      };
+      entry.abortSignal = abortSignal;
+      entry.abortListener = listener;
+      abortSignal.addEventListener("abort", listener, { once: true });
     }
   });
 }
@@ -59,6 +62,9 @@ export function respondToPrompt(runId: number, nodeId: string, response: string)
   const entry = pending.get(key);
   if (!entry) return false;
 
+  if (entry.abortSignal && entry.abortListener) {
+    entry.abortSignal.removeEventListener("abort", entry.abortListener);
+  }
   entry.resolve(response);
   pending.delete(key);
   return true;
@@ -71,21 +77,23 @@ export function getPendingPrompts(): Array<{
   input: unknown;
   createdAt: string;
 }> {
-  return [...pending.values()].map(({ resolve, ...rest }) => rest);
-}
-
-export function getPendingPromptForRun(runId: number): PendingPrompt | undefined {
-  for (const entry of pending.values()) {
-    if (entry.runId === runId) return entry;
-  }
-  return undefined;
+  return [...pending.values()].map(({ runId, nodeId, question, input, createdAt }) => ({
+    runId,
+    nodeId,
+    question,
+    input,
+    createdAt,
+  }));
 }
 
 export function clearPromptsForRun(runId: number): number {
   let cleared = 0;
   for (const [key, entry] of pending) {
     if (entry.runId === runId) {
-      entry.resolve("[cancelled]");
+      if (entry.abortSignal && entry.abortListener) {
+        entry.abortSignal.removeEventListener("abort", entry.abortListener);
+      }
+      entry.reject(new Error("run cancelled"));
       pending.delete(key);
       cleared++;
     }
