@@ -2,16 +2,20 @@ import { Hono } from "hono";
 
 import { broadcastToTopic } from "../ws/broadcast";
 
-function broadcastAsChannelOutput(content: string, nodeLabel: string) {
-  broadcastToTopic("dashboard", {
-    type: "channel:output",
-    runId: 0,
-    nodeId: "improve",
-    data: { content, conclaveName: "Improve", nodeLabel },
-  });
-}
+const ID_RE = /^[a-zA-Z0-9_-]{1,64}$/;
+const MAX_TEXT = 8_000;
 
 export const channelRoutes = new Hono()
+  .use(async (c, next) => {
+    // Browsers set Sec-Fetch-Site on all fetches; "cross-site" means the
+    // request originates from a different site — block it to prevent CSRF.
+    // Non-browser clients (curl, MCP tools) omit the header entirely and are
+    // intentionally allowed through.
+    if (c.req.header("sec-fetch-site") === "cross-site") {
+      return c.json({ error: "Forbidden" }, 403);
+    }
+    await next();
+  })
   .post("/improve-prompt", async (c) => {
     const { conclaveId, nodeId, nodeLabel, currentPrompt } = await c.req.json() as {
       conclaveId: string;
@@ -19,21 +23,18 @@ export const channelRoutes = new Hono()
       nodeLabel: string;
       currentPrompt: string;
     };
-    const content = [
-      "A user wants you to improve an agent's system prompt in OpenConclave.",
-      "",
-      `Conclave ID: ${conclaveId}`,
-      `Node ID: ${nodeId}`,
-      `Node Label: ${nodeLabel}`,
-      "",
-      "Current prompt:",
-      currentPrompt || "(empty)",
-      "",
-      "Please write an improved version of this system prompt — make it clearer, more effective, and well-structured.",
-      "Then call `update_node` to save it:",
-      `  update_node(conclaveId: "${conclaveId}", nodeId: "${nodeId}", config: { systemPrompt: "your improved prompt" })`,
-    ].join("\n");
-    broadcastAsChannelOutput(content, "Improve Prompt");
+    if (!ID_RE.test(conclaveId) || !ID_RE.test(nodeId)) {
+      return c.json({ error: "Invalid ID" }, 400);
+    }
+    broadcastToTopic("dashboard", {
+      type: "channel:improve-prompt",
+      data: {
+        conclaveId,
+        nodeId,
+        nodeLabel: String(nodeLabel ?? "").slice(0, MAX_TEXT),
+        currentPrompt: String(currentPrompt ?? "").slice(0, MAX_TEXT),
+      },
+    });
     return c.json({ ok: true });
   })
 
@@ -42,19 +43,16 @@ export const channelRoutes = new Hono()
       conclaveId: string;
       currentDescription: string;
     };
-    const content = [
-      "A user wants you to improve the conclave-level Instructions for Claude in OpenConclave.",
-      "",
-      `Conclave ID: ${conclaveId}`,
-      "",
-      "Current instructions:",
-      currentDescription || "(empty)",
-      "",
-      "Please write an improved version — make it clearer, more effective, and well-structured.",
-      "Then call `update_conclave` to save it:",
-      `  update_conclave(conclaveId: "${conclaveId}", description: "your improved instructions")`,
-    ].join("\n");
-    broadcastAsChannelOutput(content, "Improve Description");
+    if (!ID_RE.test(conclaveId)) {
+      return c.json({ error: "Invalid ID" }, 400);
+    }
+    broadcastToTopic("dashboard", {
+      type: "channel:improve-description",
+      data: {
+        conclaveId,
+        currentDescription: String(currentDescription ?? "").slice(0, MAX_TEXT),
+      },
+    });
     return c.json({ ok: true });
   })
 
@@ -66,24 +64,18 @@ export const channelRoutes = new Hono()
       runtime: string;
       currentCode: string;
     };
-    const content = [
-      "A user wants you to write or improve code for a Code node in OpenConclave.",
-      "",
-      `Conclave ID: ${conclaveId}`,
-      `Node ID: ${nodeId}`,
-      `Node Label: ${nodeLabel}`,
-      `Runtime: ${runtime}`,
-      "",
-      "Current code:",
-      currentCode || "(empty — user may have typed a description of what they want)",
-      "",
-      "If the current code looks like a natural-language description, write the code from scratch.",
-      "If it's already code, improve it — make it more robust, fix bugs, and clean it up.",
-      `The runtime is ${runtime}. Input from the previous node is passed via stdin and $INPUT env var. Output must go to stdout as JSON.`,
-      "",
-      "Then call `update_node` to save it:",
-      `  update_node(conclaveId: "${conclaveId}", nodeId: "${nodeId}", config: { code: "your code here" })`,
-    ].join("\n");
-    broadcastAsChannelOutput(content, "Improve Code");
+    if (!ID_RE.test(conclaveId) || !ID_RE.test(nodeId)) {
+      return c.json({ error: "Invalid ID" }, 400);
+    }
+    broadcastToTopic("dashboard", {
+      type: "channel:improve-code",
+      data: {
+        conclaveId,
+        nodeId,
+        nodeLabel: String(nodeLabel ?? "").slice(0, MAX_TEXT),
+        runtime: String(runtime ?? "").slice(0, 64),
+        currentCode: String(currentCode ?? "").slice(0, MAX_TEXT),
+      },
+    });
     return c.json({ ok: true });
   });
