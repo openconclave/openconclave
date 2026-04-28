@@ -1,4 +1,5 @@
-import { readFileSync, readdirSync, statSync, existsSync } from "fs";
+import { readdirSync, statSync, existsSync } from "fs";
+import { readFile } from "fs/promises";
 import { join, basename } from "path";
 import { tool } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
@@ -15,8 +16,8 @@ function attachDir(runId: number): string {
 }
 
 function resolveAttachment(runId: number, filename: string): string {
-  const safe = basename(String(filename));
-  if (safe !== String(filename) || safe.includes("..") || safe.length === 0) {
+  const safe = basename(filename);
+  if (safe !== filename || safe.includes("..") || safe.length === 0) {
     throw new Error(`Invalid filename: ${filename}`);
   }
   const path = join(attachDir(runId), safe);
@@ -24,28 +25,20 @@ function resolveAttachment(runId: number, filename: string): string {
   return path;
 }
 
-export function hasAttachments(runId: number): boolean {
-  const dir = attachDir(runId);
-  if (!existsSync(dir)) return false;
-  try {
-    return readdirSync(dir).some((f) => statSync(join(dir, f)).isFile());
-  } catch {
-    return false;
-  }
-}
-
 export async function listAttachments(runId: number): Promise<string> {
   const dir = attachDir(runId);
   if (!existsSync(dir)) return "No attachments.";
-  const files = readdirSync(dir).filter((f) => {
-    try { return statSync(join(dir, f)).isFile(); } catch { return false; }
+  const entries = readdirSync(dir).flatMap((f) => {
+    try {
+      const st = statSync(join(dir, f));
+      if (!st.isFile()) return [];
+      return [{ name: f, size: st.size }];
+    } catch {
+      return [];
+    }
   });
-  if (files.length === 0) return "No attachments.";
-
-  return files.map((filename) => {
-    const size = statSync(join(dir, filename)).size;
-    return `- ${filename} (${size} bytes)`;
-  }).join("\n");
+  if (entries.length === 0) return "No attachments.";
+  return entries.map(({ name, size }) => `- ${name} (${size} bytes)`).join("\n");
 }
 
 export async function readAttachment(
@@ -57,28 +50,30 @@ export async function readAttachment(
   const path = resolveAttachment(runId, filename);
   const cappedLimit = Math.min(Math.max(1, Math.floor(limit ?? DEFAULT_READ_LINES)), MAX_READ_LINES);
   const start = Math.max(0, Math.floor(offset ?? 0));
-  const text = readFileSync(path, "utf-8");
+  const text = await readFile(path, "utf-8");
   const all = text.split("\n");
   const total = all.length;
   const end = Math.min(total, start + cappedLimit);
-  const slice = all.slice(start, end).join("\n");
+  const slice = all.slice(start, end);
+  if (slice.length === 0) return `[offset ${start} is past end (file has ${total} lines)]`;
   const hasMore = end < total;
-  return `${slice}\n\n[lines ${start}-${Math.max(start, end - 1)} of ${total}${hasMore ? ", more available" : ""}]`;
+  return `${slice.join("\n")}\n\n[lines ${start}-${end - 1} of ${total}${hasMore ? ", more available" : ""}]`;
 }
 
 export async function grepAttachment(
   runId: number,
   filename: string,
   pattern: string,
+  flags?: string,
 ): Promise<string> {
   const path = resolveAttachment(runId, filename);
   let re: RegExp;
   try {
-    re = new RegExp(pattern);
+    re = new RegExp(pattern, flags ?? "");
   } catch (err: unknown) {
     return `Invalid regex: ${err instanceof Error ? err.message : String(err)}`;
   }
-  const text = readFileSync(path, "utf-8");
+  const text = await readFile(path, "utf-8");
   const lines = text.split("\n");
   const hits: string[] = [];
   for (let i = 0; i < lines.length; i++) {
@@ -107,7 +102,13 @@ export function createAttachmentBuiltinTools(runId: number): Record<string, Buil
           parameters: { type: "object", properties: {} },
         },
       },
-      execute: () => listAttachments(runId),
+      execute: async () => {
+        try {
+          return await listAttachments(runId);
+        } catch (err: unknown) {
+          return `Error: ${err instanceof Error ? err.message : String(err)}`;
+        }
+      },
     },
     read_attachment: {
       tool: {
@@ -126,12 +127,18 @@ export function createAttachmentBuiltinTools(runId: number): Record<string, Buil
           },
         },
       },
-      execute: async (args) => readAttachment(
-        runId,
-        args.filename as string,
-        args.offset as number | undefined,
-        args.limit as number | undefined,
-      ),
+      execute: async (args) => {
+        try {
+          return await readAttachment(
+            runId,
+            args.filename as string,
+            args.offset as number | undefined,
+            args.limit as number | undefined,
+          );
+        } catch (err: unknown) {
+          return `Error: ${err instanceof Error ? err.message : String(err)}`;
+        }
+      },
     },
     grep_attachment: {
       tool: {
@@ -145,15 +152,23 @@ export function createAttachmentBuiltinTools(runId: number): Record<string, Buil
             properties: {
               filename: { type: "string", description: "Filename exactly as returned by list_attachments" },
               pattern: { type: "string", description: "JavaScript regex" },
+              flags: { type: "string", description: "Optional regex flags (e.g. 'i' for case-insensitive)" },
             },
           },
         },
       },
-      execute: async (args) => grepAttachment(
-        runId,
-        args.filename as string,
-        args.pattern as string,
-      ),
+      execute: async (args) => {
+        try {
+          return await grepAttachment(
+            runId,
+            args.filename as string,
+            args.pattern as string,
+            args.flags as string | undefined,
+          );
+        } catch (err: unknown) {
+          return `Error: ${err instanceof Error ? err.message : String(err)}`;
+        }
+      },
     },
   };
 }
@@ -185,9 +200,10 @@ export function createClaudeAttachmentTools(runId: number): any[] {
       {
         filename: z.string().describe("Filename exactly as returned by list_attachments"),
         pattern: z.string().describe("JavaScript regex"),
+        flags: z.string().optional().describe("Optional regex flags (e.g. 'i' for case-insensitive)"),
       },
-      async ({ filename, pattern }) => ({
-        content: [{ type: "text" as const, text: await grepAttachment(runId, filename, pattern) }],
+      async ({ filename, pattern, flags }) => ({
+        content: [{ type: "text" as const, text: await grepAttachment(runId, filename, pattern, flags) }],
       }),
     ),
   ];
