@@ -7,10 +7,10 @@ import {
 } from "@openconclave/shared";
 import type { CodeConfig } from "@openconclave/shared";
 import { existsSync } from "fs";
-import { resolve as pathResolve, dirname } from "path";
+import { resolve as pathResolve, dirname, join as pathJoin } from "path";
 import type { Workspace } from "../workspace";
 import { buildSubprocessEnv } from "../../agent/subprocess-env";
-import { sessionDirForRun } from "../../lib/workspace";
+import { sessionDirForRun, WORKSPACE } from "../../lib/workspace";
 import { logger } from "../../lib/logger";
 
 export interface CodeNodeContext {
@@ -77,9 +77,58 @@ function getGitBash(): { path: string; ok: boolean } {
 let pythonCmdCache: { cmd: string[]; ok: boolean } | null = null;
 function getPythonCommand(): { cmd: string[]; ok: boolean } {
   if (pythonCmdCache) return pythonCmdCache;
-  const result = resolvePythonCommand();
-  if (result.ok) pythonCmdCache = result;
-  return result;
+  const base = resolvePythonCommand();
+  if (!base.ok) return base;
+  // On macOS Homebrew + recent Linux distros, the system Python is marked
+  // PEP 668 "externally managed" and rejects `pip install`. Agents commonly
+  // generate code that pip-installs missing packages on demand, so we route
+  // Python invocations through a per-data-dir venv where pip works without
+  // --break-system-packages. Lazy-create on first use; reuse from then on.
+  const venvPython = ensureVenv(base.cmd);
+  if (venvPython) {
+    pythonCmdCache = { cmd: [venvPython], ok: true };
+  } else {
+    pythonCmdCache = base;
+  }
+  return pythonCmdCache;
+}
+
+/**
+ * Ensure a venv exists at WORKSPACE/venv and return its python interpreter
+ * path. Returns null if venv setup fails (no python3, no venv module, IO
+ * error) — caller falls back to the base interpreter and pip-install will
+ * fail with PEP 668 just like before, but at least Python itself still runs.
+ */
+function ensureVenv(baseCmd: string[]): string | null {
+  const venvDir = pathJoin(WORKSPACE, "venv");
+  const isWin = process.platform === "win32";
+  const venvPython = isWin
+    ? pathJoin(venvDir, "Scripts", "python.exe")
+    : pathJoin(venvDir, "bin", "python");
+  if (existsSync(venvPython)) return venvPython;
+  try {
+    const result = Bun.spawnSync([...baseCmd, "-m", "venv", venvDir], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    if (result.exitCode !== 0) {
+      const err = new TextDecoder().decode(result.stderr);
+      logger.warn("python venv create failed; falling back to system python (pip install may fail with PEP 668)", {
+        venvDir,
+        stderr: err.slice(0, 300),
+      });
+      return null;
+    }
+  } catch (err: unknown) {
+    logger.warn("python venv spawn failed", { error: err instanceof Error ? err.message : String(err) });
+    return null;
+  }
+  if (!existsSync(venvPython)) {
+    logger.warn("python venv created but interpreter missing", { venvPython });
+    return null;
+  }
+  logger.info("Python venv ready for code nodes", { venvDir });
+  return venvPython;
 }
 
 /**
