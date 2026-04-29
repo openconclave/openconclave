@@ -37,9 +37,22 @@ case "${OS:-}" in
 esac
 
 PIDFILE="$DATA/oc.pid"
+PORTFILE="$DATA/port"
 LOGFILE="$DATA/server.log"
 
 mkdir -p "$DATA"
+
+# Read the chosen port from the previous session's discovery file. Falls
+# back to 4000 only if no port file exists yet (first launch). The server
+# itself picks an actually-free port on startup; this just lets the health
+# check find it.
+read_port() {
+  if [ -f "$PORTFILE" ]; then
+    cat "$PORTFILE" 2>/dev/null
+  else
+    echo 4000
+  fi
+}
 
 # ── Reap stale pidfiles ───────────────────────────────────────
 # If a prior session left a pidfile behind, check whether that process is
@@ -48,8 +61,9 @@ if [ -f "$PIDFILE" ]; then
   PRIOR_PID="$(cat "$PIDFILE" 2>/dev/null || echo '')"
   if [ -n "$PRIOR_PID" ] && kill -0 "$PRIOR_PID" 2>/dev/null; then
     # Previous session's server is genuinely alive.
-    if curl --silent --fail --max-time 2 "http://localhost:4000/api/dashboard" >/dev/null 2>&1; then
-      echo "openconclave plugin: server already running (pid=$PRIOR_PID), attaching." >&2
+    PRIOR_PORT="$(read_port)"
+    if curl --silent --fail --max-time 2 "http://localhost:${PRIOR_PORT}/api/dashboard" >/dev/null 2>&1; then
+      echo "openconclave plugin: server already running (pid=$PRIOR_PID, port=$PRIOR_PORT), attaching." >&2
       exit 0
     fi
     # Process alive but port not answering — probably stuck in startup or crashed silently.
@@ -62,9 +76,11 @@ if [ -f "$PIDFILE" ]; then
 fi
 
 # Belt-and-suspenders: if some *other* process (standalone `oc`, another plugin
-# install) is holding :4000 without our pidfile, attach rather than crash.
-if curl --silent --fail --max-time 2 "http://localhost:4000/api/dashboard" >/dev/null 2>&1; then
-  echo "openconclave plugin: :4000 held by foreign process, attaching." >&2
+# install) is holding the previously-chosen port without our pidfile, attach
+# rather than crash.
+FOREIGN_PORT="$(read_port)"
+if curl --silent --fail --max-time 2 "http://localhost:${FOREIGN_PORT}/api/dashboard" >/dev/null 2>&1; then
+  echo "openconclave plugin: :${FOREIGN_PORT} held by foreign process, attaching." >&2
   exit 0
 fi
 

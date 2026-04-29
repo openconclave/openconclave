@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serveStatic } from "hono/bun";
 import { eq, and, inArray } from "drizzle-orm";
-import { existsSync, readFileSync, writeFileSync, unlinkSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, unlinkSync, renameSync } from "fs";
 import { join, dirname, basename } from "path";
 import { WORKSPACE } from "./lib/workspace";
 
@@ -51,11 +51,12 @@ const app = new Hono();
 app.use("*", cors({
   origin: (origin: string) => {
     if (!origin) return undefined;
-    const allowed = [
-      "http://localhost:5173", "http://127.0.0.1:5173",
-      "http://localhost:4000",  "http://127.0.0.1:4000",
-    ];
-    return allowed.includes(origin) ? origin : null;
+    // Loopback origins on any port are trusted (dev UI, the OC server itself
+    // when running on a non-default port). Cross-origin browser requests with
+    // a non-loopback Origin are rejected. This keeps the loopback-only
+    // posture intact while supporting OC_PORT / port-fallback installs.
+    const m = /^https?:\/\/(localhost|127\.0\.0\.1)(?::\d+)?$/.exec(origin);
+    return m ? origin : null;
   },
   credentials: false,
 }));
@@ -431,11 +432,33 @@ app.all("/mcp", async (c) => {
 });
 
 // ── Server ───────────────────────────────────────────────────
-const port = Number.isFinite(Number(process.env.PORT)) ? Number(process.env.PORT) : API_PORT;
+// Port selection order:
+//   1. OC_PORT env var (operator-set, highest priority)
+//   2. PORT env var (legacy)
+//   3. API_PORT default (4000), then sequential fallback 4001..4009
+//   4. Port 0 (OS-assigned random) as last resort
+// Lets corporate firewalls or port-conflict installs work without config.
+function buildPortCandidates(): number[] {
+  const out: number[] = [];
+  for (const env of [process.env.OC_PORT, process.env.PORT]) {
+    const n = Number(env);
+    if (env && Number.isFinite(n) && n > 0 && n < 65536 && !out.includes(n)) out.push(n);
+  }
+  if (!out.length) {
+    for (let p = API_PORT; p < API_PORT + 10; p++) out.push(p);
+  }
+  out.push(0);
+  return out;
+}
+
+// Discovery file: the chosen port lives at WORKSPACE/port so the plugin
+// monitor, MCP shim, and any external tooling can read it without
+// scanning the network. Atomic write: write-then-rename avoids torn reads.
+const PORT_FILE = join(WORKSPACE, "port");
 
 // PID file for the Claude Code plugin monitor: lets a new session detect
 // whether the previous session's server is still alive before trying to
-// bind :4000. Stale files (process already gone) are cleaned up by the
+// bind. Stale files (process already gone) are cleaned up by the
 // plugin-server.sh startup check.
 const PID_FILE = join(WORKSPACE, "oc.pid");
 
@@ -469,20 +492,41 @@ function checkPidfileConflict(): void {
 
 checkPidfileConflict();
 
-server = Bun.serve({
-  port,
-  hostname: "127.0.0.1",
-  idleTimeout: 120,
-  fetch(req, srv) {
-    if (srv.upgrade(req, { data: { topics: new Set() } })) {
-      return;
-    }
-    return app.fetch(req);
-  },
-  websocket: wsHandler,
-});
+const candidates = buildPortCandidates();
+let lastErr: unknown;
+for (const candidate of candidates) {
+  try {
+    server = Bun.serve({
+      port: candidate,
+      hostname: "127.0.0.1",
+      idleTimeout: 120,
+      fetch(req, srv) {
+        if (srv.upgrade(req, { data: { topics: new Set() } })) {
+          return;
+        }
+        return app.fetch(req);
+      },
+      websocket: wsHandler,
+    });
+    break;
+  } catch (err) {
+    lastErr = err;
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== "EADDRINUSE" && code !== "EACCES") throw err;
+    logger.debug(`port ${candidate} unavailable (${code}), trying next`);
+  }
+}
+if (!server!) {
+  const msg = lastErr instanceof Error ? lastErr.message : String(lastErr);
+  throw new Error(`No usable port (last error: ${msg})`);
+}
+const port = server.port;
 setServer(server);
 writeFileSync(PID_FILE, String(process.pid), "utf-8");
+// Discovery file: write-then-rename so external readers never see a torn file.
+const portTmp = PORT_FILE + ".tmp";
+writeFileSync(portTmp, String(port), "utf-8");
+renameSync(portTmp, PORT_FILE);
 
 // ── Scheduler ────────────────────────────────────────────────
 const scheduler = new CronScheduler(executor);
@@ -553,6 +597,7 @@ function shutdown() {
   telegramTrigger?.stop();
   server.stop();
   try { if (existsSync(PID_FILE)) unlinkSync(PID_FILE); } catch { }
+  try { if (existsSync(PORT_FILE)) unlinkSync(PORT_FILE); } catch { }
   logger.info("Shutdown complete");
   process.exit(0);
 }
@@ -565,6 +610,7 @@ process.on("unhandledRejection", (reason) => {
 });
 process.on("exit", () => {
   try { if (existsSync(PID_FILE)) unlinkSync(PID_FILE); } catch { }
+  try { if (existsSync(PORT_FILE)) unlinkSync(PORT_FILE); } catch { }
 });
 
 // ── Ready ────────────────────────────────────────────────────
