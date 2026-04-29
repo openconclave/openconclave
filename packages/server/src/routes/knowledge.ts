@@ -55,6 +55,18 @@ export const knowledgeRoutes = new Hono()
       return c.json({ error: { code: "VALIDATION", message: "Invalid embeddingModel" } }, 400);
     }
 
+    if (body.chunkSize !== undefined && (!Number.isInteger(body.chunkSize) || body.chunkSize < 1)) {
+      return c.json({ error: { code: "VALIDATION", message: "chunkSize must be a positive integer" } }, 400);
+    }
+
+    if (body.chunkOverlap !== undefined && (!Number.isInteger(body.chunkOverlap) || body.chunkOverlap < 0)) {
+      return c.json({ error: { code: "VALIDATION", message: "chunkOverlap must be a non-negative integer" } }, 400);
+    }
+
+    if ((body.chunkOverlap ?? 50) >= (body.chunkSize ?? 512)) {
+      return c.json({ error: { code: "VALIDATION", message: "chunkOverlap must be less than chunkSize" } }, 400);
+    }
+
     const now = new Date().toISOString();
     const result = await db
       .insert(knowledgeBases)

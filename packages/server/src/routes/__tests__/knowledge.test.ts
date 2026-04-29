@@ -141,6 +141,55 @@ describe("POST / — embeddingModel validation", () => {
   });
 });
 
+// ── MAJOR: chunkSize/chunkOverlap validation ──────────────────
+
+describe("POST / — chunkSize and chunkOverlap validation", () => {
+  test("chunkSize: 0 is rejected with 400 (would infinite-loop in chunker hard-cut)", async () => {
+    const res = await post("/", { name: "Test KB", chunkSize: 0 });
+    expect(res.status).toBe(400);
+  });
+
+  test("negative chunkSize is rejected with 400", async () => {
+    const res = await post("/", { name: "Test KB", chunkSize: -1 });
+    expect(res.status).toBe(400);
+  });
+
+  test("non-integer chunkSize is rejected with 400", async () => {
+    const res = await post("/", { name: "Test KB", chunkSize: 1.5 });
+    expect(res.status).toBe(400);
+  });
+
+  test("negative chunkOverlap is rejected with 400", async () => {
+    const res = await post("/", { name: "Test KB", chunkOverlap: -1 });
+    expect(res.status).toBe(400);
+  });
+
+  test("non-integer chunkOverlap is rejected with 400", async () => {
+    const res = await post("/", { name: "Test KB", chunkOverlap: 2.5 });
+    expect(res.status).toBe(400);
+  });
+
+  test("chunkOverlap >= chunkSize is rejected with 400 (would 2x-balloon chunks)", async () => {
+    const res = await post("/", { name: "Test KB", chunkSize: 512, chunkOverlap: 600 });
+    expect(res.status).toBe(400);
+  });
+
+  test("chunkOverlap == chunkSize is rejected with 400", async () => {
+    const res = await post("/", { name: "Test KB", chunkSize: 100, chunkOverlap: 100 });
+    expect(res.status).toBe(400);
+  });
+
+  test("default values (no chunkSize / chunkOverlap supplied) pass validation", async () => {
+    const res = await post("/", { name: "Test KB" });
+    expect(res.status).not.toBe(400);
+  });
+
+  test("valid chunkSize + chunkOverlap pair passes validation", async () => {
+    const res = await post("/", { name: "Test KB", chunkSize: 512, chunkOverlap: 50 });
+    expect(res.status).not.toBe(400);
+  });
+});
+
 // ── MINOR: topK clamping ──────────────────────────────────────
 
 describe("POST /:id/search — topK clamping", () => {
