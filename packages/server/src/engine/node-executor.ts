@@ -23,62 +23,33 @@ export async function executeNode(
   conclaveContext: string | null,
   conclave: ConclaveDefinition,
   emit: (event: RunEvent) => void,
-  triggerPayload?: unknown,
-  triggeredBy?: string | null,
-  triggeredByEdgeId?: string,
-  workspace?: Workspace
+  triggerPayload: unknown,
+  triggeredBy: string | null | undefined,
+  triggeredByEdgeId: string | undefined,
+  workspace: Workspace,
 ): Promise<unknown> {
   const node = nodeMap.get(nodeId);
-  if (!node) return undefined;
+  if (!node) throw new Error(`executeNode: node "${nodeId}" not found — invariant violated`);
 
   let input: unknown;
   const incomingEdges = getIncomingEdges(nodeId, edges);
 
-  // Discussion nodes: participant edges are not data-flow. Exclude them so input resolution
-  // doesn't accidentally fold participant agent outputs (or undefined) into the discussion input.
+  // Without this, participant-agent outputs (often undefined) would be folded into the discussion's input.
   const dataIncomingEdges =
     node.data.type === "discussion"
       ? incomingEdges.filter((e) => e.targetHandle !== "participants")
       : incomingEdges;
 
   if (triggeredBy) {
-    input = nodeOutputs.get(triggeredBy);
     const triggerNode = nodeMap.get(triggeredBy);
-    if (triggerNode?.data.type === "discussion" && input) {
-      const triggerEdge = triggeredByEdgeId
-        ? dataIncomingEdges.find((e) => e.id === triggeredByEdgeId)
-        : dataIncomingEdges.find((e) => e.source === triggeredBy);
-      const h = triggerEdge?.sourceHandle;
-      if (h === "full" || h === "last" || h === "summary") {
-        input = filterDiscussionOutput(input as DiscussionOutput, h);
-      }
-    }
-  } else if (dataIncomingEdges.length > 1) {
-    const inputs: unknown[] = [];
-    for (const e of dataIncomingEdges) {
-      if (nodeOutputs.has(e.source)) {
-        let val = nodeOutputs.get(e.source);
-        const srcNode = nodeMap.get(e.source);
-        if (srcNode?.data.type === "discussion" && val) {
-          const h = e.sourceHandle;
-          if (h === "full" || h === "last" || h === "summary") {
-            val = filterDiscussionOutput(val as DiscussionOutput, h);
-          }
-        }
-        inputs.push(val);
-      }
-    }
-    input = inputs.length === 1 ? inputs[0] : inputs;
+    const triggerEdge = triggeredByEdgeId
+      ? dataIncomingEdges.find((e) => e.id === triggeredByEdgeId)
+      : undefined;
+    input = resolveEdgeOutput(triggerEdge, triggerNode, nodeOutputs.get(triggeredBy));
   } else if (dataIncomingEdges.length === 1) {
     const edge = dataIncomingEdges[0]!;
-    input = nodeOutputs.get(edge.source);
     const srcNode = nodeMap.get(edge.source);
-    if (srcNode?.data.type === "discussion" && input) {
-      const h = edge.sourceHandle;
-      if (h === "full" || h === "last" || h === "summary") {
-        input = filterDiscussionOutput(input as DiscussionOutput, h);
-      }
-    }
+    input = resolveEdgeOutput(edge, srcNode, nodeOutputs.get(edge.source));
   }
 
   emit({ type: "node:started", runId, nodeId });
@@ -101,11 +72,11 @@ export async function executeNode(
           node.data.config as CodeConfig,
           input,
           { conclaveId: Number(conclave.id), runId, nodeId },
-          workspace ?? new Workspace(),
+          workspace,
         );
         break;
       case "merge": {
-        const filteredOutputs = new Map(nodeOutputs);
+        const edgeOverrides = new Map<string, unknown>();
         for (const e of getIncomingEdges(nodeId, edges)) {
           const srcNode = nodeMap.get(e.source);
           if (srcNode?.data.type === "discussion") {
@@ -113,19 +84,19 @@ export async function executeNode(
             if (h === "full" || h === "last" || h === "summary") {
               const raw = nodeOutputs.get(e.source);
               if (raw !== undefined) {
-                filteredOutputs.set(e.source, filterDiscussionOutput(raw as DiscussionOutput, h));
+                edgeOverrides.set(e.id, filterDiscussionOutput(raw as DiscussionOutput, h));
               }
             }
           }
         }
-        output = executeMerge(nodeId, edges, nodeMap, filteredOutputs);
+        output = executeMerge(nodeId, edges, nodeMap, nodeOutputs, edgeOverrides);
         break;
       }
       case "prompt":
         output = await executePrompt(node, input, conclave, runId, nodeId, triggeredBy, nodeMap, emit);
         break;
       case "file":
-        output = await executeFile(node, input, workspace ?? new Workspace());
+        output = await executeFile(node, input, workspace);
         break;
       case "output":
         output = await executeOutput(node, input, runId, nodeId, conclave.name, emit);
@@ -175,6 +146,20 @@ interface DiscussionOutput {
   rounds: number;
   exitReason: string;
   input: unknown;
+}
+
+function resolveEdgeOutput(
+  edge: ConclaveEdge | undefined,
+  srcNode: ConclaveNode | undefined,
+  raw: unknown,
+): unknown {
+  if (srcNode?.data.type === "discussion" && raw) {
+    const h = edge?.sourceHandle;
+    if (h === "full" || h === "last" || h === "summary") {
+      return filterDiscussionOutput(raw as DiscussionOutput, h);
+    }
+  }
+  return raw;
 }
 
 function filterDiscussionOutput(output: DiscussionOutput, sourceHandle: "full" | "last" | "summary"): unknown {
