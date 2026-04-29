@@ -34,14 +34,12 @@ export const agentRoutes = new Hono()
     const [wf] = await db.select().from(conclaves).where(eq(conclaves.id, conclaveId));
     if (!wf) throw AppError.notFound("Conclave", String(conclaveId));
 
-    const definition = typeof wf.definition === "string"
-      ? JSON.parse(wf.definition as string)
-      : wf.definition;
+    const definition = wf.definition as { nodes: ConclaveNode[] };
 
-    const node = (definition.nodes as ConclaveNode[]).find((n) => n.id === nodeId);
+    const node = definition.nodes.find((n) => n.id === nodeId);
     if (!node) throw AppError.notFound("Node", nodeId);
     if (node.data.type !== "agent") {
-      throw new AppError(ErrorCode.VALIDATION, `Node "${nodeId}" is not an agent`);
+      throw AppError.validation(`Node "${nodeId}" is not an agent`);
     }
 
     const agentConfig = node.data.config as AgentConfig;
@@ -56,20 +54,31 @@ export const agentRoutes = new Hono()
       mergedConfig.systemPrompt = systemPromptOverride;
     }
 
+    // Collect every persistence promise so the route awaits them before
+    // responding — a process restart between c.json() and the catch handler
+    // would otherwise drop emitted events.
+    const pendingWrites: Promise<unknown>[] = [];
+
     const emit = (event: RunEvent): void => {
       broadcastRunEvent(event);
       const now = new Date().toISOString();
-      db.insert(runEvents)
+      const p = db.insert(runEvents)
         .values({ runId: event.runId, nodeId: event.nodeId, type: event.type, data: event.data ?? null, createdAt: now })
         .catch((err: unknown) => {
           const msg = err instanceof Error ? err.message : String(err);
           logger.error("Failed to persist invoke event", { error: msg });
         });
+      pendingWrites.push(p);
     };
 
-    // When tools are provided, use the structured tool call path
     if (tools && tools.length > 0) {
       const engine = mergedConfig.engine ?? "claude";
+      if (engine === "ollama" && !mergedConfig.ollamaModel) {
+        throw new AppError(ErrorCode.AGENT_NO_MODEL, "No Ollama model selected");
+      }
+      if (engine === "openai" && !mergedConfig.openaiModel) {
+        throw new AppError(ErrorCode.AGENT_NO_MODEL, "No OpenAI model selected");
+      }
       const result = await invokeWithTools({
         engine,
         config: mergedConfig,
@@ -79,12 +88,14 @@ export const agentRoutes = new Hono()
         nodeId,
         emit,
       });
-      return c.json(result);
+      await Promise.all(pendingWrites);
+      return c.json({ output: result.output, tool_call: result.tool_call ?? null });
     }
 
     const result = await executeAgent(runId, nodeId, mergedConfig, prompt, emit);
+    await Promise.all(pendingWrites);
 
-    return c.json({ output: result.output });
+    return c.json({ output: result.output, tool_call: null });
   })
 
   .get("/status", async (c) => {
@@ -100,9 +111,9 @@ export const agentRoutes = new Hono()
     return c.json({ running, queued });
   })
 
-  .get("/tasks/:id/logs", async (c) => {
-    const { id } = c.req.param();
-    const [task] = await db.select().from(agentTasks).where(eq(agentTasks.id, Number(id)));
-    if (!task) throw AppError.notFound("Task", id);
+  .get("/tasks/:id", zValidator("param", z.object({ id: z.coerce.number().int().positive() })), async (c) => {
+    const { id } = c.req.valid("param");
+    const [task] = await db.select().from(agentTasks).where(eq(agentTasks.id, id));
+    if (!task) throw AppError.notFound("Task", String(id));
     return c.json(task);
   });
