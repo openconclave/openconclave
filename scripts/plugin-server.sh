@@ -68,10 +68,30 @@ if curl --silent --fail --max-time 2 "http://localhost:4000/api/dashboard" >/dev
   exit 0
 fi
 
+cd "$ROOT"
+
+# ── First-run client build ────────────────────────────────────
+# Fresh git clones don't include packages/client/dist/ (gitignored), so the
+# server's static-serve check at startup finds no index.html and the web UI
+# returns 404. Build it once on first launch; subsequent runs see dist/ and
+# skip the ~3s build cost.
+if [ ! -f "$ROOT/packages/client/dist/index.html" ]; then
+  echo "openconclave plugin: building client (first run)…" >&2
+  if [ ! -d "$ROOT/node_modules" ]; then
+    bun install >> "$LOGFILE" 2>&1 || {
+      echo "openconclave plugin: bun install failed; see $LOGFILE" >&2
+      exit 1
+    }
+  fi
+  (cd "$ROOT/packages/client" && bun run build) >> "$LOGFILE" 2>&1 || {
+    echo "openconclave plugin: client build failed; see $LOGFILE" >&2
+    exit 1
+  }
+fi
+
 # ── Start the server ──────────────────────────────────────────
 # Server writes its own pidfile at $DATA/oc.pid once Bun.serve succeeds.
 # Its stderr goes to $LOGFILE so we can post-mortem silent crashes. Stdout
 # stays on the monitor channel (banner + __OC_EVENT__ notifications).
 echo "openconclave plugin: starting server; stderr -> $LOGFILE" >&2
-cd "$ROOT"
 exec bun run packages/server/src/cli.ts 2>> "$LOGFILE"
