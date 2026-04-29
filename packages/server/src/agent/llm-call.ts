@@ -6,7 +6,6 @@ import { agentTasks, settings } from "../db/schema";
 import type { ResolvedAgentConfig } from "@openconclave/shared";
 import { VERSION } from "@openconclave/shared";
 import type { RunEvent } from "../engine/types";
-import { logger } from "../lib/logger";
 
 // ── Types ───────────────────────────────────────────────────
 
@@ -58,9 +57,9 @@ export async function invokeWithTools(options: InvokeWithToolsOptions): Promise<
     createdAt: now,
   }).returning({ id: agentTasks.id });
 
-  const taskId = taskResult[0]!.id;
+  if (!taskResult[0]) throw new Error("DB insert did not return task row");
+  const taskId = taskResult[0].id;
   let result: ToolCallResult;
-  let taskCompleted = false;
 
   try {
     options.emit({ type: "agent:started", runId: options.runId, nodeId: options.nodeId, data: { taskId, engine } });
@@ -80,32 +79,20 @@ export async function invokeWithTools(options: InvokeWithToolsOptions): Promise<
       default:
         throw new Error(`Unknown engine: ${engine}`);
     }
-
-    await db.update(agentTasks).set({
-      status: "success",
-      output: result.output,
-      completedAt: new Date().toISOString(),
-    }).where(eq(agentTasks.id, taskId));
-    taskCompleted = true;
-    options.emit({ type: "agent:completed", runId: options.runId, nodeId: options.nodeId, data: { taskId, success: true } });
   } catch (err: unknown) {
-    if (!taskCompleted) {
-      // Protect the failure-path DB write so a secondary error here does not
-      // mask the original engine failure or swallow agent:completed.
-      const message = err instanceof Error ? err.message : String(err);
-      try {
-        await db.update(agentTasks).set({ status: "failure", error: message, completedAt: new Date().toISOString() }).where(eq(agentTasks.id, taskId));
-      } catch (updateErr: unknown) {
-        logger.error("Failed to mark agent task as failure", { taskId, originalError: message, updateError: updateErr instanceof Error ? updateErr.message : String(updateErr) });
-      }
-      try {
-        options.emit({ type: "agent:completed", runId: options.runId, nodeId: options.nodeId, data: { taskId, success: false } });
-      } catch (emitErr: unknown) {
-        logger.error("Failed to emit agent:completed", { taskId, emitError: emitErr instanceof Error ? emitErr.message : String(emitErr) });
-      }
-    }
+    const message = err instanceof Error ? err.message : String(err);
+    await db.update(agentTasks).set({ status: "failure", error: message, completedAt: new Date().toISOString() }).where(eq(agentTasks.id, taskId));
+    options.emit({ type: "agent:completed", runId: options.runId, nodeId: options.nodeId, data: { taskId, success: false } });
     throw err;
   }
+
+  await db.update(agentTasks).set({
+    status: "success",
+    output: result.output,
+    completedAt: new Date().toISOString(),
+  }).where(eq(agentTasks.id, taskId));
+
+  options.emit({ type: "agent:completed", runId: options.runId, nodeId: options.nodeId, data: { taskId, success: true } });
 
   return result;
 }
@@ -145,13 +132,11 @@ function invokeDebug(options: InvokeWithToolsOptions): ToolCallResult {
 // ── Ollama engine ───────────────────────────────────────────
 
 const OLLAMA_URL = process.env.OLLAMA_URL ?? "http://localhost:11434";
+if (!isAcceptableOllamaUrl(OLLAMA_URL)) {
+  throw new Error(`OLLAMA_URL "${OLLAMA_URL}" is not an acceptable URL (RFC1918, link-local, and non-http(s) blocked)`);
+}
 
 async function invokeOllama(options: InvokeWithToolsOptions): Promise<ToolCallResult> {
-  // Defer validation to first use so a misconfigured OLLAMA_URL does not
-  // crash the server for callers using other engines.
-  if (!isAcceptableOllamaUrl(OLLAMA_URL)) {
-    throw new Error(`OLLAMA_URL "${OLLAMA_URL}" is not an acceptable URL (RFC1918, link-local, and non-http(s) blocked)`);
-  }
   const model = options.config.ollamaModel ?? "qwen3:8b";
 
   const ollamaTools = options.tools.map((t) => ({
@@ -202,12 +187,7 @@ async function invokeOllama(options: InvokeWithToolsOptions): Promise<ToolCallRe
         );
       }
     } else {
-      args = tc.function.arguments as Record<string, unknown>;
-    }
-    if (typeof args !== "object" || args === null || Array.isArray(args)) {
-      throw new Error(
-        `Ollama returned unparseable tool arguments for "${tc.function.name}": expected object, got ${args === null ? "null" : Array.isArray(args) ? "array" : typeof args}`,
-      );
+      args = tc.function.arguments;
     }
     return {
       output: JSON.stringify({ tool_name: tc.function.name, tool_input: args }),
@@ -234,13 +214,6 @@ async function invokeOpenAI(options: InvokeWithToolsOptions): Promise<ToolCallRe
     throw new Error(`Provider "${providerId}" has malformed JSON in settings`);
   }
   const provider = providerSchema.parse(parsed);
-
-  // Resolve the hostname now and re-check the resolved IPs against the
-  // public-host blocklist. Without this, a public-looking name like
-  // exfil.attacker.example can resolve to 169.254.169.254 (cloud metadata)
-  // at fetch time, sending the Authorization header to a private address.
-  await assertResolvedHostIsPublic(new URL(provider.baseUrl).hostname);
-
   const model = options.config.openaiModel ?? "gpt-4o";
 
   const openaiTools = options.tools.map((t) => ({
@@ -288,10 +261,7 @@ async function invokeOpenAI(options: InvokeWithToolsOptions): Promise<ToolCallRe
   };
 
   const choice = data.choices[0]?.message;
-  if (!choice) {
-    throw new Error("OpenAI returned no choices");
-  }
-  if (choice.tool_calls && choice.tool_calls.length > 0) {
+  if (choice?.tool_calls && choice.tool_calls.length > 0) {
     const tc = choice.tool_calls[0]!;
     let args: Record<string, unknown>;
     try {
@@ -307,7 +277,7 @@ async function invokeOpenAI(options: InvokeWithToolsOptions): Promise<ToolCallRe
     };
   }
 
-  return { output: choice.content ?? "" };
+  return { output: choice?.content ?? "" };
 }
 
 // ── Provider URL validation (SSRF guard) ────────────────────
@@ -343,35 +313,18 @@ export function isPublicHttpUrl(url: string): boolean {
   if (m) {
     const a = Number(m[1]);
     const b = Number(m[2]);
-    if (a === 0) return false;                // 0.0.0.0/8 (this network)
     if (a === 127) return false;              // loopback
     if (a === 169 && b === 254) return false; // link-local / cloud metadata
     if (a === 10) return false;               // RFC1918
     if (a === 192 && b === 168) return false; // RFC1918
     if (a === 172 && b >= 16 && b <= 31) return false; // RFC1918
-    if (a === 100 && b >= 64 && b <= 127) return false; // RFC6598 CGNAT
   }
   return true;
 }
 
-async function assertResolvedHostIsPublic(hostname: string): Promise<void> {
-  const dns = await import("node:dns/promises");
-  const addresses = await dns.lookup(hostname, { all: true });
-  for (const { address } of addresses) {
-    const probe = address.includes(":") ? `https://[${address}]` : `https://${address}`;
-    if (!isPublicHttpUrl(probe)) {
-      throw new Error(
-        `Provider hostname "${hostname}" resolves to a non-public address (${address})`,
-      );
-    }
-  }
-}
-
 const providerSchema = z.object({
-  // Require https so a misconfigured provider does not transmit the API key
-  // over cleartext. Public-IP guard still applies via isPublicHttpUrl.
-  baseUrl: z.string().refine((u) => u.startsWith("https://") && isPublicHttpUrl(u), {
-    message: "baseUrl must be an https URL on a public host — internal / loopback / http URLs are blocked",
+  baseUrl: z.string().refine(isPublicHttpUrl, {
+    message: "baseUrl must be a public http(s) URL — internal / loopback / file URLs are blocked",
   }),
   apiKey: z.string().min(1),
 });
@@ -435,7 +388,7 @@ function toolShape(inputSchema: Record<string, unknown>): Record<string, z.ZodTy
   const required = (inputSchema.required ?? []) as string[];
   const shape: Record<string, z.ZodType> = {};
   for (const [key, propSchema] of Object.entries(props)) {
-    let zodProp = jsonSchemaToZod(propSchema, 1);
+    let zodProp = jsonSchemaToZod(propSchema);
     const desc = propSchema.description as string | undefined;
     if (desc) {
       zodProp = zodProp.describe(desc);
@@ -463,15 +416,6 @@ async function invokeClaude(options: InvokeWithToolsOptions): Promise<ToolCallRe
   // the first choice.
   const toolState: { toolName?: string; toolInput?: Record<string, unknown> } = {};
 
-  // Private controller so we can abort the SDK after the first tool call without
-  // canceling unrelated work the caller may still be doing on options.abortController.
-  const innerController = new AbortController();
-  const externalSignal = options.abortController?.signal;
-  if (externalSignal) {
-    if (externalSignal.aborted) innerController.abort();
-    else externalSignal.addEventListener("abort", () => innerController.abort(), { once: true });
-  }
-
   const sdkTools = options.tools.map((t) =>
     tool(
       t.name,
@@ -481,9 +425,6 @@ async function invokeClaude(options: InvokeWithToolsOptions): Promise<ToolCallRe
         if (!toolState.toolName) {
           toolState.toolName = t.name;
           toolState.toolInput = args;
-          // Abort to short-circuit the rest of the SDK turn budget; without this
-          // the loop can exhaust maxTurns and throw "Reached maximum number of turns".
-          innerController.abort();
         }
         return {
           content: [{ type: "text", text: `Action recorded: ${t.name}` }],
@@ -509,29 +450,18 @@ async function invokeClaude(options: InvokeWithToolsOptions): Promise<ToolCallRe
       env: buildSubprocessEnv(),
       model,
       systemPrompt,
-      // Safety ceiling, not the expected exit path: the tool callback aborts on
-      // first call so a healthy run typically uses 1–2 turns.
-      maxTurns: 10,
+      maxTurns: 3,
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
       tools: [],
       mcpServers,
       strictMcpConfig: true,
-      abortController: innerController,
+      abortController: options.abortController,
     },
   });
 
-  // Drain the SDK generator. Tool dispatch happens via the MCP callback above;
-  // messages are not inspected at this level. Swallow AbortError when it was
-  // our own abort fired after recording a tool, otherwise rethrow.
-  try {
-    for await (const _ of agentQuery) {
-      void _;
-    }
-  } catch (err: unknown) {
-    if (!(innerController.signal.aborted && toolState.toolName)) {
-      throw err;
-    }
+  for await (const _message of agentQuery) {
+    void _message;
   }
 
   if (toolState.toolName) {
