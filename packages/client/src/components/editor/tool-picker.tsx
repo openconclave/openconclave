@@ -10,6 +10,7 @@ import {
   Globe,
   GlobeLock,
   GripVertical,
+  Image as ImageIcon,
 } from "lucide-react";
 
 // Built-in Claude Code tools
@@ -22,6 +23,7 @@ const builtinTools = [
   { id: "Grep", label: "Grep", icon: Search, description: "Search file contents" },
   { id: "WebFetch", label: "Web Fetch", icon: Globe, description: "Fetch a URL via headless browser → saved to attachments" },
   { id: "WebSearch", label: "Web Search", icon: GlobeLock, description: "Search the web (SearXNG / Tavily / Serper / Linkup)", requiresConfig: "web_search_provider" },
+  { id: "ViewImage", label: "View Image", icon: ImageIcon, description: "Load PNG/JPEG/WEBP/GIF so a vision-capable model can see it (Ollama path only — Claude/OpenAI ignored)" },
 ];
 
 // Known MCP servers (user can add custom ones too)

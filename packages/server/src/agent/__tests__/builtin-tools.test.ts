@@ -249,6 +249,60 @@ describe("edit tool: empty old_string", () => {
   });
 });
 
+// ── view_image: sentinel + size cap + extension gate ────────
+
+describe("view_image", () => {
+  test("returns sentinel-prefixed base64 for a real PNG", async () => {
+    const ws = makeWorkspace();
+    const p = join(ws.cwd, "tiny.png");
+    // 67-byte PNG (1x1 transparent pixel) — minimal valid PNG that decoders accept.
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkAAIAAAoAAv/lxKUAAAAASUVORK5CYII=",
+      "base64",
+    );
+    writeFileSync(p, png);
+    try {
+      const tools = createBuiltinTools(ws);
+      const result = await tools.view_image!.execute({ path: "tiny.png" });
+      expect(result.startsWith("__OC_IMAGE_B64__:image/png:")).toBe(true);
+      const b64 = result.slice("__OC_IMAGE_B64__:image/png:".length);
+      const decoded = Buffer.from(b64, "base64");
+      expect(decoded.length).toBe(png.length);
+      expect(decoded[0]).toBe(0x89); // PNG magic byte
+    } finally {
+      unlinkSync(p);
+    }
+  });
+
+  test("rejects unsupported extensions (e.g. .txt)", async () => {
+    const ws = makeWorkspace();
+    const p = join(ws.cwd, "not-an-image.txt");
+    writeFileSync(p, "hello");
+    try {
+      const tools = createBuiltinTools(ws);
+      const result = await tools.view_image!.execute({ path: "not-an-image.txt" });
+      expect(result).toContain("Error");
+      expect(result).toContain("unsupported image extension");
+    } finally {
+      unlinkSync(p);
+    }
+  });
+
+  test("rejects images above the 5MB cap", async () => {
+    const ws = makeWorkspace();
+    const p = join(ws.cwd, "huge.png");
+    writeFileSync(p, new Uint8Array(6 * 1024 * 1024));
+    try {
+      const tools = createBuiltinTools(ws);
+      const result = await tools.view_image!.execute({ path: "huge.png" });
+      expect(result).toContain("Error");
+      expect(result).toContain("cap");
+    } finally {
+      unlinkSync(p);
+    }
+  });
+});
+
 // ── grep: max_results = 0 still uses default ────────────────
 
 describe("grep: max_results edge case", () => {

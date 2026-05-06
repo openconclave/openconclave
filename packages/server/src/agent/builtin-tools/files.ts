@@ -2,6 +2,20 @@ import type { BuiltinTool } from "./types";
 
 const READ_FILE_CAP_BYTES = 5 * 1024 * 1024;
 const WRITE_FILE_CAP_BYTES = 5 * 1024 * 1024;
+const VIEW_IMAGE_CAP_BYTES = 5 * 1024 * 1024;
+
+// Sentinel the Ollama loop unpacks into the next user message's `images` field.
+// Format: `__OC_IMAGE_B64__:<mime>:<base64>`. Plain string keeps the executor
+// signature stable; the chat loop is the only consumer that splits this apart.
+export const VIEW_IMAGE_SENTINEL = "__OC_IMAGE_B64__:";
+
+const IMAGE_EXTENSIONS: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
+  gif: "image/gif",
+};
 
 type PathResolver = (p: string) => string;
 
@@ -142,6 +156,44 @@ export function buildFileTools(resolveIn: PathResolver): Record<string, BuiltinT
           }
           await Bun.write(filePath, updated);
           return `File edited: ${path}`;
+        } catch (err: unknown) {
+          return `Error: ${err instanceof Error ? err.message : String(err)}`;
+        }
+      },
+    },
+    view_image: {
+      tool: {
+        type: "function",
+        function: {
+          name: "view_image",
+          description:
+            "Load an image file (PNG, JPEG, WEBP, GIF) so the model can see it. Use this to inspect screenshots, photos, or any visual content. Path is resolved against the agent's working directory. Files larger than 5MB are rejected. Only effective with vision-capable models (e.g. gemma3, gemma4, llava, qwen-vl).",
+          parameters: {
+            type: "object",
+            required: ["path"],
+            properties: {
+              path: { type: "string", description: "Absolute or relative path to an image file" },
+            },
+          },
+        },
+      },
+      execute: async (args) => {
+        try {
+          const path = typeof args.path === "string" ? args.path : "";
+          if (!path) return "Error: path must be a non-empty string.";
+          const ext = path.toLowerCase().split(".").pop() ?? "";
+          const mime = IMAGE_EXTENSIONS[ext];
+          if (!mime) {
+            return `Error: unsupported image extension ".${ext}". Supported: ${Object.keys(IMAGE_EXTENSIONS).join(", ")}.`;
+          }
+          const file = Bun.file(resolveIn(path));
+          if (!(await file.exists())) return `Error: file not found: ${path}`;
+          if (file.size > VIEW_IMAGE_CAP_BYTES) {
+            return `Error: image exceeds ${VIEW_IMAGE_CAP_BYTES / (1024 * 1024)}MB cap (${file.size} bytes).`;
+          }
+          const buf = await file.arrayBuffer();
+          const b64 = Buffer.from(buf).toString("base64");
+          return `${VIEW_IMAGE_SENTINEL}${mime}:${b64}`;
         } catch (err: unknown) {
           return `Error: ${err instanceof Error ? err.message : String(err)}`;
         }

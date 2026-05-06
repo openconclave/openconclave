@@ -35,4 +35,5 @@ export const TOOL_NAME_MAP: Record<string, string> = {
   Grep: "grep",
   WebFetch: "web_fetch",
   WebSearch: "web_search",
+  ViewImage: "view_image",
 };

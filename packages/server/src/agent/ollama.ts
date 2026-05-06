@@ -5,6 +5,7 @@ import { SESSIONS_DIR } from "../lib/workspace";
 import { AgentBase } from "./base";
 import { createOllamaRoutingTool } from "./ollama-routing";
 import { ROUTING_TOOL_NAME } from "./constants";
+import { VIEW_IMAGE_SENTINEL } from "./builtin-tools/files";
 import type { ResolvedAgentConfig } from "@openconclave/shared";
 
 export type { OllamaStatus, OllamaModelInfo, OllamaRunOptions, ThinkingBlock, OllamaResult } from "./ollama-types";
@@ -314,12 +315,33 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
             result = `Error: Unknown tool "${fnName}"`;
           }
 
-          messages.push({ role: "tool", tool_call_id: toolCall.id, name: fnName, content: result });
-          if (sessionFile) {
-            appendFileSync(sessionFile, JSON.stringify({ role: "tool", tool_call_id: toolCall.id, name: fnName, content: result }) + "\n");
+          // view_image returns `<sentinel><mime>:<base64>`; lift the bytes into a
+          // synthetic user message with the `images` field so the vision encoder
+          // actually sees them. The tool message keeps a short status string so
+          // the conversation log stays readable.
+          let imagesForNextMsg: string[] | undefined;
+          let toolMsgContent = result;
+          if (result.startsWith(VIEW_IMAGE_SENTINEL)) {
+            const payload = result.slice(VIEW_IMAGE_SENTINEL.length);
+            const colon = payload.indexOf(":");
+            if (colon > 0) {
+              const b64 = payload.slice(colon + 1);
+              imagesForNextMsg = [b64];
+              toolMsgContent = `Image loaded (${Math.round((b64.length * 3) / 4)} bytes). Attached in the next message — describe what you see.`;
+            }
           }
 
-          onOutput?.(`[${fnName} result: ${result.slice(0, 200)}${result.length > 200 ? "..." : ""}]\n`);
+          const toolMsg = { role: "tool", tool_call_id: toolCall.id, name: fnName, content: toolMsgContent };
+          messages.push(toolMsg);
+          if (sessionFile) appendFileSync(sessionFile, JSON.stringify(toolMsg) + "\n");
+
+          if (imagesForNextMsg) {
+            const imgUserMsg = { role: "user", content: "(image attached via view_image)", images: imagesForNextMsg };
+            messages.push(imgUserMsg);
+            if (sessionFile) appendFileSync(sessionFile, JSON.stringify(imgUserMsg) + "\n");
+          }
+
+          onOutput?.(`[${fnName} result: ${toolMsgContent.slice(0, 200)}${toolMsgContent.length > 200 ? "..." : ""}]\n`);
         }
 
         if (routeTo) {
