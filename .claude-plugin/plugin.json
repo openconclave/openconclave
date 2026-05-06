@@ -9,7 +9,12 @@
   "homepage": "https://openconclave.com",
   "repository": "https://github.com/openconclave/oc",
   "license": "MIT",
-  "keywords": ["multi-agent", "orchestration", "conclave", "mcp"],
+  "keywords": [
+    "multi-agent",
+    "orchestration",
+    "conclave",
+    "mcp"
+  ],
   "mcpServers": {
     "openconclave": {
       "command": "bun",
