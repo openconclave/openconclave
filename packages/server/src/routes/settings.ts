@@ -126,8 +126,18 @@ export const ollamaRoutes = new Hono()
 
 export const claudeCodeRoutes = new Hono()
   .get("/status", async (c) => {
+    // If OC is running as a Claude Code plugin, Claude Code is by definition
+    // present — it spawned us. Skip the brittle PATH-based spawn check, which
+    // fails inside the plugin host (npm shims like claude.cmd don't resolve
+    // through Bun.spawn on Windows, and the plugin process inherits a
+    // sanitized PATH that often omits the claude install dir).
+    if (process.env.OC_PLUGIN_ROOT) {
+      return c.json({ installed: true, version: "(via Claude Code plugin)" });
+    }
+    const resolved = Bun.which("claude");
+    if (!resolved) return c.json({ installed: false, version: null });
     try {
-      const proc = Bun.spawn({ cmd: ["claude", "--version"], stdout: "pipe", stderr: "ignore" });
+      const proc = Bun.spawn({ cmd: [resolved, "--version"], stdout: "pipe", stderr: "ignore" });
       const exitCode = await proc.exited;
       const out = await new Response(proc.stdout).text();
       const version = out.trim().split("\n")[0] ?? "";
