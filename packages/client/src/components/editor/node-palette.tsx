@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Zap, User, GitFork, Code, Combine, MessageCircleQuestion, Send, FileText, BookOpen,
   Terminal, FileEdit, FileSearch, FolderSearch, Search, Server, ChevronDown, ChevronRight,
-  Users, Loader2, Boxes, Globe,
+  Users, Loader2, Boxes, Globe, Image as ImageIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { NodeType, KnowledgeBase, McpRegistrySearchResponse, McpRegistryServer, McpServerLaunchConfig } from "@openconclave/shared";
@@ -89,6 +89,7 @@ const codeToolItems: ToolItem[] = [
   { toolType: "builtin", toolId: "Grep", toolName: "Grep", icon: Search, description: "Search file contents" },
   { toolType: "builtin", toolId: "WebFetch", toolName: "Web Fetch", icon: Globe, description: "Fetch a URL via headless browser" },
   { toolType: "builtin", toolId: "WebSearch", toolName: "Web Search", icon: Globe, description: "Search the web (configure in Settings → Web search)" },
+  { toolType: "builtin", toolId: "ViewImage", toolName: "View Image", icon: ImageIcon, description: "Load PNG/JPEG so a vision-capable Ollama model can see it" },
 ];
 
 const builtinMcpItems: ToolItem[] = [
