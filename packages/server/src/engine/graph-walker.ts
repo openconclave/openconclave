@@ -6,7 +6,7 @@ import { getIncomingEdges, getOutgoingEdges } from "./graph";
 import { executeNode } from "./node-executor";
 import { normalizeConclaveNodeTypes } from "./normalize-conclave";
 import { logger } from "../lib/logger";
-import { AppError, ErrorCode, MAX_CONCLAVE_ITERATIONS } from "@openconclave/shared";
+import { AppError, ErrorCode } from "@openconclave/shared";
 import type { ConclaveDefinition, ConclaveNode, ConclaveEdge } from "@openconclave/shared";
 
 import type { QueueEntry, RunEvent } from "./types";
@@ -197,17 +197,8 @@ export async function executeGraph(
     // path at the `resumeSkipNodes.has(entry.nodeId)` check below, causing downstream
     // nodes after a merge-in-checkpoint to be silently dropped on resume.
     const firedMerges = new Set<string>();
-    let iterations = 0;
 
     while (queue.length > 0) {
-      iterations++;
-      if (iterations > MAX_CONCLAVE_ITERATIONS) {
-        throw new AppError(
-          ErrorCode.CONCLAVE_MAX_ITERATIONS,
-          `Exceeded max iterations (${MAX_CONCLAVE_ITERATIONS})`
-        );
-      }
-
       const [run] = await db.select().from(runs).where(eq(runs.id, runId));
       if (run?.status === "cancelled") {
         emit({ type: "run:completed", runId, data: { status: "cancelled" } });
