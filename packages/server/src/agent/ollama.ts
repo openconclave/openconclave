@@ -24,6 +24,32 @@ function ollamaLog(label: string, data: unknown): void {
 
 const OLLAMA_URL = process.env.OLLAMA_URL ?? "http://localhost:11434";
 
+/**
+ * Force-unload a model from Ollama via the API. Used to recover from the
+ * runner-hang bug (ollama/ollama#15950): after large/MoE models are pinned
+ * in memory for hours, /api/generate begins accepting connections at the
+ * kernel level but never delivers the request to the runner's work loop —
+ * the request hangs forever (zero bytes returned). Listing endpoints stay
+ * responsive, so it's not a daemon crash, it's a runner-receive failure.
+ *
+ * Sending /api/generate with `keep_alive: 0` and an empty prompt unloads
+ * the model; the next real request reloads it fresh, bypassing the hung
+ * runner state. Best-effort; if this call also hangs we just give up and
+ * surface the original error.
+ */
+async function unloadOllamaModel(model: string): Promise<void> {
+  try {
+    await fetch(`${OLLAMA_URL}/api/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model, prompt: "", keep_alive: 0 }),
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch {
+    /* best-effort */
+  }
+}
+
 export async function checkOllama(): Promise<OllamaStatus> {
   try {
     const res = await fetch(`${OLLAMA_URL}/api/tags`, { signal: AbortSignal.timeout(3000) });
@@ -227,31 +253,82 @@ export async function runOllamaAgent(options: OllamaRunOptions): Promise<OllamaR
       // Bun's fetch has a 30s default timeout — far too short for local LLM
       // inference (time-to-first-token on a 9B model with thinking can exceed 60s).
       // Combine the pool's cancellation signal with a 10-minute deadline.
-      const timeoutSignal = AbortSignal.timeout(600_000);
-      const fetchSignal = abortSignal
-        ? AbortSignal.any([abortSignal, timeoutSignal])
-        : timeoutSignal;
-
-      const res = await fetch(`${OLLAMA_URL}/api/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-        signal: fetchSignal,
-      });
-
-      if (!res.ok) {
-        const errText = await res.text();
-        await agent.disconnect();
-        return {
-          success: false,
-          output: "",
-          error: `Ollama API error ${res.status}: ${errText}`,
-          durationMs: Date.now() - startTime,
-        };
-      }
-
+      //
+      // On timeout we retry once after force-unloading the model.
+      // Long-running ollama sessions sometimes leave the runner accepting
+      // TCP connections at the kernel level but never delivering the
+      // request to the work loop, while listing endpoints stay responsive.
+      // Unload+reload bypasses the bad runner state. Empirically this
+      // recovers our long Dreamer/Indexer pipeline runs without human
+      // intervention.
+      const MAX_FETCH_ATTEMPTS = 2;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const assistantMsg = await readOllamaStream(res, onOutput) as any;
+      let assistantMsg: any;
+      let attempt = 0;
+      while (true) {
+        attempt++;
+        const timeoutSignal = AbortSignal.timeout(600_000);
+        const fetchSignal = abortSignal
+          ? AbortSignal.any([abortSignal, timeoutSignal])
+          : timeoutSignal;
+
+        try {
+          const res = await fetch(`${OLLAMA_URL}/api/chat`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+            signal: fetchSignal,
+          });
+
+          if (!res.ok) {
+            const errText = await res.text();
+            await agent.disconnect();
+            return {
+              success: false,
+              output: "",
+              error: `Ollama API error ${res.status}: ${errText}`,
+              durationMs: Date.now() - startTime,
+            };
+          }
+
+          assistantMsg = await readOllamaStream(res, onOutput);
+          break;
+        } catch (err) {
+          // User-cancellation always wins — never retry past it.
+          if (abortSignal?.aborted) throw err;
+
+          const msg = err instanceof Error ? err.message : String(err);
+          const isTimeoutOrConn =
+            err instanceof Error &&
+            (err.name === "TimeoutError" ||
+              err.name === "AbortError" ||
+              /aborted|timed out|fetch failed|ECONNRESET|ECONNREFUSED/i.test(msg));
+
+          if (attempt < MAX_FETCH_ATTEMPTS && isTimeoutOrConn) {
+            ollamaLog(`TIMEOUT/CONN-ERROR — unloading model and retrying`, {
+              model,
+              attempt,
+              error: msg,
+            });
+            onOutput?.(
+              `[Ollama request hung (${msg}); unloading ${model} and retrying]\n`,
+            );
+            await unloadOllamaModel(model);
+            // Brief settle before reload — gives Ollama time to release the
+            // runner process before we re-request.
+            await new Promise((r) => setTimeout(r, 2000));
+            continue;
+          }
+
+          await agent.disconnect();
+          return {
+            success: false,
+            output: "",
+            error: `Ollama request failed after ${attempt} attempt(s): ${msg}`,
+            durationMs: Date.now() - startTime,
+          };
+        }
+      }
       ollamaLog(`RESPONSE turn ${turn + 1}`, {
         thinking: assistantMsg.thinking?.slice(0, 500),
         content: assistantMsg.content?.slice(0, 500),
