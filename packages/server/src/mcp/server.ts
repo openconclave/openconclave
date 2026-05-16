@@ -437,11 +437,32 @@ export function createMcpServer() {
 // conclave directly by name instead of remembering its ID + trigger_conclave.
 //
 // Static registration only at stdio startup — new conclaves appear after
-// /reload-plugins (which respawns the MCP server). Best effort: if the OC
-// server isn't up yet, we log and skip; tools appear on next reload.
+// /reload-plugins (which respawns the MCP server). The MCP stdio process is
+// spawned by the plugin host in parallel with the OC HTTP server, so
+// /api/conclaves may not be reachable on the first call. Retry with a short
+// backoff until the server is up or a deadline hits; if the deadline hits we
+// fall back to the old behavior (log and skip — only static management tools
+// register).
+const REGISTRATION_MAX_WAIT_MS = 30_000;
+const REGISTRATION_POLL_MS = 500;
+
+async function fetchConclavesWithRetry(): Promise<{ conclaves?: Array<Record<string, unknown>> }> {
+  const deadline = Date.now() + REGISTRATION_MAX_WAIT_MS;
+  let lastErr: unknown = null;
+  while (Date.now() < deadline) {
+    try {
+      return (await ocApi("/conclaves")) as { conclaves?: Array<Record<string, unknown>> };
+    } catch (err) {
+      lastErr = err;
+      await sleep(REGISTRATION_POLL_MS);
+    }
+  }
+  throw lastErr ?? new Error(`OC server unreachable after ${REGISTRATION_MAX_WAIT_MS}ms`);
+}
+
 async function registerConclaveTools(server: ReturnType<typeof createMcpServer>): Promise<void> {
   try {
-    const data = await ocApi("/conclaves") as { conclaves?: Array<Record<string, unknown>> };
+    const data = await fetchConclavesWithRetry();
     const list = data.conclaves ?? [];
     const seen = new Set<string>();
     for (const wf of list) {
