@@ -25,6 +25,72 @@ async function ocApi(path: string, method = "GET", body?: unknown): Promise<unkn
   return res.json();
 }
 
+// Conclave-as-tool blocking semantics.
+//
+// When a conclave is exposed via `toolName`, the caller is using it as a tool
+// and wants a result. We poll the run until it reaches a terminal status (or
+// hits the timeout) and return the output node's channel:output content. If
+// the timeout fires before completion we fall back to {runId, status:running}
+// so the caller can keep using get_run as they would today.
+//
+// Long-running pipelines that are not tool-shaped should NOT set toolName —
+// they can still be invoked via trigger_conclave, which stays async.
+const DEFAULT_TOOL_TIMEOUT_MS = 120_000;
+const TOOL_POLL_INTERVAL_MS = 1_000;
+
+type RunStatus = "queued" | "running" | "success" | "failure" | "cancelled";
+type RunEventRow = { type: string; nodeId: string | null; data: unknown };
+type RunDetails = { run: { id: number; status: RunStatus; error: string | null }; events: RunEventRow[] };
+
+type AwaitResult =
+  | { kind: "success"; content: string }
+  | { kind: "failure"; error: string }
+  | { kind: "cancelled" }
+  | { kind: "timeout" };
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function extractChannelOutputs(events: RunEventRow[]): string[] {
+  const out: string[] = [];
+  for (const e of events) {
+    if (e.type !== "channel:output") continue;
+    const data = e.data as { content?: unknown } | null | undefined;
+    const content = data?.content;
+    if (content == null) continue;
+    out.push(typeof content === "string" ? content : JSON.stringify(content, null, 2));
+  }
+  return out;
+}
+
+async function awaitRunResult(runId: number, timeoutMs: number): Promise<AwaitResult> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await sleep(TOOL_POLL_INTERVAL_MS);
+    const details = (await ocApi(`/runs/${runId}`)) as RunDetails;
+    const status = details.run.status;
+    if (status === "queued" || status === "running") continue;
+    if (status === "success") {
+      const outputs = extractChannelOutputs(details.events);
+      if (outputs.length === 0) {
+        return { kind: "success", content: JSON.stringify({ runId, note: "run succeeded but no output node fired (no claude-code Output node, or output configured for log/telegram)" }) };
+      }
+      const content = outputs.length === 1
+        ? outputs[0]!
+        : outputs.map((o, i) => `--- output ${i + 1} ---\n${o}`).join("\n\n");
+      return { kind: "success", content };
+    }
+    if (status === "failure") {
+      return { kind: "failure", error: details.run.error ?? "run failed (no error message recorded)" };
+    }
+    if (status === "cancelled") {
+      return { kind: "cancelled" };
+    }
+  }
+  return { kind: "timeout" };
+}
+
 export function createMcpServer() {
   const server = new McpServer({
     name: "openconclave",
@@ -392,10 +458,18 @@ async function registerConclaveTools(server: ReturnType<typeof createMcpServer>)
       seen.add(toolName);
       const description = String(def.description ?? wf.description ?? `Run conclave: ${wf.name}`);
       const conclaveId = String(wf.id);
+      // Per-conclave override; falls back to the default. Allows long-running
+      // tools (e.g. a deep multi-agent review) to declare e.g. toolTimeoutMs:
+      // 600_000 in their definition.
+      const rawTimeout = def.toolTimeoutMs;
+      const toolTimeoutMs =
+        typeof rawTimeout === "number" && Number.isFinite(rawTimeout) && rawTimeout > 0
+          ? Math.floor(rawTimeout)
+          : DEFAULT_TOOL_TIMEOUT_MS;
 
       server.tool(
         toolName,
-        `${description}. Code nodes inherit the Claude Code session's cwd by default; pass cwd to override.`,
+        `${description}\n\n— Calling this by name is blocking: it waits for the run to reach a terminal status (timeout ${Math.round(toolTimeoutMs / 1000)}s) and returns the conclave's claude-code Output node content as the tool result. On timeout, returns {runId, status:"running"} so you can fall back to get_run. Code nodes inherit the Claude Code session's cwd by default; pass cwd to override.`,
         {
           input: z.string().optional().describe("Input data to pass to the conclave trigger"),
           cwd: z.string().optional().describe("Override working directory for agents (defaults to the MCP client's cwd)"),
@@ -406,8 +480,34 @@ async function registerConclaveTools(server: ReturnType<typeof createMcpServer>)
             ...(input ? { input } : {}),
             _callerCwd: effectiveCwd,
           };
-          const result = await ocApi(`/conclaves/${conclaveId}/run`, "POST", { payload });
-          return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+          const triggered = (await ocApi(`/conclaves/${conclaveId}/run`, "POST", { payload })) as { runId: number };
+          const runId = triggered.runId;
+          const result = await awaitRunResult(runId, toolTimeoutMs);
+          if (result.kind === "success") {
+            return { content: [{ type: "text", text: result.content }] };
+          }
+          if (result.kind === "timeout") {
+            return {
+              content: [{
+                type: "text",
+                text: JSON.stringify({
+                  runId,
+                  status: "running",
+                  note: `Exceeded blocking timeout (${toolTimeoutMs}ms). Use get_run({runId: "${runId}"}) to check progress or read the output event when it fires.`,
+                }, null, 2),
+              }],
+            };
+          }
+          if (result.kind === "cancelled") {
+            return {
+              content: [{ type: "text", text: JSON.stringify({ runId, status: "cancelled" }, null, 2) }],
+              isError: true,
+            };
+          }
+          return {
+            content: [{ type: "text", text: JSON.stringify({ runId, status: "failure", error: result.error }, null, 2) }],
+            isError: true,
+          };
         }
       );
     }
