@@ -5,7 +5,7 @@
   },
   "metadata": {
     "description": "OpenConclave — multi-agent conclave platform (self-hosted marketplace for the main plugin).",
-    "version": "1.0.29"
+    "version": "1.0.30"
   },
   "plugins": [
     {

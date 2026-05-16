@@ -1,4 +1,5 @@
 import { eq, desc } from "drizzle-orm";
+import { join } from "path";
 
 import { db } from "../db/client";
 import { runs, checkpoints, agentTasks } from "../db/schema";
@@ -6,6 +7,7 @@ import { getIncomingEdges, getOutgoingEdges } from "./graph";
 import { executeNode } from "./node-executor";
 import { normalizeConclaveNodeTypes } from "./normalize-conclave";
 import { logger } from "../lib/logger";
+import { sessionDirForRun } from "../lib/workspace";
 import { AppError, ErrorCode } from "@openconclave/shared";
 import type { ConclaveDefinition, ConclaveNode, ConclaveEdge } from "@openconclave/shared";
 
@@ -161,6 +163,15 @@ export async function executeGraph(
     triggerPayload,
     triggerCfg?.workingDirectory as string | undefined,
   );
+  // Every run gets read/write access to its own session's attachments and artifacts
+  // folders, regardless of agent engine (claude / ollama / openai / etc). web_fetch
+  // and saveAttachmentsForRun park files here; the cataloger leg must be able to
+  // read them back. sessionDirForRun creates both subdirs (idempotent).
+  const runSessionDir = sessionDirForRun(runId);
+  workspace.setAllowedDirs([
+    join(runSessionDir, "attachments"),
+    join(runSessionDir, "artifacts"),
+  ]);
   activeWorkspaces.set(runId, workspace);
   // Conclave context from trigger — injected into every agent's system prompt
   const conclaveContext = cleanPayload
