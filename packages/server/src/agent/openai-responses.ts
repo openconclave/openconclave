@@ -25,6 +25,18 @@ export async function runResponsesAPI(options: OpenAIRunOptions): Promise<OpenAI
         }
       } catch { /* skip malformed lines */ }
     }
+    // The session file holds prior-turn history only; the current turn's user
+    // input must still be appended each call (the chat path does the same).
+    // agent.ts pre-creates the session file with the system message, so this
+    // branch runs even on the very first turn — omitting this drops the user
+    // input entirely and the model receives instructions with no prompt.
+    const inputStr =
+      options.input !== undefined
+        ? (typeof options.input === "string" ? options.input : JSON.stringify(options.input, null, 2))
+        : options.prompt ?? "";
+    if (inputStr) {
+      input.push({ role: "user", content: inputStr });
+    }
   } else {
     const inputStr =
       options.input !== undefined
@@ -81,6 +93,11 @@ export async function runResponsesAPI(options: OpenAIRunOptions): Promise<OpenAI
           "Authorization": `Bearer ${provider.apiKey}`,
         },
         body: JSON.stringify(body),
+        // Bun's fetch has a 30s default timeout — far too short for local LLM
+        // inference (a reasoning model summarizing a large chunk can run for
+        // minutes). Mirror the ollama path's 10-minute deadline. Without this,
+        // long generations die mid-stream with "The operation timed out."
+        signal: AbortSignal.timeout(600_000),
       });
 
       if (!res.ok) {

@@ -102,6 +102,11 @@ export async function runChatCompletions(options: OpenAIRunOptions): Promise<Ope
           "Authorization": `Bearer ${provider.apiKey}`,
         },
         body: JSON.stringify(body),
+        // Bun's fetch has a 30s default timeout — far too short for local LLM
+        // inference (a reasoning model summarizing a large chunk can run for
+        // minutes). Mirror the ollama path's 10-minute deadline. Without this,
+        // long generations die mid-stream with "The operation timed out."
+        signal: AbortSignal.timeout(600_000),
       });
 
       if (!res.ok) {
